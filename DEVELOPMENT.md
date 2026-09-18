@@ -44,7 +44,7 @@ src/
 ├── scripts/      ★ 浏览器端行为：DOM、音频、键盘、MIDI（只在客户端执行）
 ├── lib/          ★ 纯数据 + 纯函数：可被 views / scripts / tests 共用，不碰 DOM
 ├── i18n/         文案字典 + 路径工具
-├── styles/       tokens.css（设计变量）/ global.css / home-glass.css（首页专用材质）
+├── styles/       tokens.css（设计变量）/ global.css（背景 + 玻璃系统，含 `.glass--liquid` 厚玻璃）
 ├── content/      Markdown 内容（blog / lab / pages，`名字.zh.md` / `名字.en.md`）
 └── tests/        node:test 单元测试（只测 lib 和纯逻辑）
 ```
@@ -120,6 +120,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | --- | --- | --- | --- |
 | 头部导航 | `src/components/Header.astro` | 纯模板 | `.site-header`、`[data-section-target]` |
 | 页脚 | `src/components/Footer.astro` | 纯模板 | — |
+| 现代主题背景 + 面板玻璃材质 | `src/styles/tokens.css`、`src/styles/global.css` | `--bg-image` / `--paper*`（全站同一片淡蓝底）、`--liquid-*` token 与 `.glass--liquid`（时钟 / 播放器 / 联系方式用的面板材质，与顶栏同款透明玻璃） | `html[data-theme]`（modern / baroque 两套值） |
 | 语言切换 + 文字滑出/滑入 | `src/scripts/lang.ts`、`src/styles/global.css`、`src/scripts/app.ts` | `initLangSwitch()`、`swapChrome()`、`collectTextElements()`、`markIncomingLanguageText()`、`markLanguageSwap()` / `takeLanguageSwap()`（切语言这一趟的记号）、`restoreScrollAfterSwap()` / `restoreScrollAfterLoad()`（保留滚动位置） | `[data-lang-switch]`、`html[data-lang]`、`.lang-slide-out` / `.lang-slide-in`、sessionStorage `space.lang-scroll` / `space.lang-swap` |
 | 主题切换（modern/baroque） | `src/scripts/theme.ts`、`src/scripts/theme-switch.ts`、`src/lib/themes.ts` | `ThemeManager`、`initTheme()`、`initThemeSwitcher()`、`setTheme()`、`toggle()` | `html[data-theme]`、`[data-theme-switch]` |
 | 全站状态 | `src/scripts/app-state.ts` | `AppStore.get()` / `set()` / `isUnlocked()` / `hasUnlocks()` | `'change'` 事件（detail: `{ state, previous }`） |
@@ -533,14 +534,14 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 
 | 文件 | 内容 |
 | --- | --- |
-| `src/styles/tokens.css` | 全部设计变量：字体/字号/行高、圆角、缓动与时长、布局栅格、模糊、纸张与墨色、accent/glow、玻璃、LCD、控件、渐变（`--grad-*`）。`[data-theme='baroque']` 里是第二套值；文件底部有 reduced-motion 覆盖（时长压到 1ms） |
-| `src/styles/global.css` | 站点基础：Reset / Ambient 背景 / Layout / Typography / Glass 系统（`.glass--1..4`）/ LCD 系统（`.lcd`）/ 状态灯 / Controls / 页面入场（`.rise`）/ **语言切换文字动画（`.lang-slide-out` / `.lang-slide-in`）** / 主题过渡（`.theme-shift`）/ 无障碍 / Prose |
-| `src/styles/home-glass.css` | 只在首页使用的材质覆盖（被 `HomePage.astro` import，其他路由不受影响） |
+| `src/styles/tokens.css` | 全部设计变量：字体/字号/行高、圆角、缓动与时长、布局栅格、模糊、纸张与墨色、accent/glow、玻璃、**厚玻璃（`--liquid-*`）**、LCD、控件、渐变（`--grad-*`）。**背景（`--paper*` / `--bg-image` / `--bg-vignette` / `--bg-texture`）也在这里，且只有一套：首页、关于、博客、Lab、自我介绍、入场页共用同一片淡蓝底**（没有首页专用的背景覆盖文件了）。`[data-theme='baroque']` 里是第二套值；文件底部有 reduced-motion 覆盖（时长压到 1ms） |
+| `src/styles/global.css` | 站点基础：Reset / Ambient 背景 / Layout / Typography / Glass 系统（`.glass--1..4` + **`.glass--liquid`：与顶栏同款的透明玻璃**）/ LCD 系统（`.lcd`）/ 状态灯 / Controls / 页面入场（`.rise`）/ **语言切换文字动画（`.lang-slide-out` / `.lang-slide-in`）** / 主题过渡（`.theme-shift`）/ 无障碍 / Prose |
 
 规则：
 
-- 组件里**只允许用语义 token**（`--ink`、`--glass-2`、`--accent`…），不写死颜色；否则换主题一定掉队。
-- 玻璃卡片用 `.glass` + `.glass--N`；LCD 面用 `.lcd`。
+- 组件里**只允许用语义 token**（`--ink`、`--glass-2`、`--liquid-fill`、`--accent`…），不写死颜色；否则换主题一定掉队。
+- 玻璃卡片用 `.glass` + `.glass--N`；**"像一个实体容器"的面板（时钟 / 播放器 / 联系方式）用 `.glass--liquid`**（它只是把 `.glass` 的自定义属性换成 `--liquid-*` 那一套，几何和过渡仍然共用）；LCD 面用 `.lcd`。
+- **`.glass--liquid` 的铁律：只透色，不上色**。填充保持在 0.11 白这一档、色偏层 `--glass-tint` 与内部镜面层 `--glass-surface` 一律 `none`。想让面板更"厚"时，先加模糊和边光，不要加彩色渐变或大块白 —— 那会变成"往玻璃上刷颜色"，本人已经否掉过一版。
 - 页面入场动画是 `.rise` / `.rise--2/3/4`（一次性 CSS animation）。**语言切换进新页面时会被有意去掉**（见 §5.4），因为那一次只该动文字。
 - 所有动画都要在 `@media (prefers-reduced-motion: no-preference)` 里，或自己判断 reduced motion。
 - **焦点圈只在键盘操作后画**：全局 `:focus-visible` 规则挂在 `html[data-input='keyboard']` 下；鼠标/触摸时连浏览器自带的默认圈也一起关掉（`html[data-input='pointer'] :focus-visible:not(input, textarea, select, [contenteditable='true'])`）。状态由 `src/scripts/input-modality.ts` 的 `trackInputModality()` 维护（boot 里调用，换页后重新写回 `<html>`）。原因见 §10「焦点圈又冒出来」那条：脚本 `focus()` 会被浏览器判成"键盘焦点"。
@@ -674,6 +675,16 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-19 · 现代主题：全站统一淡蓝背景 + 时钟 / 播放器 / 联系方式的厚玻璃
+
+- 需求：本人反馈两条 UI 问题 —— 1) 关于我页面和网站主页的背景不是一个蓝（一个淡蓝、一个偏蓝），保留淡蓝；2) 现代主题里时钟 / 播放器 / "找到我" 那几个容器还不够 liquid 玻璃。
+- 背景：那个"淡蓝"原本是首页专用覆盖（`home-glass.css` 里的 `html:not([data-theme='baroque']) body:has(.home) .ambient`）。现在把它按原值搬进 `src/styles/tokens.css` 的现代主题（`--paper` `#e4eef5`、`--paper-2`、`--paper-3`、`--bg-image`、`--bg-vignette`），于是 `/`、`/about/`、`/about/intro/`、`/blog/`、`/lab/` 以及入场页共用同一片底；`home-glass.css` 随之删除（`HomePage.astro` 不再 import，`home-glass.css` 里那条"把玻璃调淡"的覆盖也一起消失，首页顶栏现在和其他页面完全同材质）。首页外观与改动前逐像素一致（用的就是原来那组值），关于页从 `#dbe6f7` + 左上强蓝光斑变成 `#e4eef5`。
+- 玻璃：新增一档 `.glass--liquid`（`src/styles/global.css`），**和顶部导航栏同一种料**：一层很淡的白（`--liquid-fill`，0.11）+ 一道白色斜高光（沿用 `--grad-sheen`）+ 强模糊（`--liquid-blur` 30px，小面 `--liquid-blur-s` 22px；`--liquid-saturate` 1.5）。`.glass--liquid` 里显式把 `--glass-tint` 和 `--glass-surface` 关成 `none` —— **面板自己不产生颜色，颜色只能从背景透过模糊进来**；只额外留一圈纯白的边光（`--liquid-edge` / `--liquid-stroke`）和收得住的投影（`--liquid-inset(-s)` / `--liquid-shadow(-s/-lift)`），否则小块玻璃落在浅色背景上看不出边界。baroque 里换成一档"深色透光玻璃 + 暖白高光"。两套值都在 `tokens.css`。
+- 中途返工一次：第一版把"厚玻璃"理解成"更白 + 更多色偏"（蓝/青的调子层 + 内部镜面层），本人看过实际页面后要求"和顶部导航栏一样的液体玻璃透明的，不是这种乱堆颜色上去的"，于是把色偏层与镜面层整个删掉，改成上面这套纯白的配方。
+- 文件：`src/styles/tokens.css`、`src/styles/global.css`、`src/components/LcdClock.astro`（`glass glass--1` → `glass glass--liquid`）、`src/components/MusicSystem.astro`（full 变体挂 `glass glass--liquid`，组件里删掉重复的材质声明只留 padding；LCD 屏上沿补一圈玻璃反光）、`src/components/ContactTiles.astro`（`::before` 换成小一号的 `--liquid-*`，并加了 hover / focus-within 提亮）、`src/views/HomePage.astro`（去掉 `home-glass.css` 的 import）；**删除** `src/styles/home-glass.css`。
+- 钩子/数据：无新增 data-* / storage key / 自定义事件；样式类新增 `.glass--liquid`。
+- 验证：`npm test` 69/69；`npm run check` 0 错误 0 警告；`npm run build` 17 页，产物 CSS 里标准 `backdrop-filter` 9 处、`-webkit-backdrop-filter` 0 处（没有再踩 §10「液态玻璃线上失效」那条）。Playwright 实测（1440×1000，先跳过入场页）：`/` 与 `/about/` 的 `.ambient` 计算值完全相同，截图逐点比对也一致（左上 40×40 都是 `214,235,254`，右下 `223,229,242`）；厚玻璃面板的边光比周围背景亮约 20 级（时钟上沿 `241,248,250` vs 背景 `219,236,240`），右下角带出青色折射（`189,227,239`），播放器深色屏仍是 `65,80,121`（屏幕没有被玻璃吃掉）；baroque 主题与 390px 宽视口下同样无 console error。
 
 ### 2026-09-19 · 修复 About 切语言后标签冻结悬空
 

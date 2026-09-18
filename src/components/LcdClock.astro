@@ -11,7 +11,7 @@ const { lang } = Astro.props;
 const city = SITE.location.city[lang];
 ---
 
-<div class="clock glass glass--1" data-clock>
+<div class="clock glass glass--liquid" data-clock>
   <div class="clock__head">
     <span class="label label--caps label--dim"><T k="clock.label" lang={lang} /></span>
     <span class="clock__zone num">{SITE.location.offset}</span>

@@ -72,26 +72,24 @@
 
   color-scheme: light;
 
-  /* ---- environment ---- */
-  --paper: #dbe6f7;
-  --paper-2: #e9edfc;
-  --paper-3: #cbd9f1;
+  /* ---- environment ----
+     背景是整站共享的同一片底：淡蓝 + 几团看不出边界的水汽。
+     首页 / 关于 / 博客 / 自我介绍取的是同一组值，
+     所以在这些页面之间跳转时，底色不会又换一个蓝。
+     刻意不做蓝→紫→粉的彩虹，那样会变成 Lavender UI。 */
+  --paper: #e4eef5;
+  --paper-2: #eef4f9;
+  --paper-3: #d8e6ef;
   --paper-ink: rgba(24, 34, 66, 0.02);
 
-  /* 背景：渐变是主角，但整片都是冷色 —— 蓝 / 冰蓝 / 青 / 蓝绿，
-     只在右下方留一点几乎看不见的蓝紫当环境光。
-     刻意不做蓝→紫→粉的彩虹，那样会变成 Lavender UI。 */
   --bg-image:
-    radial-gradient(58vw 46vw at 76% -16%, rgba(255, 255, 255, 0.90), transparent 66%),
-    radial-gradient(96vw 82vw at -14% -18%, rgba(88, 146, 246, 0.50), transparent 72%),
-    radial-gradient(80vw 70vw at 108% 0%, rgba(56, 190, 228, 0.42), transparent 70%),
-    radial-gradient(88vw 76vw at 104% 102%, rgba(74, 204, 194, 0.30), transparent 74%),
-    radial-gradient(78vw 68vw at -16% 98%, rgba(98, 154, 240, 0.34), transparent 76%),
-    radial-gradient(72vw 58vw at 36% 62%, rgba(112, 192, 238, 0.17), transparent 78%),
-    radial-gradient(62vw 54vw at 68% 42%, rgba(146, 152, 234, 0.12), transparent 80%),
-    linear-gradient(158deg, #d6e2fb 0%, #d3e7f7 26%, #d5e3fa 52%, #d8e6f8 74%, #d4e4f7 100%);
+    radial-gradient(ellipse 72% 78% at 4% 8%, rgba(89, 158, 223, 0.27), transparent 73%),
+    radial-gradient(ellipse 66% 75% at 82% 48%, rgba(72, 193, 206, 0.22), transparent 72%),
+    radial-gradient(ellipse 68% 63% at 22% 92%, rgba(121, 171, 234, 0.24), transparent 74%),
+    linear-gradient(145deg, #e4eff8, #e8f3f4 54%, #e5eaf5);
   /* 暗角：四周轻轻退后，让中间浮起来。不是网格，也不是线。 */
-  --bg-vignette: radial-gradient(126vw 106vh at 50% 36%, transparent 44%, rgba(72, 108, 190, 0.10) 100%);  /* 纹理：极轻的胶片噪点。不用网格线 —— 那会让背景像工程图纸。 */
+  --bg-vignette: radial-gradient(126vw 106vh at 50% 36%, transparent 48%, rgba(72, 108, 190, 0.08) 100%);
+  /* 纹理：极轻的胶片噪点。不用网格线 —— 那会让背景像工程图纸。 */
   --bg-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
   --bg-texture-size: 180px 180px;
   --bg-texture-opacity: 0.055;
@@ -198,6 +196,45 @@
   --glass-surface:
     radial-gradient(122% 86% at 8% -28%, rgba(255, 255, 255, 0.52), transparent 60%),
     radial-gradient(96% 76% at 94% 126%, rgba(120, 198, 238, 0.22), transparent 68%);
+
+  /* ---- liquid：面板玻璃 ----
+     和顶部导航栏是同一块料：一层很淡的白 + 一道白色斜高光 + 强模糊，
+     颜色只从背景里"透过"来，面板自己不叠任何色。
+     （曾经在这里加过蓝/青的色偏和内部镜面，看起来像往面板上刷了颜色，已删。）
+     面板比导航栏多两样东西：
+       · 一圈纯白的边光 —— 小块玻璃落在浅色背景上，没它就只剩一团影；
+       · 收得住的投影 —— 让面板浮起来，而不是糊在背景上。
+     数值全部对着 Header 的 .site-header 取值：填充 --glass-2、高光 --grad-sheen、
+     blur(--blur-strong) saturate(1.5)。 */
+  --liquid-fill: rgba(255, 255, 255, 0.11);
+  --liquid-fill-2: rgba(255, 255, 255, 0.18);
+  --liquid-blur: 30px;
+  --liquid-blur-s: 22px;
+  --liquid-saturate: 1.5;
+  /* 边光：纯白，从上左的受光转到下右的极淡反光，不带任何色相 */
+  --liquid-edge: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.62) 0%,
+    rgba(255, 255, 255, 0.14) 34%,
+    rgba(255, 255, 255, 0.05) 62%,
+    rgba(255, 255, 255, 0.26) 100%
+  );
+  --liquid-stroke: rgba(255, 255, 255, 0.26);
+  --liquid-inset:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.16);
+  --liquid-inset-s:
+    inset 0 1px 0 rgba(255, 255, 255, 0.78),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.14);
+  --liquid-shadow:
+    0 2px 6px -3px rgba(40, 54, 108, 0.10),
+    0 20px 40px -28px rgba(40, 54, 108, 0.32);
+  --liquid-shadow-s:
+    0 1px 4px -2px rgba(40, 54, 108, 0.10),
+    0 12px 26px -20px rgba(40, 54, 108, 0.28);
+  --liquid-shadow-lift:
+    0 4px 10px -4px rgba(40, 54, 108, 0.12),
+    0 26px 50px -30px rgba(40, 54, 108, 0.36);
 
   /* ---- dock：首页的 Communication Dock ----
      刻意不用页面主色：冷银边光 + 淡青通道灯 + 一点香槟高光，
@@ -393,6 +430,36 @@ html[data-theme='baroque'] {
   --glass-surface:
     radial-gradient(122% 86% at 8% -28%, rgba(255, 236, 200, 0.22), transparent 60%),
     radial-gradient(96% 76% at 94% 126%, rgba(210, 160, 90, 0.16), transparent 68%);
+
+  /* ---- liquid：同一块料，在木色主题里是"深色透光玻璃 + 暖白高光" ---- */
+  --liquid-fill: rgba(90, 64, 43, 0.32);
+  --liquid-fill-2: rgba(96, 68, 46, 0.42);
+  --liquid-blur: 30px;
+  --liquid-blur-s: 22px;
+  --liquid-saturate: 1.2;
+  --liquid-edge: linear-gradient(
+    160deg,
+    rgba(246, 226, 190, 0.34) 0%,
+    rgba(246, 226, 190, 0.08) 34%,
+    rgba(246, 226, 190, 0.04) 62%,
+    rgba(246, 226, 190, 0.16) 100%
+  );
+  --liquid-stroke: rgba(240, 210, 150, 0.20);
+  --liquid-inset:
+    inset 0 1px 0 rgba(246, 226, 190, 0.16),
+    inset 0 -1px 0 rgba(246, 226, 190, 0.07);
+  --liquid-inset-s:
+    inset 0 1px 0 rgba(246, 226, 190, 0.14),
+    inset 0 -1px 0 rgba(246, 226, 190, 0.06);
+  --liquid-shadow:
+    0 2px 8px -3px rgba(0, 0, 0, 0.34),
+    0 22px 44px -28px rgba(0, 0, 0, 0.72);
+  --liquid-shadow-s:
+    0 1px 5px -2px rgba(0, 0, 0, 0.32),
+    0 14px 28px -20px rgba(0, 0, 0, 0.68);
+  --liquid-shadow-lift:
+    0 4px 12px -4px rgba(0, 0, 0, 0.38),
+    0 28px 52px -30px rgba(0, 0, 0, 0.78);
 
   /* dock：同一件设备，在木色主题里变成黄铜 + 暖白通道灯 */
   --dock-face: linear-gradient(

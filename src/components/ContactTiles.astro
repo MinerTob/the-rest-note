@@ -28,24 +28,28 @@ const names: Record<string, string> = { wechat: 'WeChat', email: 'Email', bilibi
   })}
 </ul>
 <style>
-  /* All material is painted on the rounded tile; content has no overlay plane. */
-  .contact-tile { background-clip: padding-box; }
+  /* 材质画在 ::before 这块圆角玻璃上，内容永远是另一层（z-index:1），
+     所以模糊只作用在背景，不会糊到字。 */
   .contact-tile__main, .contact-tile__copy { -webkit-tap-highlight-color: transparent; }
-  :global(html[data-theme='baroque']) .contact-tile::before {
-    background: radial-gradient(ellipse at 22% 0%, rgba(239,204,143,.12), transparent 72%), linear-gradient(135deg, rgba(169,124,62,.09), rgba(71,45,25,.08));
-    box-shadow: inset 0 1px 2px rgba(238,204,144,.2), inset 0 -2px 5px rgba(36,20,9,.1), 0 5px 14px -10px rgba(0,0,0,.3);
-    backdrop-filter: blur(12px) saturate(1.08);
-  }
 
   :global(html[data-theme='baroque']) .contact-tile img { filter: invert(87%) sepia(24%) saturate(580%) hue-rotate(345deg); opacity: .9; }
   .contact-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: min(100%, 390px); margin: 0; padding: 0; list-style: none; }
   .contact-tile { position: relative; isolation: isolate; min-width: 0; height: 60px; border-radius: 16px; }
-  /* Static material sibling, never an ancestor of interactive/text paint layers. */
+  /* 和时钟 / 播放器、以及顶部导航栏同一块玻璃（--liquid-*），小一寸的版本（-s）。 */
   .contact-tile::before { content: ''; position: absolute; inset: 0; z-index: 0; border-radius: inherit; pointer-events: none; clip-path: inset(0 round 16px);
-    background: radial-gradient(ellipse at 22% 0%, rgba(255,255,255,.12), transparent 72%), linear-gradient(135deg, rgba(255,255,255,.06), transparent 48%, rgba(111,200,222,.04));
-    backdrop-filter: blur(12px) saturate(1.18);
-    box-shadow: inset 0 1px 2px rgba(255,255,255,.18), inset 0 -2px 5px rgba(112,162,190,.04), 0 5px 14px -10px rgba(38,80,110,.18);
+    background-color: var(--liquid-fill);
+    background-image: var(--grad-sheen);
+    backdrop-filter: blur(var(--liquid-blur-s)) saturate(var(--liquid-saturate));
+    border: 1px solid var(--liquid-stroke);
+    box-shadow: var(--liquid-inset-s), var(--liquid-shadow-s);
+    transition: background-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease);
+  }
 
+  /* 手放上去：玻璃更亮一点、抬起来一点，尺寸不变 */
+  .contact-tile:hover::before,
+  .contact-tile:focus-within::before {
+    background-color: var(--liquid-fill-2);
+    box-shadow: var(--liquid-inset-s), var(--liquid-shadow);
   }
 
 

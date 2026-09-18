@@ -380,6 +380,30 @@ hr {
 
 .glass--pill { border-radius: 999px; }
 
+/* ---- liquid：和顶部导航栏同一种玻璃 ----
+   只做三件事：一点点白、一道白色斜高光、强模糊。
+   --glass-tint（冷暖色偏）和 --glass-surface（内部镜面）在这里被关掉 ——
+   面板自己不产生颜色，颜色全部从背景透过模糊带进来，这才是"透明玻璃"。
+   时钟 / 播放器 / 联系方式这类"像一个实体容器"的面板用它。 */
+.glass--liquid {
+  --glass-bg: var(--liquid-fill);
+  --glass-blur: var(--liquid-blur);
+  --glass-tint: none;
+  --glass-surface: none;
+  --grad-edge: var(--liquid-edge);
+  --edge-opacity: 0.5;
+  --surface-opacity: 0;
+  border-color: var(--liquid-stroke);
+  backdrop-filter: blur(var(--liquid-blur)) saturate(var(--liquid-saturate));
+  box-shadow: var(--liquid-inset), var(--liquid-shadow);
+}
+
+.glass--liquid.glass--live:hover,
+.glass--liquid.glass--live:focus-within {
+  --glass-bg: var(--liquid-fill-2);
+  box-shadow: var(--liquid-inset), var(--liquid-shadow-lift);
+}
+
 /* 旧类名兼容 */
 .glass--thin { --glass-bg: var(--glass-1); --glass-blur: var(--blur-s); --edge-opacity: 0.42; --surface-opacity: 0.78; }
 
