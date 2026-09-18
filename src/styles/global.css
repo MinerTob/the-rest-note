@@ -297,7 +297,6 @@ hr {
   background-color: var(--glass-bg);
   background-image: var(--grad-sheen), var(--glass-tint);
   backdrop-filter: blur(var(--glass-blur)) saturate(1.9) brightness(1.06);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.9) brightness(1.06);
   border: 1px solid var(--glass-stroke);
   border-radius: var(--radius-liquid);
   box-shadow:
@@ -387,12 +386,10 @@ hr {
   border-radius: var(--radius-l);
   box-shadow: inset 0 1px 0 var(--glass-edge), var(--shadow);
   backdrop-filter: blur(var(--blur-s)) saturate(1.15);
-  -webkit-backdrop-filter: blur(var(--blur-s)) saturate(1.15);
 }
 
 .sheet--flat {
   backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 /* ============================================================
@@ -525,7 +522,6 @@ hr {
   letter-spacing: 0.02em;
   text-decoration: none;
   backdrop-filter: blur(var(--blur-s)) saturate(1.35);
-  -webkit-backdrop-filter: blur(var(--blur-s)) saturate(1.35);
   box-shadow: var(--inner-glow), var(--shadow-xs);
   transition:
     color var(--dur-1) var(--ease),
@@ -729,7 +725,6 @@ a.chip:hover {
   background-color: var(--glass-4);
   background-image: var(--grad-sheen);
   backdrop-filter: blur(var(--blur-s));
-  -webkit-backdrop-filter: blur(var(--blur-s));
   border: 1px solid var(--line-strong);
   color: var(--ink);
   box-shadow: var(--shadow-s);

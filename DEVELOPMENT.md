@@ -610,6 +610,16 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 验证：npm test / npm run check / 浏览器实测结果
 ```
 
+### 2026-09-19 · 修复"液态玻璃"在线上失效（构建把 backdrop-filter 合并成只剩 -webkit-）
+
+- 需求：线上站点所有玻璃材质都成了"纯透明"，本地 dev 正常。
+- 根因：源码把属性写成成对的 `backdrop-filter: X;` + `-webkit-backdrop-filter: X;`；构建管线里的 **lightningcss** 会把这一对合并，并保留 `-webkit-` 那份、丢掉标准属性（`node -e` 复现：输入两份、输出只剩前缀版）。Chromium 不支持 `-webkit-backdrop-filter`（实测 `CSS.supports('-webkit-backdrop-filter','blur(4px)') === false`），于是产物里的玻璃模糊全部失效：构建产物里标准属性 0 处、`-webkit-` 13 处。
+- 文件：`src/styles/global.css`（删 5 行）、`src/styles/home-glass.css`（删 1 行）、`src/components/Header.astro`、`src/components/MiniLab.astro`、`src/components/MusicSystem.astro`（删 2 行）、`src/components/ThemeSwitcher.astro`、`src/components/ContactTiles.astro`（删 2 行并保留标准属性）、`src/components/ContactPanelBaroque.astro` —— 共删除 14 行手写的前缀副本。
+- 函数：无 —— 纯样式修复。
+- 钩子/数据：无。
+- 要点：**不要再手写 `-webkit-backdrop-filter`**：它会被构建合并成"只有前缀"的形态，在 Chromium 里等于没有这个效果。要兼容老 Safari 应该上 autoprefixer + browserslist，前缀交给构建工具生成。验收标准：`dist/_astro/*.css` 里标准 `backdrop-filter` 必须存在（本次修复后 标准=13、`-webkit-`=0）。
+- 验证：浏览器实测同一元素 —— 修复前线上 `.site-header` 计算值 `backdrop-filter: none`、本地 dev 为 `blur(30px) saturate(1.5)`；修复后重建产物里标准属性回归（13 处、前缀 0 处），`npm test` 65 通过、`astro check` 0 error；推送后由 Render 重新部署并复查线上计算值。
+
 ### 2026-09-19 · 修掉正文焦点框造成的"边缘蓝线"
 
 - 需求：进入网站后，页面上下边缘各多出一条横贯屏幕的蓝线（用户反馈）。
@@ -678,6 +688,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 7. **某个动画"不生效"**：组件 scoped 样式（`[data-astro-cid-...]`）优先级高于全局单类选择器；例如时钟的 `.is-tick` 会盖过语言切换动画 —— 已知且可接受。
 8. **`dist/` 是构建产物**：不要手改；改完源码跑 `npm run build`。
 9. **双语键漏了一半**：`ui.ts` 里 zh / en 两个字典都要加，否则取不到会回退成 key 本身。
+10. **手写的 `-webkit-` 前缀会被构建吞掉**：`backdrop-filter` 与 `-webkit-backdrop-filter` 成对书写时，lightningcss 合并后只留前缀那份，Chromium 不认 → 玻璃效果全没（见 §10 的修复记录）。只写标准属性，前缀交给构建工具。
 
 ---
 

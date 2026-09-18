@@ -35,7 +35,6 @@ const names: Record<string, string> = { wechat: 'WeChat', email: 'Email', bilibi
     background: radial-gradient(ellipse at 22% 0%, rgba(239,204,143,.12), transparent 72%), linear-gradient(135deg, rgba(169,124,62,.09), rgba(71,45,25,.08));
     box-shadow: inset 0 1px 2px rgba(238,204,144,.2), inset 0 -2px 5px rgba(36,20,9,.1), 0 5px 14px -10px rgba(0,0,0,.3);
     backdrop-filter: blur(12px) saturate(1.08);
-    -webkit-backdrop-filter: blur(12px) saturate(1.08);
   }
 
   :global(html[data-theme='baroque']) .contact-tile img { filter: invert(87%) sepia(24%) saturate(580%) hue-rotate(345deg); opacity: .9; }
@@ -44,7 +43,7 @@ const names: Record<string, string> = { wechat: 'WeChat', email: 'Email', bilibi
   /* Static material sibling, never an ancestor of interactive/text paint layers. */
   .contact-tile::before { content: ''; position: absolute; inset: 0; z-index: 0; border-radius: inherit; pointer-events: none; clip-path: inset(0 round 16px);
     background: radial-gradient(ellipse at 22% 0%, rgba(255,255,255,.12), transparent 72%), linear-gradient(135deg, rgba(255,255,255,.06), transparent 48%, rgba(111,200,222,.04));
-    backdrop-filter: blur(12px) saturate(1.18); -webkit-backdrop-filter: blur(12px) saturate(1.18);
+    backdrop-filter: blur(12px) saturate(1.18);
     box-shadow: inset 0 1px 2px rgba(255,255,255,.18), inset 0 -2px 5px rgba(112,162,190,.04), 0 5px 14px -10px rgba(38,80,110,.18);
 
   }

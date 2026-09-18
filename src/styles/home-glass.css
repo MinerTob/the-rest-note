@@ -20,5 +20,4 @@ html:not([data-theme='baroque']) body:has(.home) :is(.site-header, .home__clock 
   --glass-line-2: rgba(179,212,225,.16);
   --glass-stroke: transparent;
   backdrop-filter: blur(14px) saturate(1.15);
-  -webkit-backdrop-filter: blur(14px) saturate(1.15);
 }
