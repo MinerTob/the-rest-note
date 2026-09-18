@@ -1,5 +1,5 @@
 ---
-title: "关于"
+title: "关于我"
 description: "MinerTob 的自述：名字的来历、两副键盘、音乐、The Rest Note，以及一些尚未发生的事。"
 lang: zh
 ---

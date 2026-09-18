@@ -634,6 +634,14 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 验证：npm test / npm run check / 浏览器实测结果
 ```
 
+### 2026-09-19 · 自我介绍页大标题「关于」→「关于我」
+
+- 需求：本人要求把自我介绍页顶部的大标题从`关于`改成`关于我`。
+- 文件：`src/content/pages/intro.zh.md`（frontmatter 的 `title`，只动中文）。
+- 函数：无 —— 纯内容改动。`IntroPage.astro` 用 `entry.data.title` 同时渲染 `<h1>` 和浏览器标签页标题，所以改一处两处都跟着变。
+- 钩子/数据：无。英文版标题保持 `About`（英文里 `About` 就是这页的正常说法，和中文"关于我"对应）。
+- 验证：`npm test` 69/69、`npm run check` 0 错误 0 警告、`npm run build` 17 页；线上复核 `/about/intro/` 的 `<h1>`。
+
 ### 2026-09-19 · 修掉"返回后方块像死了一样"和"拖动自我介绍会强制进页面"
 
 - 需求：本人报了两个 bug —— 1) 从自我介绍页返回 About 之后，方块的物理效果像是没了；2) 拖动第十个标签（自我介绍）会被强制带进新页面，要求"拖动不触发、点击才触发"。顺带：中文返回按钮只留`返回`。
