@@ -113,10 +113,13 @@ npm test          # 纯逻辑单元测试（音名映射、旋律识别、主题
 | --- | --- |
 | Cloudflare Pages | build command `npm run build`，输出目录 `dist` |
 | Netlify | 同上，`dist` |
+| Render | Static Site：build command `npm ci && npm run build`，publish directory `dist` |
 | GitHub Pages | 需要把产物发到 Pages 分支或用 Action；`site` 要填对，否则子路径部署时资源会 404 |
 | 自己的服务器 | 把 `dist/` 拷过去即可，无需 Node 运行时 |
 
-站点没有任何服务端逻辑，也不要配任何环境变量 —— 仓库里没有 `.env`。
+> **Node 版本是硬性要求。** Astro 7 需要 **Node ≥ 22.12.0**：仓库根目录的 `.node-version`（`22.22.0`）和 `package.json` 里的 `engines` 都写了这一点。托管平台如果默认给更老的 Node（Render 上，2024 年创建的服务默认是 20.15.1），构建会在 `astro build` 那一步直接拒绝运行，报 `Node.js vX is not supported by Astro!`。平台设置里找不到 Node 版本选项时，加一个环境变量 `NODE_VERSION=22.22.0` 即可（Render 的优先级是 `NODE_VERSION` > `.node-version` > `.nvmrc` > `engines`）。
+
+站点没有任何服务端逻辑，也不需要 `.env` —— 唯一可能用到的环境变量就是上面那个 `NODE_VERSION`。
 
 ## 目录结构
 
@@ -143,6 +146,8 @@ public/
 └── audio/piano/        # MiniLab / About 用的钢琴采样
 
 tests/                  # node --test 单元测试
+.node-version           # 声明 Node 版本（托管平台用它选版本，务必 ≥ 22.12.0）
+.gitattributes          # Git LFS 规则 + 换行符规则
 DEVELOPMENT.md          # 开发文档（功能地图 / 模块详解 / 功能日志）
 AGENTS.md               # 给 AI 助手的协作约定
 ```

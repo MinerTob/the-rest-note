@@ -610,6 +610,16 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 验证：npm test / npm run check / 浏览器实测结果
 ```
 
+### 2026-09-19 · 修复 Render 部署失败（Node 版本）
+
+- 需求：Render 上绑这个仓库后构建失败。
+- 现象：`astro build` 直接退出，日志 `Node.js v20.15.1 is not supported by Astro! Please upgrade Node.js to a supported version: ">=22.12.0"`。
+- 原因：Render 的默认 Node 版本取决于**服务创建时间**（2024-07 ~ 2024-10 创建的服务默认 20.15.1）；仓库当初没有任何 Node 版本声明，所以拿不到新版本。
+- 文件：`.node-version`（新增，内容 `22.22.0`）、`package.json`（新增 `engines.node = ">=22.12.0 <25.0.0"` 与 `engines.npm`）、`README.md`（部署章节补 Render 设置与 Node 版本说明）。
+- 函数：无 —— 不动任何运行时代码。
+- 钩子/数据：无。
+- 要点：Render 判定 Node 版本的优先级是 `NODE_VERSION` 环境变量 > `.node-version` > `.nvmrc` > `package.json` 的 `engines`。`.node-version` 取的是 Render 默认版本历史表里出现过的版本号，避免指定到平台上不存在的版本。
+- 验证：本地 `node -v` = 22.12.0 ≥ 要求；`package.json` JSON 解析通过；推送后由 Render 重新部署确认。
 ### 2026-09-19 · 仓库重建 + 上传 GitHub（Git LFS）
 
 - 需求：把项目从旧的 ximu 仓库里拆出来独立成新仓库；补全 README；清掉旧 git 历史；音频等大文件交给 Git LFS。
