@@ -258,11 +258,17 @@ function takeLanguageSwap(): boolean;               // 目标页取走记号：t
 collectTextElements(root)      // TreeWalker 收集"承载文字的元素"，祖先命中则跳过后代
 playOut(elements) / playIn(elements)
 switchChromeInPlace(target)    // 两种语言共用同一地址时（如 404）的兜底
-rememberScrollPosition()       // 换页前存 scrollY + #hash（sessionStorage 'space.lang-scroll'）
+rememberScrollPosition()       // 换页前存 { y, hash, anchor }（sessionStorage 'space.lang-scroll'）
 restoreScrollAfterSwap()       // 第一段：astro:after-swap 里先对齐（View Transition 快照才是对的）
 restoreScrollAfterLoad()       // 第二段：astro:page-load 里再对齐（关于页此时才把标签搬进 body，文档高度变了）
-forgetSavedScroll()            // 导航失败时丢弃
-applySavedScroll()             // 两段共用的收尾：按当前文档高度收敛 + 接回 #锚点
+forgetSavedScroll()            // 只在导航失败时丢弃（成功时必须留给第二段）
+applySavedScroll()             // 两段共用的收尾：地标对齐 → 收敛到文档高度 → 接回 #锚点
+// 内部：地标（换页后要按回原处的那一块）
+topProbeY() / isBlock() / visibleHeight() / blockChildren()
+blockAtTop()                   // 视口顶端那一块：从 main 逐层钻进"刚好包住这点"的块级元素
+dominantBlock()                // 占住视口的那一块：每层挑露出最多的孩子，低于四成就停
+findAnchor() / resolveAnchor() // 记下子节点路径 + 视口高度；新页面按同一路径找回来
+readAnchor()                   // 从 sessionStorage 读出来的东西先验形状
 ```
 
 **点击一条语言链接的完整链路**：
@@ -291,11 +297,13 @@ click [data-lang-switch]
 - 元素原本的透明度（少数弱化文字不是 1）会记在 `--lang-opacity` 里，动画结束回到原值。
 - 系统开启 *减少动态效果*（`prefers-reduced-motion: reduce`）时：完全跳过动画和等待，直接切换。
 - 语言偏好存 localStorage `space.lang`；进站时若偏好与页面语言不同，只换 UI 文案（正文语言仍由 URL 决定）。
-- **切语言不弹回顶部（两段式恢复）**：ClientRouter 每次换页都会 `scrollTo(0, 0)`（`astro/dist/transitions/router.js` 的 `moveToLocation`），所以 `lang.ts` 在 `navigate()` 之前把 `scrollY` 和 `#hash` 存进 sessionStorage `space.lang-scroll`，再分两次对齐：
+- **切语言不弹回顶部（两段式 + 地标对齐）**：ClientRouter 每次换页都会 `scrollTo(0, 0)`（`astro/dist/transitions/router.js` 的 `moveToLocation`），所以 `lang.ts` 在 `navigate()` 之前把 `scrollY`、`#hash` 和**视口里的地标**存进 sessionStorage `space.lang-scroll`，再分两次对齐：
   1. `restoreScrollAfterSwap()`（`astro:after-swap`）—— 时机在那次滚动之后、View Transition 拍"新页面"快照之前，位置接得上又不会和动画打架；
-  2. `restoreScrollAfterLoad()`（`astro:page-load`）—— 关于页此时才由 `initIdentity()` 把标签搬进 `body` 改成绝对定位，文档高度会变，只对齐一次会被浏览器按旧高度截断（那就是本人看到的"切完语言发生位移"）。
-  两个函数共用 `applySavedScroll()`：用 `behavior: 'instant'`（站点全局有 `scroll-behavior: smooth`，`auto` 会变成慢悠悠地滚回去）、把 y 夹到当前文档高度上限，并在 URL 丢了 `#hash` 时用 `history.replaceState` 接回去（router 只按 `to.href` 写地址，`#about` 会被它丢掉）。
+  2. `restoreScrollAfterLoad()`（`astro:page-load`）—— 关于页此时才由 `initIdentity()` 把标签搬进 `body` 改成绝对定位，文档高度会变，只对齐一次会被浏览器按旧高度截断（那就是本人看到的"切完语言发生位移"）；`document.fonts.ready` + 一帧之后还会再对一次（字体就位布局才会定），但若这中间用户自己滚过（和上次落点差 ≥4px）就不抢他的位置。
+  两个函数共用 `applySavedScroll()`：**先按地标对齐**——把换页前视口里那一块按回原来的高度（`offset` 是它当时的视口 top）；地标找不回来才退回老像素。另外用 `behavior: 'instant'`（站点全局有 `scroll-behavior: smooth`，`auto` 会变成慢悠悠地滚回去）、把 y 夹到当前文档高度上限，并在 URL 丢了 `#hash` 时用 `history.replaceState` 接回去（router 只按 `to.href` 写地址，`#about` 会被它丢掉）。
+- **为什么不能只按像素恢复**：英文普遍比中文长，换页后上面那些内容的高度会变 —— 实测首页（那串拼接页）切语言时整块"关于"区在文档里下沉 **115px**，自我介绍页整篇高 **1639px**。只把老 `scrollY` 滚回去，人正在看的那一块就被挤走（本人报的"位移"）。所以地标优先：选"占住视口的那一块"（不是视口最上面那一行——那可能只是上一段滚出去的尾巴），长文页（每层都是整屏高、钻不到段落）改成视口顶端那一块。实测：首页滚到关于区切语言，`[data-identity]` 的屏幕位置 98 → 98（**0px**），滚动位置 2714 → 2829 正好抵消那 115px；自我介绍页滚到 4000 处切语言，`<article>` 里视口顶端那块 −25 → −25（**0px**）。
 - **切语言是"同一页换种说法"，不是"换了一趟路"**：`markLanguageSwap(pathname)` 在换页前把目标 pathname 写进 sessionStorage `space.lang-swap`，目标页 `takeLanguageSwap()` 取走一次（对不上就丢掉，不留残余）。身份标签靠它区分"重新落一次"和"原样留着"（见 §5.8）。
+- **一个曾经的坑**：收尾的 `finally` 里原本无条件 `forgetSavedScroll()`，而 `navigate()` 在 View Transition 更新完 DOM 时（`astro:page-load` 之前）就返回了 —— 于是第二段对齐永远读不到位置，等于只有一段。现在只有 `navigate()` 真抛错时才丢弃。改这条链路时留意调用顺序。
 
 ### 5.5 背景音乐
 
@@ -424,9 +432,9 @@ setIdentityActive(active: boolean): void;  // 进入/离开视口时激活
 // identity-physics.ts（matter-js）
 createIdentityPhysics(root, tags, onSettled?, onActivate?): {
   reveal(index, source?): void;    // 从键盘位抛出（没给 source 就走"静止队形"）
-  restore(layout): number;         // 按 cookie 里的落点摆好，返回摆好几个
-  placeMissing(): void;            // 还没上场的标签直接补进静止队形（切语言时用）
-  snapshot(): IdentityLayout;      // 此刻的归一化落点（离开页面前写进 cookie）
+  restore(layout): number;         // 按 cookie 里的落点摆好（按地板差值整体平移），返回摆好几个
+  markPlaced(): void;              // 把场上这些记成"已落地"（切语言用，见下）
+  snapshot(): IdentityLayout;      // 此刻的文档像素落点 + 地板位置（离开页面前写进 cookie）
   reset(): void;                   // 清空身体与记忆（重新演奏按钮）
   dispose(): void;
 }
@@ -442,20 +450,22 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
 ```
 
 - 标签的入场不是 `scale(0)→scale(1)`，而是被"弹出来"的物理动画：ejection → flight（浅抛物线 + 轻微旋转）→ landing → settle。动画参数在 `IDENTITY_MOTION`。
-- 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数，cookie 名 `rest-note-identity-v2-<visit>`，visit id 每次会话一个；`v2` 是落点格式版本，见下）。这份记忆**只当"先摆出来"的兜底**（万一声音还没解锁，页面也不会是一片空地）：`physics.restore()` 之后 `needsAnimation` 仍然是 `true`，音乐一响 `reveal()` 就把已有的身体重新抛回场上再落一次 —— 每次回到这一页，方块都是活的（本人报过"返回之后方块的物理效果就没了"）。`reset()`（重新演奏按钮）会连内部的 `dropped` 一起清空、并 `clearLayout()`，所以下一轮整排重抛。
-- **落点存的是文档像素坐标**（`{ x, y, angle }` = 本体中心 + 角度），不是归一化比例。曾经存过比例（`(x-left)/(right-left)`、`(floor-y)/floor`），但两种语言的页面高度差几像素，比例还原时会被整体缩放，实测偏 20-80px —— 本人看到的就是"切语言之后标签位移"。改格式记得同时改 `LAYOUT_VERSION`（cookie 名字里那个 `v2`），否则新代码会把旧格式的值当像素读。
+- 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数，cookie 名 `rest-note-identity-v3-<visit>`，visit id 每次会话一个；`v3` 是落点格式版本，见下）。这份记忆**只当"先摆出来"的兜底**（万一声音还没解锁，页面也不会是一片空地）：`physics.restore()` 之后 `needsAnimation` 仍然是 `true`，音乐一响 `reveal()` 就把已有的身体重新抛回场上再落一次 —— 每次回到这一页，方块都是活的（本人报过"返回之后方块的物理效果就没了"）。`reset()`（重新演奏按钮）会连内部的 `dropped` 一起清空、并 `clearLayout()`，所以下一轮整排重抛。
+- **落点存的是文档像素坐标 + 地板位置**（`{ floor, items: [{ x, y, angle }] }`，`x/y/angle` = 本体中心 + 角度），不是归一化比例。曾经存过比例（`(x-left)/(right-left)`、`(floor-y)/floor`），但两种语言的页面高度差几像素，比例还原时会被整体缩放，实测偏 20-80px —— 本人看到的就是"切语言之后标签位移"。`floor` 是写下落点时 `.identity__landing` 下沿的文档位置：换语言/换宽度会让整块区域上下移动（实测首页那串拼接页切到英文时下沉 **115px**），`restore()` 会先算 `shift = floor_now - layout.floor` 再整体平移，标签才不会漂出自己那一块。改格式记得同时改 `LAYOUT_VERSION`（cookie 名字里那个 `v3`），否则新代码会把旧格式的值当新格式读。
 - `bounds()` 与 `restore()` 的夹取只做"别出视口、别陷进地板"（`x ∈ [8, width-8]`、`y ∈ [8, floor-4]`），**不按方块自己的尺寸算**。按尺寸算会出事：脚本刚接手时量到的元素尺寸常常是错的（样式还没应用，实测 46px 的标签量成 134px），一夹就把方块顶歪 44px；按舞台宽度夹也会把更宽的英文标签整排推走（实测偏 75px）。另外 `bounds()` 里有**尺寸自愈**：元素尺寸和造本体时记下的不一样，就用同一个中心重造本体（位置不动，只补尺寸），`document.fonts.ready` 之后还会再量一次。
-- **切语言是唯一的例外：落点原样留着，缺的补齐，不重弹。** 判定靠 `lang.ts` 的 `takeLanguageSwap()`（sessionStorage `space.lang-swap`，见 §5.4），流程是：
+- **切语言是唯一的例外：落点原样留着，还没上场的继续排队，不提前补位、不重弹。** 判定靠 `lang.ts` 的 `takeLanguageSwap()`（sessionStorage `space.lang-swap`，见 §5.4），流程是：
   ```ts
-  physics.restore(readLayout() ?? []);      // 摆好记忆里的落点
-  needsAnimation = !takeLanguageSwap();     // 切语言这一趟 = false
-  if (!needsAnimation) physics.placeMissing();  // 没记到的标签补进"静止队形"（不抛、不滚）
+  physics.restore(readLayout());        // 摆好记忆里的落点（含地板平移）
+  needsAnimation = true;                // 计划照旧跑：剩下的标签仍由音乐按原时刻放出来
+  if (takeLanguageSwap()) physics.markPlaced();  // 已经在场上的记成"已落地"，音乐不会再抛它们
   ```
+  **切语言时绝不能把缺的标签一次补齐。** 曾经这里是 `placeMissing()`（把还没上场的直接摆进静止队形），结果人点了翻译、歌还没播到那一段，十个标签全弹出来了（本人复报的 bug）。实测：切语言时场上 2 个 → 旧逻辑 350ms 后 10 个全出；现在 2 个原地不动，音乐走到 0:09 出第 3 个、0:33（乐谱截止时刻）凑满 10 个。
   四个坑，改这里之前先看：
   1. **别用模块变量判"这一趟是切语言"**。`navigate()` 在 View Transition 更新完 DOM 时就返回了，新页面的脚本是随后才加载执行的 —— 点击处理器里的收尾早就跑完，模块变量必然已经清空（实测新页面读到的永远是 `false`）。跨页只能用 sessionStorage 记号。
   2. **别用 `restored < tags.length` 当"要不要重落"的判据**。cookie 快照是"上一次全部静止时"写的，而人往往在标签还滚着的时候就点了切换 —— 实测快照只有 7/10 条，`restore()` 返回 7，于是十个标签被整排重抛，看起来就是"切语言之后全弹了一遍"（本人报的 bug）。
   3. **离开页面前要写"此刻"的落点**，不能只靠静止时的那次快照：`disposeCurrent`（`astro:before-swap` → `disposeIdentity()`）里会 `writeLayout(physics.snapshot())`，把正在运动的身体也一并记下来，切到对面语言时才能一个不差地摆回原位。
   4. **别用"刚接手时量到的元素尺寸"去夹位置**。新页面的脚本可能在样式应用之前就跑起来了，这时候 `offsetWidth/offsetHeight` 全是错的（实测 46px 量成 134px），拿它算边界会把方块顶歪 44px。所以夹取只跟视口和地板有关；`bounds()` 会在尺寸对不上时用同一个中心重造本体（见上面那条）。判断"是否零位移"要看**中心点**，别拿 `getBoundingClientRect()` 的 top/left 比 —— 旋转过的方块，盒子一变宽它的外接矩形就会整体移动，那是量法的问题不是 bug。
+- **"拖不动"的三个来源**（本人在独立页面/切语言后都遇到过）：① `pointerup` 丢事件（指针在窗口外松开、被系统弹窗抢走）→ `drag` 卡在"正在拖"，之后谁按都拖不动；② 拖到一半 `bounds()` 因窗口/尺寸变化重造了本体 → 拖拽关节还挂在被移出世界的旧本体上，标签跟着指针却一动不动；③ 标签还没被音乐放出来（场上没有本体，按住无效，这是设计如此）。前两个已经在 `identity-physics.ts` 里堵死：`window` 上兜底监听 `pointerup` / `pointercancel` / `blur`，`pointerdown` 时若发现上一次拖拽超过 2.5s 就先替它收尾，`bounds()` 重造本体时把 `drag.joint.bodyB` 接到新本体上。
 - **第十个标签（`intro`）是唯一的例外**：它比别的标签大 0.2 倍，点一下进整页自我介绍（§5.14）。放大用的是 font-size / padding 同比例放大（`calc(基准 * 1.2)`），**不能用 `transform: scale()`** —— 物理引擎每帧都会重写 inline `transform`。
 - 点按判定在 `identity-physics.ts`：按下后位移 < 8px、且 0.7s 内抬手才算"点击"；拖动过就不算（"抛掷"不能被误认成"点开"）。命中 + 元素带 `data-identity-link` 才回调 `onActivate`，由 `identity-player.ts` 走 `astro:transitions/client` 的 `navigate()`（失败退回 `location.assign`）；键盘上按回车同样打开。
 - **拖动不能触发链接**：第十个标签是 `<a href>`，浏览器在 `pointerup` 之后还会自己补一发 `click`（`setPointerCapture` 让目标仍是它），光靠点按判定拦不住。所以只要这一次抬手不算点按，就把 `swallowClickUntil` 设成"现在 + 300ms"，由文档级捕获阶段的 `click` 监听把这一发 `click.preventDefault()` 掉 —— 拖完标签不会跟着跳页（本人报过的 bug），点一下照常进自我介绍页。
@@ -561,7 +571,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 | `space.unlocked` | localStorage | 已解锁隐藏曲目 id（JSON 数组） | `src/scripts/app-state.ts` |
 | `space.lang` | localStorage | 语言偏好（`zh` / `en`） | `src/scripts/lang.ts` |
 | `space.lang-transition` | sessionStorage | 语言切换的一次性标记："新文档要滑入" | `src/scripts/lang.ts` |
-| `space.lang-scroll` | sessionStorage | 语言切换前记下的 `{ y, hash }`，新页面读完就删（两段式恢复，见 §5.4） | `src/scripts/lang.ts` |
+| `space.lang-scroll` | sessionStorage | 语言切换前记下的 `{ y, hash, anchor: { path, offset } }`，新页面读完就删（地标对齐 + 两段式恢复，见 §5.4） | `src/scripts/lang.ts` |
 | `space.lang-swap` | sessionStorage | 语言切换的目标 pathname（一次性）：对得上才说明"这一趟是切语言"，身份标签据此保留落点（§5.8） | `src/scripts/lang.ts` |
 | `space.position.v1.<id>` | sessionStorage | 每首曲子记下"暂停时的位置" | `src/lib/live-timeline.ts` |
 | `rest-note.entry-passed` | sessionStorage | 本次会话已通过入场页 | `src/scripts/entry-gate.ts` |
@@ -674,6 +684,20 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 钩子/数据：新的 data-* / storage key / 自定义事件（没有就写"无"）
 - 验证：npm test / npm run check / 浏览器实测结果
 ```
+
+### 2026-09-19 · 切语言的三件事：标签不再提前弹出 / 正在看的那一块不再被挤走 / 拖拽不会卡死
+
+- 需求：本人复报三件事——①"点击翻译会有位移"；②"关于页 MIDI 还没播到那一段，所有性格标签就全弹出来了"；③"有时候按导航跳到单独的网页就拖不动"，并要求我用浏览器自己复现。
+- 复现方式：本会话里 Codex 的浏览器操控插件连不上（`unsupported Codex auth method: apikey`），改用**无头 Chrome + CDP 脚本**跑真实链路（入场页 → 等夜曲 → 点翻译 → 逐帧量位置），脚本放在 `%TEMP%\cdp-*.mjs`。
+- 根因与实测：
+  1. **提前弹出**：切语言那一趟走的是 `physics.placeMissing()`，把还没上场的标签一次补齐。实测切语言时场上只有 2 个标签，**350ms 后 10 个全出**、瞬间静止成一排。现在改成 `markPlaced()`（把场上的记成"已落地"）+ `needsAnimation` 保持 `true`：实测 2 个原地不动 → 音乐 0:09 出第 3 个 → 0:33（`identityRevealPlan` 的 deadline）凑满 10 个，音乐从原来的 0:05 接着走（`live-timeline`）。
+  2. **真的位移**：滚动只按老像素恢复，而换语言后内容高度会变（首页整块"关于"区在文档里下沉 **115px**、自我介绍页整篇高 **1639px**），人正在看的那一块被挤走；另外收尾的 `finally` 里无条件 `forgetSavedScroll()`，而 `navigate()` 在 `astro:page-load` 之前就返回 —— 第二段对齐永远读不到位置，等于只有一段。现在 `space.lang-scroll` 多存一个 `anchor`（"占住屏幕的那一块"的子节点路径 + 它的视口高度），`applySavedScroll()` 先按地标对齐、找不回才退回像素，只有 `navigate()` 真抛错才丢弃位置，`document.fonts.ready` 后补一次对齐（用户自己滚过就不抢）。实测：首页滚到关于区切语言 `[data-identity]` 屏幕位置 98 → 98、滚动 2714 → 2829；自我介绍页滚到 4000 切语言，视口顶端那段 −25 → −25。
+  3. **标签跟着区块一起走**：落点格式从 `{ x, y, angle }[]` 改成 `{ floor, items }`（cookie 版本 `v2` → `v3`），`restore()` 先算 `shift = floor_now - layout.floor` 再整体平移 —— 否则滚动位置一改，标签就相对区块漂走（实测差 115px）。
+  4. **拖不动**：`pointerup` 丢事件（指针在窗口外松开）会让 `drag` 卡在"正在拖"，之后谁按都拖不动；`bounds()` 因尺寸变化重造本体时，拖拽关节还挂在被移出世界的旧本体上（按着指针标签也不动）。现在 `window` 上兜底监听 `pointerup`/`pointercancel`/`blur`，`pointerdown` 发现上一次拖拽超过 2.5s 就先替它收尾，重造本体时把 `drag.joint.bodyB` 接到新本体上。实测：切语言前后各拖一次都跟手（−174/−70 与 −188/−64，请求的是 −180/−70 与 −190/−60）。
+- 文件：`src/scripts/lang.ts`、`src/scripts/identity-physics.ts`、`src/scripts/identity-player.ts`、`DEVELOPMENT.md`。
+- 函数：`lang.ts` 新增内部 `topProbeY()` / `isBlock()` / `visibleHeight()` / `blockChildren()` / `blockAtTop()` / `dominantBlock()` / `findAnchor()` / `resolveAnchor()` / `readAnchor()`，`rememberScrollPosition()` 改存 `ScrollRecord = { y, hash, anchor? }`，`applySavedScroll()` 改为地标优先，`restoreScrollAfterLoad()` 加 `fonts.ready` 补对齐；`identity-physics.ts` 的 `IdentityLayout` 改成 `{ floor, items }`、`snapshot()` 记录地板、`restore(layout | undefined)` 按地板差值平移、`placeMissing()` → `markPlaced()`、`bounds()` 重接拖拽关节、`pointerdown` 加陈旧拖拽兜底、新增窗口级 `release` 监听；`identity-player.ts` 的 `LAYOUT_VERSION` → `'v3'`、`readLayout()` 校验新形状、切语言分支改调 `markPlaced()`、删掉 `start()` 里那句 `if (!needsAnimation) root.dataset.settled`。
+- 钩子/数据：storage key `space.lang-scroll` 的值多了 `anchor` 字段；身份落点 cookie 名 `rest-note-identity-v3-<visit>`（新增 `floor`）。没有新增 data-* 钩子或自定义事件。
+- 验证：`npm test` 69 项全过；`npm run check` 0 错误；`npm run build` 通过；无头 Chrome 实测数据见上（提前弹出、地标对齐、拖拽三组）。判断"零位移"时比的是标签**中心点**。
 
 ### 2026-09-19 · 关于页切语言：标签真正零位移（落点改存像素坐标 + 尺寸自愈）
 

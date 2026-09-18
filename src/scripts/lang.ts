@@ -150,12 +150,128 @@ function clearPendingTransition(): void {
   }
 }
 
+/**
+ * 换语言前记下当前位置：换页之后要放回去。
+ *
+ * 记两层：
+ *   - `anchor`：此刻视口顶端那一块地标（按子节点路径找回来），
+ *   - `y`：像素坐标，只在找不回地标时兜底。
+ *
+ * 为什么不能只记像素：英文普遍更长，换语言之后上面那些内容的高度会变
+ * （实测首页整块"关于"区域在文档里下沉 115px，自我介绍页整篇高 1639px）。
+ * 只把老像素滚回去，人正在看的那一块就被挤到别处去了 —— 本人眼里的"位移"。
+ */
+type ScrollAnchor = { path: number[]; offset: number };
+
+type ScrollRecord = { y: number; hash: string; anchor?: ScrollAnchor };
+
+/** 从导航栏下面 2px 处取点，免得把固定的头部本身当成"正在看的正文"。 */
+function topProbeY(): number {
+  const header = document.querySelector<HTMLElement>('.site-header');
+  const bottom = header ? header.getBoundingClientRect().bottom : 0;
+  return Math.round(Math.max(2, Math.min(bottom + 2, window.innerHeight - 2)));
+}
+
+/** 只认块级元素：`<span>` 这类行内元素不算地标，它所在的段落才是。 */
+function isBlock(element: HTMLElement): boolean {
+  const display = getComputedStyle(element).display;
+  return !display.startsWith('inline') && display !== 'contents';
+}
+
+/** 元素在视口里露出来的高度（px）。 */
+function visibleHeight(element: HTMLElement): number {
+  const rect = element.getBoundingClientRect();
+  return Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+}
+
+function blockChildren(node: HTMLElement): HTMLElement[] {
+  return [...node.children].filter(
+    (child): child is HTMLElement => child instanceof HTMLElement && isBlock(child),
+  );
+}
+
+/** 从 main 逐层往下，找到"刚好包住这点"的最深块级元素，并记下子节点路径。 */
+function blockAtTop(): { path: number[]; node: HTMLElement } | undefined {
+  const main = document.querySelector<HTMLElement>('main');
+  if (!main) return undefined;
+  const x = Math.round(window.innerWidth / 2);
+  const y = topProbeY();
+  const path: number[] = [];
+  let node: HTMLElement = main;
+  for (;;) {
+    const next = blockChildren(node).find((child) => {
+      const rect = child.getBoundingClientRect();
+      return rect.left <= x && x < rect.right && rect.top <= y && y < rect.bottom;
+    });
+    if (!next) break;
+    path.push([...node.children].indexOf(next));
+    node = next;
+  }
+  if (!path.length) return undefined;
+  return { path, node };
+}
+
+/**
+ * 占住视口的那一块：每层挑"露出最多"的孩子往下走，露出不到视口四成就不往里钻。
+ *
+ * 为什么不用"视口最上面那一个元素"：它可能只是上一段滚出去的尾巴
+ * （实测首页视口顶端是实验区最后一行小字，而人真正在看的是下面整块"关于"）。
+ */
+function dominantBlock(): { path: number[]; node: HTMLElement } | undefined {
+  const main = document.querySelector<HTMLElement>('main');
+  if (!main) return undefined;
+  const least = Math.max(120, window.innerHeight * 0.4);
+  const path: number[] = [];
+  let node: HTMLElement = main;
+  for (;;) {
+    const children = blockChildren(node);
+    if (!children.length) break;
+    const best = children.reduce((a, b) => (visibleHeight(b) > visibleHeight(a) ? b : a));
+    if (visibleHeight(best) < least) break;
+    path.push([...node.children].indexOf(best));
+    node = best;
+  }
+  if (!path.length) return undefined;
+  return { path, node };
+}
+
+/**
+ * 取"换页后要按回原处的那一块"。
+ *
+ * 占住视口的那块优先 —— 它才是人正在看的东西；不过长文页（自我介绍）
+ * 从 main 一路下来每一层都是整屏高，钻不到具体的段落，这时改用视口顶端那一块。
+ */
+function findAnchor(): ScrollAnchor | undefined {
+  const dominant = dominantBlock();
+  const picked =
+    !dominant || visibleHeight(dominant.node) >= window.innerHeight * 0.9
+      ? blockAtTop() ?? dominant
+      : dominant;
+  if (!picked) return undefined;
+  return { path: picked.path, offset: Math.round(picked.node.getBoundingClientRect().top) };
+}
+
+/** 按路径找回同一块地标：中英页面结构一致，路径才成立；找不回就当没有。 */
+function resolveAnchor(anchor: ScrollAnchor): HTMLElement | undefined {
+  let node: HTMLElement | undefined = document.querySelector<HTMLElement>('main') ?? undefined;
+  for (const index of anchor.path) {
+    const child = node?.children[index];
+    if (!(child instanceof HTMLElement)) return undefined;
+    node = child;
+  }
+  return node;
+}
+
 /** 换语言前记下当前位置：换页之后要放回去。 */
 function rememberScrollPosition(): void {
   try {
     window.sessionStorage.setItem(
       SCROLL_KEY,
-      JSON.stringify({ y: Math.round(window.scrollY), hash: window.location.hash }),
+      JSON.stringify({
+        y: Math.round(window.scrollY),
+        hash: window.location.hash,
+        anchor: findAnchor(),
+      } satisfies ScrollRecord),
     );
   } catch {
     /* 隐私模式：跳过，退回浏览器默认行为 */
@@ -169,26 +285,54 @@ function rememberScrollPosition(): void {
  * moveToLocation），所以这里挂在 `astro:after-swap` 上 —— 它就在那次滚动之后、
  * View Transition 拍"新页面"快照之前跑，位置能稳稳接上，动画也不会跳。
  */
-let pendingScroll: { y: number; hash: string } | undefined;
+let pendingScroll: ScrollRecord | undefined;
+/** 上一次对齐之后落到的位置：用来判断"这中间用户自己滚过没有"。 */
+let appliedScrollY = 0;
 
-function readSavedScroll(): { y: number; hash: string } | undefined {
+function readSavedScroll(): ScrollRecord | undefined {
   try {
     const raw = window.sessionStorage.getItem(SCROLL_KEY);
     if (!raw) return undefined;
     window.sessionStorage.removeItem(SCROLL_KEY);
-    const parsed = JSON.parse(raw) as { y?: unknown; hash?: unknown };
+    const parsed = JSON.parse(raw) as { y?: unknown; hash?: unknown; anchor?: unknown };
     if (typeof parsed?.y !== 'number') return undefined;
-    return { y: parsed.y, hash: typeof parsed.hash === 'string' ? parsed.hash : '' };
+    return {
+      y: parsed.y,
+      hash: typeof parsed.hash === 'string' ? parsed.hash : '',
+      anchor: readAnchor(parsed.anchor),
+    };
   } catch {
     return undefined;
   }
 }
 
-/** 按当前文档高度把位置对齐（高度变了就按新上限收敛）。 */
+/** 从 sessionStorage 里读出来的东西不能信，形状不对就当没有。 */
+function readAnchor(value: unknown): ScrollAnchor | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const candidate = value as { path?: unknown; offset?: unknown };
+  if (!Array.isArray(candidate.path) || !candidate.path.every((step) => typeof step === 'number')) return undefined;
+  if (typeof candidate.offset !== 'number') return undefined;
+  return { path: candidate.path, offset: candidate.offset };
+}
+
+/**
+ * 按当前文档高度把位置对齐（高度变了就按新上限收敛）。
+ *
+ * 优先按地标对齐：把换页前视口顶端那一块按回原来那个高度。
+ * 地标找不回来（结构对不上）才退回像素 —— 这也是以前唯一的做法。
+ */
 function applySavedScroll(): void {
   if (!pendingScroll) return;
   const limit = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-  window.scrollTo({ top: Math.min(pendingScroll.y, limit), left: 0, behavior: 'instant' });
+  let target = pendingScroll.y;
+  if (pendingScroll.anchor) {
+    const element = resolveAnchor(pendingScroll.anchor);
+    if (element) {
+      target = element.getBoundingClientRect().top + window.scrollY - pendingScroll.anchor.offset;
+    }
+  }
+  window.scrollTo({ top: Math.min(Math.max(0, target), limit), left: 0, behavior: 'instant' });
+  appliedScrollY = Math.round(window.scrollY);
 
   // 顺手把锚点接回去：router 只按 to.href 写地址，`#about` 这种锚点会被丢掉。
   if (pendingScroll.hash && !window.location.hash) {
@@ -215,12 +359,20 @@ function restoreScrollAfterSwap(): void {
 /**
  * 第二段：`astro:page-load`（boot 之后）再对齐一次。
  * About 页的标签列表会在 initIdentity() 里从 section 搬进 body 并改成绝对定位，
- * 文档高度跟着变，只对齐一次会被浏览器按旧高度截断 —— 那就是"切语言之后发生位移"。
+ * 文档高度跟着变，只对齐一次会被浏览器按旧高度截断；
+ * 第二遍也是地标对齐（地标本身可能因为字体就位又挪了一点）。
  */
 function restoreScrollAfterLoad(): void {
   if (!pendingScroll) return;
   applySavedScroll();
-  pendingScroll = undefined;
+  // 字体、图片就位之后布局还可能挪一点点，最后一帧再对一次；
+  // 但如果这中间用户自己滚了页面，就别去抢他的位置。
+  void document.fonts?.ready.then(() => {
+    window.requestAnimationFrame(() => {
+      if (pendingScroll && Math.abs(window.scrollY - appliedScrollY) < 4) applySavedScroll();
+      pendingScroll = undefined;
+    });
+  });
 }
 
 /** 导航失败时别把位置留给下一次换页。 */
@@ -365,10 +517,14 @@ export function initLangSwitch(): void {
         rememberScrollPosition();
         // 这一趟是"切语言"：目标页面据此保留标签落点，不重新抛一遍。
         markLanguageSwap(new URL(href).pathname);
-        await navigate(href);
+        try {
+          await navigate(href);
+        } catch {
+          // 导航没成（离线、被拦截…）：人还在原页面，别把这份位置留给下一次换页。
+          forgetSavedScroll();
+        }
       } finally {
         // 导航成功时旧文字已随页面移除；失败时让它们重新显形。
-        forgetSavedScroll();
         document.querySelectorAll<HTMLElement>(`.${OUT_CLASS}`).forEach((element) => {
           element.classList.remove(OUT_CLASS);
           forgetOpacity(element);

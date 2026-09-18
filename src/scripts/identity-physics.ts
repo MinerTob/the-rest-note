@@ -4,8 +4,15 @@ import { Engine, Bodies, Body, Composite, Constraint, Sleeping } from 'matter-js
  * A document-space playground: scrolling never moves the floor or the bodies.
  * 坐标是**文档像素**，不是归一化比例 —— 换语言时两种页面的舞台高度会差几像素，
  * 归一化坐标会跟着缩放（实测偏 20-80px），像素坐标才是"原位"。
+ *
+ * `floor` 记的是写下这些落点时地板（`.identity__landing` 下沿）在文档里的位置。
+ * 换语言/换宽度之后地板会上下移动（实测首页切语言时整块"关于"区域下沉 115px），
+ * 恢复时按地板差值整体平移，标签才继续贴在原来那一块地方，而不是漂出去。
  */
-export type IdentityLayout = ({ x: number; y: number; angle: number } | null)[];
+export type IdentityLayout = {
+  floor: number;
+  items: ({ x: number; y: number; angle: number } | null)[];
+};
 
 export function createIdentityPhysics(
   root: HTMLElement,
@@ -69,6 +76,10 @@ export function createIdentityPhysics(
         Composite.remove(engine.world, b);
         Composite.add(engine.world, body);
         bodies.set(index, body);
+        // 重造本体的时候要是正好在拖它，把拖拽关节接到新本体上；
+        // 不接的话关节还挂在已经移出世界的旧本体上 —— 按着指针，标签却一动不动
+        // （拖到一半窗口尺寸一变就会踩中，本人反馈的"拖不动"）。
+        if (drag?.index === index) drag.joint.bodyB = body;
       }
       // 只夹"别出视口、别陷进地板"，而且**不按方块自己的尺寸算** ——
       // 尺寸量错的时候，按尺寸算会连位置一起夹歪（以前的 `floor - 50` 就是把躺好的
@@ -87,12 +98,15 @@ export function createIdentityPhysics(
     });
   }
   function snapshot(): IdentityLayout {
-    return tags.map((_, index) => {
-      const body = bodies.get(index);
-      if (!body) return null;
-      // "本体中心"的文档像素坐标：换语言前后量到多少就是多少，不做任何缩放。
-      return { x: body.position.x, y: body.position.y, angle: body.angle };
-    });
+    return {
+      floor,
+      items: tags.map((_, index) => {
+        const body = bodies.get(index);
+        if (!body) return null;
+        // "本体中心"的文档像素坐标：换语言前后量到多少就是多少，不做任何缩放。
+        return { x: body.position.x, y: body.position.y, angle: body.angle };
+      }),
+    };
   }
   function saveWhenSettled() {
     if (!onSettled || bodies.size === 0) return;
@@ -127,6 +141,9 @@ export function createIdentityPhysics(
   }
   tags.forEach((el, index) => {
     el.addEventListener('pointerdown', e => {
+      // 上一次拖拽要是没收到 pointerup（指针在窗口外松开、被系统弹窗抢走…），
+      // 这里先替它收尾 —— 不然 `drag` 会一直卡在"正在拖"，整个实验场谁都拖不动。
+      if (drag && performance.now() - drag.startedAt > 2500) release();
       const b = bodies.get(index);
       if (!b || drag || e.button !== 0) return;
       e.preventDefault();
@@ -164,6 +181,9 @@ export function createIdentityPhysics(
     }, { signal: abort.signal });
   });
   // 拖过之后的单击不算点按：在捕获阶段吃掉它，别让 <a> 自己跳页。
+  // 窗口级的 pointerup / blur 是兜底：元素自己没收到结尾事件时，拖拽也必须结束。
+  for (const type of ['pointerup', 'pointercancel', 'blur'] as const)
+    window.addEventListener(type, release, { signal: abort.signal });
   document.addEventListener('click', (event) => {
     if (performance.now() > swallowClickUntil) return;
     const target = event.target;
@@ -202,15 +222,18 @@ export function createIdentityPhysics(
     if (reduced.matches) Sleeping.set(b, true);
     paint(); wake();
   }
-  function restore(layout: IdentityLayout): number {
-    if (layout.length !== tags.length || !layout.every((item) => item === null || (Number.isFinite(item.x) && Number.isFinite(item.y) && Number.isFinite(item.angle)))) return 0;
-    layout.forEach((item, index) => {
+  function restore(layout: IdentityLayout | undefined): number {
+    const items = layout?.items;
+    if (!layout || !Array.isArray(items) || items.length !== tags.length || !items.every((item) => item === null || (Number.isFinite(item.x) && Number.isFinite(item.y) && Number.isFinite(item.angle)))) return 0;
+    // 地板挪了多少，落点就跟着挪多少：换语言之后标签继续贴着同一块区域。
+    const shift = Number.isFinite(layout.floor) ? floor - layout.floor : 0;
+    items.forEach((item, index) => {
       if (!item) return;
       const el = tags[index], w = el.offsetWidth, h = el.offsetHeight;
       // 存的就是像素坐标，这里只做"别出视口、别陷地板"的松夹取：
       // 一旦按尺寸或舞台宽度去夹，英文那些更宽的标签就会被整排推走（实测偏 75px）。
       const x = clamp(item.x, 8, width - 8);
-      const y = clamp(item.y, 8, floor - 4);
+      const y = clamp(item.y + shift, 8, floor - 4);
       const old = bodies.get(index);
       if (old) Composite.remove(engine.world, old);
       const body = makeBody(index, x, y, w, h, item.angle);
@@ -224,20 +247,13 @@ export function createIdentityPhysics(
     return bodies.size;
   }
   /**
-   * 还没上场的标签直接摆进静止队形（不抛、不滚）。
-   * 切语言保留落点时用：落点记录里缺几条就补几条，绝不重排已经躺好的那些。
+   * 把此刻场上的标签记成"已经落地"。
+   *
+   * 切语言专用：落点已经原样摆回来了，剩下的空位要留给音乐按原计划一个一个放出来
+   * （本人反馈：歌还没播到那一段，十个标签就全弹出来了 —— 就是以前在这里一次补齐的）。
    */
-  function placeMissing() {
-    tags.forEach((_, index) => {
-      if (bodies.has(index)) return;
-      reveal(index);
-      const body = bodies.get(index);
-      if (!body) return;
-      // 补位就位即睡：别让它在队形里再抖一下。
-      Sleeping.set(body, true);
-      frozen.add(index);
-    });
-    paint();
+  function markPlaced(): void {
+    bodies.forEach((_, index) => dropped.add(index));
   }
   // Keep the static, readable list when scripts are unavailable.
   root.dataset.physics = 'true';
@@ -250,7 +266,7 @@ export function createIdentityPhysics(
   // 样式/字体就位后再量一次：脚本刚接手时元素尺寸可能还是错的（换语言最容易撞上），
   // 这一次会让 bounds() 发现尺寸对不上、重造本体 —— 位置不动，只是把尺寸补正。
   void document.fonts?.ready.then(() => { requestAnimationFrame(bounds); });
-  return { reveal, restore, placeMissing, snapshot,
+  return { reveal, restore, markPlaced, snapshot,
     reset() { release(); bodies.forEach(b => Composite.remove(engine.world, b)); bodies.clear(); sizes.clear(); frozen.clear(); dropped.clear(); tags.forEach(el => { delete el.dataset.revealed; el.style.transform = ''; }); },
     dispose() { disposed = true; release(); window.clearTimeout(settleTimer); cancelAnimationFrame(frame); abort.abort(); observer.disconnect(); Engine.clear(engine); layer.remove(); }
   };

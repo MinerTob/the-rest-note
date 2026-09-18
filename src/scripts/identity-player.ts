@@ -31,8 +31,8 @@ let disposeCurrent: (() => void) | undefined;
 let setActiveCurrent: ((active: boolean) => void) | undefined;
 
 const VISIT_KEY = 'rest-note.identity-visit';
-/** 落点格式版本：v1 存归一化比例，v2 起存文档像素坐标 —— 换名字，免得把旧值当像素读。 */
-const LAYOUT_VERSION = 'v2';
+/** 落点格式版本：v1 存归一化比例，v2 存文档像素，v3 连地板位置一起存 —— 换名字，免得把旧值当新格式读。 */
+const LAYOUT_VERSION = 'v3';
 function layoutCookieName(): string {
   let visit = '';
   try {
@@ -50,8 +50,11 @@ const layoutCookie = layoutCookieName();
 function readLayout(): IdentityLayout | undefined {
   try {
     const value = document.cookie.split('; ').find((part) => part.startsWith(`${layoutCookie}=`))?.split('=').slice(1).join('=');
-    const parsed = value ? JSON.parse(decodeURIComponent(value)) : undefined;
-    return Array.isArray(parsed) ? parsed : undefined;
+    const parsed: unknown = value ? JSON.parse(decodeURIComponent(value)) : undefined;
+    if (!parsed || typeof parsed !== 'object') return undefined;
+    const candidate = parsed as { floor?: unknown; items?: unknown };
+    if (typeof candidate.floor !== 'number' || !Array.isArray(candidate.items)) return undefined;
+    return candidate as IdentityLayout;
   } catch { return undefined; }
 }
 function writeLayout(layout: IdentityLayout): void {
@@ -122,11 +125,13 @@ export function initIdentity(): void {
     void navigate(href).catch(() => window.location.assign(href));
   });
   // 落点记忆先摆出来当兜底：万一声音还没解锁，也不会是一片空地。
-  physics.restore(readLayout() ?? []);
+  // 换语言时地板可能挪了位置（英文内容更高），restore() 会按地板差值整体平移。
+  physics.restore(readLayout());
   // 从别的页面走进来（或第一次来）→ 方块再落一次，每次都能玩；
-  // 切语言只是"同一页换种说法" → 保留落点，缺的补齐，不重弹也不位移。
-  needsAnimation = !takeLanguageSwap();
-  if (!needsAnimation) physics.placeMissing();
+  // 切语言只是"同一页换种说法" → 已经在场上的原地不动（记成已落地，音乐不会再抛它们），
+  // 还没上场的继续按乐谱排队 —— 歌走到哪一颗音，才放出哪一个标签。
+  needsAnimation = true;
+  if (takeLanguageSwap()) physics.markPlaced();
   piano.addEventListener(
     "piano:context",
     () => {
@@ -313,7 +318,6 @@ export function initIdentity(): void {
       }
       offset = savedPosition(TIMELINE, duration());
       root.dataset.loops = String(loop);
-      if (!needsAnimation) root.dataset.settled = "true";
       music?.setDucked(true);
       cursor = notes.findIndex((n) => n.end > offset);
       if (cursor < 0) cursor = 0;
