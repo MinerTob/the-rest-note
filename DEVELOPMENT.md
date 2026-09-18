@@ -434,7 +434,7 @@ setIdentityActive(active: boolean): void;  // 进入/离开视口时激活
 createIdentityPhysics(root, tags, onSettled?, onActivate?): {
   reveal(index, source?): void;    // 从键盘位抛出（没给 source 就走"静止队形"）
   restore(layout): number;         // 按 cookie 里的落点摆好（按地板差值整体平移），返回摆好几个
-  markPlaced(): void;              // 把场上这些记成"已落地"（切语言用，见下）
+  markPlaced(): void;              // 把场上这些记成"已上场"并解除快照冻结（切语言用，见下）
   snapshot(): IdentityLayout;      // 此刻的文档像素落点 + 地板位置（离开页面前写进 cookie）
   reset(): void;                   // 清空身体与记忆（重新演奏按钮）
   dispose(): void;
@@ -454,18 +454,19 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
 - 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数，cookie 名 `rest-note-identity-v3-<visit>`，visit id 每次会话一个；`v3` 是落点格式版本，见下）。这份记忆**只当"先摆出来"的兜底**（万一声音还没解锁，页面也不会是一片空地）：`physics.restore()` 之后 `needsAnimation` 仍然是 `true`，音乐一响 `reveal()` 就把已有的身体重新抛回场上再落一次 —— 每次回到这一页，方块都是活的（本人报过"返回之后方块的物理效果就没了"）。`reset()`（重新演奏按钮）会连内部的 `dropped` 一起清空、并 `clearLayout()`，所以下一轮整排重抛。
 - **落点存的是文档像素坐标 + 地板位置**（`{ floor, items: [{ x, y, angle }] }`，`x/y/angle` = 本体中心 + 角度），不是归一化比例。曾经存过比例（`(x-left)/(right-left)`、`(floor-y)/floor`），但两种语言的页面高度差几像素，比例还原时会被整体缩放，实测偏 20-80px —— 本人看到的就是"切语言之后标签位移"。`floor` 是写下落点时 `.identity__landing` 下沿的文档位置：换语言/换宽度会让整块区域上下移动（实测首页那串拼接页切到英文时下沉 **115px**），`restore()` 会先算 `shift = floor_now - layout.floor` 再整体平移，标签才不会漂出自己那一块。改格式记得同时改 `LAYOUT_VERSION`（cookie 名字里那个 `v3`），否则新代码会把旧格式的值当新格式读。
 - `bounds()` 与 `restore()` 的夹取只做"别出视口、别陷进地板"（`x ∈ [8, width-8]`、`y ∈ [8, floor-4]`），**不按方块自己的尺寸算**。按尺寸算会出事：脚本刚接手时量到的元素尺寸常常是错的（样式还没应用，实测 46px 的标签量成 134px），一夹就把方块顶歪 44px；按舞台宽度夹也会把更宽的英文标签整排推走（实测偏 75px）。另外 `bounds()` 里有**尺寸自愈**：元素尺寸和造本体时记下的不一样，就用同一个中心重造本体（位置不动，只补尺寸），`document.fonts.ready` 之后还会再量一次。
-- **切语言是唯一的例外：落点原样留着，还没上场的继续排队，不提前补位、不重弹。** 判定靠 `lang.ts` 的 `takeLanguageSwap()`（sessionStorage `space.lang-swap`，见 §5.4），流程是：
+- **切语言是唯一的例外：位置原样接续，恢复的身体重新受重力，还没上场的继续排队，不提前补位、不重弹。** 判定靠 `lang.ts` 的 `takeLanguageSwap()`（sessionStorage `space.lang-swap`，见 §5.4），流程是：
   ```ts
   physics.restore(readLayout());        // 摆好记忆里的落点（含地板平移）
   needsAnimation = true;                // 计划照旧跑：剩下的标签仍由音乐按原时刻放出来
-  if (takeLanguageSwap()) physics.markPlaced();  // 已经在场上的记成"已落地"，音乐不会再抛它们
+  if (takeLanguageSwap()) physics.markPlaced();  // 已上场：不再重抛；解除 frozen/sleeping，半空标签继续下落
   ```
   **切语言时绝不能把缺的标签一次补齐。** 曾经这里是 `placeMissing()`（把还没上场的直接摆进静止队形），结果人点了翻译、歌还没播到那一段，十个标签全弹出来了（本人复报的 bug）。实测：切语言时场上 2 个 → 旧逻辑 350ms 后 10 个全出；现在 2 个原地不动，音乐走到 0:09 出第 3 个、0:33（乐谱截止时刻）凑满 10 个。
-  四个坑，改这里之前先看：
+  五个坑，改这里之前先看：
   1. **别用模块变量判"这一趟是切语言"**。`navigate()` 在 View Transition 更新完 DOM 时就返回了，新页面的脚本是随后才加载执行的 —— 点击处理器里的收尾早就跑完，模块变量必然已经清空（实测新页面读到的永远是 `false`）。跨页只能用 sessionStorage 记号。
   2. **别用 `restored < tags.length` 当"要不要重落"的判据**。cookie 快照是"上一次全部静止时"写的，而人往往在标签还滚着的时候就点了切换 —— 实测快照只有 7/10 条，`restore()` 返回 7，于是十个标签被整排重抛，看起来就是"切语言之后全弹了一遍"（本人报的 bug）。
   3. **离开页面前要写"此刻"的落点**，不能只靠静止时的那次快照：`disposeCurrent`（`astro:before-swap` → `disposeIdentity()`）里会 `writeLayout(physics.snapshot())`，把正在运动的身体也一并记下来，切到对面语言时才能一个不差地摆回原位。
   4. **别用"刚接手时量到的元素尺寸"去夹位置**。新页面的脚本可能在样式应用之前就跑起来了，这时候 `offsetWidth/offsetHeight` 全是错的（实测 46px 量成 134px），拿它算边界会把方块顶歪 44px。所以夹取只跟视口和地板有关；`bounds()` 会在尺寸对不上时用同一个中心重造本体（见上面那条）。判断"是否零位移"要看**中心点**，别拿 `getBoundingClientRect()` 的 top/left 比 —— 旋转过的方块，盒子一变宽它的外接矩形就会整体移动，那是量法的问题不是 bug。
+  5. **`restore()` 会把快照身体设为 frozen + sleeping，切语言后必须由 `markPlaced()` 解除两者。** 快照可能是在标签飞行中途写下的；只标记 dropped 而不唤醒，会把标签永久钉在半空，看起来像物理引擎失效。`prefers-reduced-motion` 模式仍保持 sleeping，符合无动画偏好。
 - **"拖不动"的三个来源**（本人在独立页面/切语言后都遇到过）：① `pointerup` 丢事件（指针在窗口外松开、被系统弹窗抢走）→ `drag` 卡在"正在拖"，之后谁按都拖不动；② 拖到一半 `bounds()` 因窗口/尺寸变化重造了本体 → 拖拽关节还挂在被移出世界的旧本体上，标签跟着指针却一动不动；③ 标签还没被音乐放出来（场上没有本体，按住无效，这是设计如此）。前两个已经在 `identity-physics.ts` 里堵死：`window` 上兜底监听 `pointerup` / `pointercancel` / `blur`，`pointerdown` 时若发现上一次拖拽超过 2.5s 就先替它收尾，`bounds()` 重造本体时把 `drag.joint.bodyB` 接到新本体上。
 - **第十个标签（`intro`）是唯一的例外**：它比别的标签大 0.2 倍，点一下进整页自我介绍（§5.14）。放大用的是 font-size / padding 同比例放大（`calc(基准 * 1.2)`），**不能用 `transform: scale()`** —— 物理引擎每帧都会重写 inline `transform`。
 - 点按判定在 `identity-physics.ts`：按下后位移 < 8px、且 0.7s 内抬手才算"点击"；拖动过就不算（"抛掷"不能被误认成"点开"）。命中 + 元素带 `data-identity-link` 才回调 `onActivate`，由 `identity-player.ts` 走 `astro:transitions/client` 的 `navigate()`（失败退回 `location.assign`）；键盘上按回车同样打开。
@@ -673,6 +674,15 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-19 · 修复 About 切语言后标签冻结悬空
+
+- 需求：About 身份标签切换语言后仍会失去物理效果，部分标签悬停在空中；修复后更新文档并推送 GitHub，触发 Render 自动部署。
+- 根因：离页快照可能在标签仍飞行时写下；目标语言页 `restore()` 为安全恢复会把所有身体设成 `frozen + sleeping`，而切语言分支的 `markPlaced()` 过去只写 `dropped` 防止重新抛出，没有解除冻结。于是快照中位于半空的标签被永久钉住。
+- 文件：`src/scripts/identity-physics.ts`、`README.md`、`DEVELOPMENT.md`。
+- 函数：`markPlaced()` 现在除标记 `dropped` 外，还会删除 `frozen`、在非 reduced-motion 模式下 `Sleeping.set(body, false)`，并调用 `wake()` 让 Matter.js 从恢复位置继续运算；不会整排重弹，也不会提前补齐尚未出场的标签。
+- 钩子/数据：无新增 DOM 钩子、storage key 或自定义事件；沿用 sessionStorage `space.lang-swap` 与 cookie `rest-note-identity-v3-<visit>`。
+- 验证：`npm test` 69/69；`npm run check` 0 错误、0 警告；`npm run build` 成功生成 17 页。Edge 本地预览在独立 About 页从头播放，首个标签飞行阶段切换英文→中文：恢复后仍只有 1 个已触发标签（未提前补齐），其 `top` 从 0px 继续下落到约 245px；落地后用方向键再次抛掷，`top` 从约 495px 上升到 429px、随后回落到 495px，证明切语言后的物理计算与交互仍在运行，没有冻结悬空。
 
 ### 2026-09-19 · 修复自我介绍页底部切语言位移 + 顶栏统一回 Journey 长页
 

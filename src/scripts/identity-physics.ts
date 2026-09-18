@@ -247,13 +247,20 @@ export function createIdentityPhysics(
     return bodies.size;
   }
   /**
-   * 把此刻场上的标签记成"已经落地"。
+   * 把此刻场上的标签记成"已经上场"，并从恢复快照的冻结状态接回物理世界。
    *
-   * 切语言专用：落点已经原样摆回来了，剩下的空位要留给音乐按原计划一个一个放出来
+   * 切语言专用：位置已经原样摆回来了，剩下的空位要留给音乐按原计划一个一个放出来
    * （本人反馈：歌还没播到那一段，十个标签就全弹出来了 —— 就是以前在这里一次补齐的）。
+   * restore() 不知道快照是在地面还是半空，所以会先冻结以免普通返回页立刻乱跑；
+   * 但切语言是同一次现场的延续，必须解除冻结。否则切换瞬间仍在空中的标签会永久悬停。
    */
   function markPlaced(): void {
-    bodies.forEach((_, index) => dropped.add(index));
+    bodies.forEach((body, index) => {
+      dropped.add(index);
+      frozen.delete(index);
+      if (!reduced.matches) Sleeping.set(body, false);
+    });
+    wake();
   }
   // Keep the static, readable list when scripts are unavailable.
   root.dataset.physics = 'true';
