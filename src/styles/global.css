@@ -91,10 +91,19 @@ a:hover {
   color: var(--ink);
 }
 
-:focus-visible {
+/* 焦点圈只在"最近一次操作来自键盘"时才画：脚本 focus() 不该给鼠标玩家画蓝框
+   （状态记在 html[data-input]，见 src/scripts/input-modality.ts）。 */
+html[data-input='keyboard'] :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: var(--radius-xs);
+}
+
+/* 鼠标 / 触摸操作时，连浏览器自带的默认焦点圈一起关掉（脚本 focus() 之后浏览器会
+   把元素当成"键盘焦点"，于是默认圈也会冒出来）。文本框等表单控件除外 —— 它们本来
+   就应该一直有焦点反馈。 */
+html[data-input='pointer'] :focus-visible:not(input, textarea, select, [contenteditable='true']) {
+  outline: none;
 }
 
 /* main 是"跳到主要内容"和入场动画结束后的焦点落点，不是可交互控件。

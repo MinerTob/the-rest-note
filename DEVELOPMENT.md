@@ -123,6 +123,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 语言切换 + 文字滑出/滑入 | `src/scripts/lang.ts`、`src/styles/global.css`、`src/scripts/app.ts` | `initLangSwitch()`、`swapChrome()`、`collectTextElements()`、`markIncomingLanguageText()` | `[data-lang-switch]`、`html[data-lang]`、`.lang-slide-out` / `.lang-slide-in` |
 | 主题切换（modern/baroque） | `src/scripts/theme.ts`、`src/scripts/theme-switch.ts`、`src/lib/themes.ts` | `ThemeManager`、`initTheme()`、`initThemeSwitcher()`、`setTheme()`、`toggle()` | `html[data-theme]`、`[data-theme-switch]` |
 | 全站状态 | `src/scripts/app-state.ts` | `AppStore.get()` / `set()` / `isUnlocked()` / `hasUnlocks()` | `'change'` 事件（detail: `{ state, previous }`） |
+| 焦点圈（仅键盘） | `src/scripts/input-modality.ts`、`src/styles/global.css` | `trackInputModality()` | `html[data-input]` |
 | LCD 时钟 | `src/components/LcdClock.astro`、`src/scripts/clock.ts` | `initClock()` | `[data-clock]`、`[data-clock-time]`、`[data-clock-date]` |
 | 背景音乐播放器 | `src/components/MusicSystem.astro`、`src/scripts/music-manager.ts`、`music-ui.ts`、`src/lib/music.ts` | `MusicManager`、`initMusicUI()` | `[data-music]`、`[data-music-toggle/-progress/-volume/-state/-title/-subtitle/-time]` |
 | 播放进度记忆 | `src/lib/live-timeline.ts` | `savedPosition()` / `savePosition()` / `restartPosition()` | sessionStorage `space.position.v1.<id>` |
@@ -497,6 +498,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 玻璃卡片用 `.glass` + `.glass--N`；LCD 面用 `.lcd`。
 - 页面入场动画是 `.rise` / `.rise--2/3/4`（一次性 CSS animation）。**语言切换进新页面时会被有意去掉**（见 §5.4），因为那一次只该动文字。
 - 所有动画都要在 `@media (prefers-reduced-motion: no-preference)` 里，或自己判断 reduced motion。
+- **焦点圈只在键盘操作后画**：全局 `:focus-visible` 规则挂在 `html[data-input='keyboard']` 下；鼠标/触摸时连浏览器自带的默认圈也一起关掉（`html[data-input='pointer'] :focus-visible:not(input, textarea, select, [contenteditable='true'])`）。状态由 `src/scripts/input-modality.ts` 的 `trackInputModality()` 维护（boot 里调用，换页后重新写回 `<html>`）。原因见 §10「焦点圈又冒出来」那条：脚本 `focus()` 会被浏览器判成"键盘焦点"。
 
 ### 5.14 自我介绍页（About 第十个标签的去处）
 
@@ -559,6 +561,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 | --- | --- | --- | --- |
 | `html[data-lang]` | `BaseLayout.astro` | `getDocumentLang()` | 当前页面语言 |
 | `html[data-theme]` | `ThemeManager.syncTheme()` | 全部 CSS 主题选择器 | 当前主题 |
+| `html[data-input]` | `trackInputModality()`（`src/scripts/input-modality.ts`） | `global.css` / `IdentityStage.astro` 的焦点圈规则 | 最近一次操作是 `keyboard` 还是 `pointer`：决定画不画焦点圈 |
 | `[data-i18n]` + `data-zh` / `data-en` | `<T>` 或手写 | `swapChrome(lang)` | 运行期换 UI 文案 |
 | `[data-i18n-aria]` + `data-aria-zh` / `data-aria-en` | 同上 | `swapChrome(lang)` | 运行期换 aria-label |
 | `[data-lang-switch="zh\|en"]` | `Header.astro` | `initLangSwitch()` | 语言切换链接 |
@@ -636,6 +639,16 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 钩子/数据：新的 data-* / storage key / 自定义事件（没有就写"无"）
 - 验证：npm test / npm run check / 浏览器实测结果
 ```
+
+### 2026-09-19 · 修掉"焦点圈又冒出来"：身份标签与入场页按钮上的蓝框
+
+- 需求：本人反馈关于页的身份标签、入场页的"进入空间"按钮上又出现了蓝框（本地和线上都有）—— 和之前 `main` 那条蓝线是同一类问题。
+- 根因：脚本调用 `el.focus()`（`identity-physics.ts` 按下标签时、`entry-gate.ts` 聚焦按钮与 `main` 时）会被浏览器判成"键盘焦点"，全局 `:focus-visible` 规则于是给它画上 accent 蓝框（#4A6EE0）。上一次只给 `main` 单独关掉，别处照旧；而且只加门槛还不够 —— 不写 `outline` 时浏览器会改用自带的默认焦点圈（实测 `1px auto rgb(16,16,16)`）。
+- 文件：**新增** `src/scripts/input-modality.ts`；`src/scripts/app.ts`（boot 第 0 步调用）、`src/styles/global.css`、`src/components/IdentityStage.astro`、`DEVELOPMENT.md`。
+- 函数：新增 `trackInputModality()`（内部 `apply()`，模块态 `modality` / `listening`）。
+- 钩子/数据：新增 `html[data-input='keyboard' | 'pointer']`；没有新 storage key、没有新事件。
+- 要点：焦点圈＝键盘专属。新加可聚焦元素时别写裸的 `:focus-visible`，照 §5.13 的写法挂到 `html[data-input='keyboard']` 下；鼠标态还要显式 `outline: none`，否则会露出浏览器默认圈。
+- 验证：无头 Chrome（1280×900）实测 —— 入场页按钮 `outline: 3px none`；进入后 `main` `outline: 3px none`；鼠标点标签后 `outline: 3px none`（修前 `2px solid rgb(74,110,224)`）；拖动自我介绍标签后 `outline: 3px none`（修前 `3px solid rgb(74,110,224)`）；按两次 Tab（键盘玩家）`A.skip-link` 拿到 `2px solid rgb(74,110,224)`，键盘焦点框保留。`npm test` 69/69、`npm run check` 0 错误 0 警告、`npm run build` 17 页。
 
 ### 2026-09-19 · 切语言不再弹回页面顶部（保留原来的位置）
 
@@ -755,6 +768,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 10. **手写的 `-webkit-` 前缀会被构建吞掉**：`backdrop-filter` 与 `-webkit-backdrop-filter` 成对书写时，lightningcss 合并后只留前缀那份，Chromium 不认 → 玻璃效果全没（见 §10 的修复记录）。只写标准属性，前缀交给构建工具。
 11. **第十个标签（自我介绍）**：它比别的标签大 0.2 倍 —— 放大只能改 font-size / padding（写成 `calc(基准 * 1.2)`），写 `transform: scale()` 会被物理引擎每帧覆盖；"点开"的判定在 `identity-physics.ts`（位移 < 8px 且 0.7s 内抬手），拖动抛掷时这次抬手不算点按，`swallowClickUntil` 还会在捕获阶段吃掉浏览器自带的 `click`（300ms 窗口），所以**拖完不会跳页，点一下照常进自我介绍页**。要改尺寸就改 `IdentityStage.astro` 里 `[data-identity-link]` 那组规则；要改文案就改 `src/lib/identity.ts` 的最后一个条目。
 12. **回到 About 后方块一动不动**：别去找引擎 —— 十有八九是落点 cookie 命中、`restore()` 把方块"存档摆好"了。`needsAnimation` 现在恒为 `true`，音乐一响就会把方块重新抛回场上再落一次（见 §5.8）。
+13. **又看到蓝框 / 蓝线**：焦点圈只在"最近一次操作是键盘"时才画（`html[data-input]`，见 §5.13 与 §10）。脚本 `focus()` 之后浏览器会把元素当成键盘焦点，所以任何裸写的 `:focus-visible`（或脚本聚焦点的鼠标态）都会在鼠标玩家那里画出蓝框。
 
 ---
 

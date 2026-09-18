@@ -53,7 +53,8 @@ const zh = lang === 'zh';
   :global(body > [data-identity-arena] .identity__tag) { position:absolute; left:0; top:0; pointer-events:auto; touch-action:none; user-select:none; cursor:grab; white-space:nowrap; padding:11px 22px; min-height:46px; font-size:clamp(15px, 1.2vw, 17px); font-weight:500; line-height:1.6; background:var(--identity-color, var(--paper-2)); color:var(--ink); background-image:linear-gradient(135deg, var(--glass-line-2), transparent 70%); box-shadow:0 3px 12px var(--accent-wash),inset 0 1px 0 var(--glass-line-2); }
   :global(body > [data-identity-arena] .identity__tag:not([data-revealed])) { visibility:hidden; }
   :global(body > [data-identity-arena] [data-dragging='true']) { cursor:grabbing; }
-  :global(body > [data-identity-arena] .identity__tag:focus-visible) { outline:2px solid var(--accent); outline-offset:3px; }
+  /* 焦点圈门槛同上：标签是脚本聚焦的（按下时 focus()），鼠标玩家不该看到蓝框。 */
+  :global(html[data-input='keyboard'] body > [data-identity-arena] .identity__tag:focus-visible) { outline:2px solid var(--accent); outline-offset:3px; }
   .identity__landing { height:112px; }
   .identity__scroll { margin-top:16px; }
   .identity__scroll { overflow-x:auto; border-radius:14px; background:linear-gradient(180deg, transparent, var(--accent-wash)); scrollbar-width:thin; }
@@ -150,7 +151,7 @@ const zh = lang === 'zh';
     left: 11px;
     font-size: 12px;
   }
-  :global(body > [data-identity-arena] .identity__tag[data-identity-link]:focus-visible) {
+  :global(html[data-input='keyboard'] body > [data-identity-arena] .identity__tag[data-identity-link]:focus-visible) {
     outline: 3px solid var(--accent);
     outline-offset: 4px;
   }

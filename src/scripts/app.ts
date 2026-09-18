@@ -14,6 +14,7 @@ import { initThemeSwitcher } from './theme-switch';
 import { logConsoleNote } from './console-note';
 import { MusicManager } from './music-manager';
 import { initEntryGate } from './entry-gate';
+import { trackInputModality } from './input-modality';
 
 let disposeJourney: (() => void) | undefined;
 
@@ -73,6 +74,9 @@ function boot(): void {
   disposeJourney?.();
   const global = getGlobal();
   clearTimers();
+
+  // 0) 焦点圈开关：先记下"最近一次是鼠标还是键盘"，后面的脚本聚焦才不会画出蓝框
+  trackInputModality();
 
   // 1) 统一状态
   global.store ??= new AppStore();
