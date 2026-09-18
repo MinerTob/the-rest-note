@@ -3,6 +3,10 @@
   "type": "module",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.12.0 <25.0.0",
+    "npm": ">=9.6.5"
+  },
   "description": "A gradient + liquid-glass personal digital space with a 25-key MiniLab.",
   "scripts": {
     "dev": "astro dev",
