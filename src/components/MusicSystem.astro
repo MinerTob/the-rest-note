@@ -1,0 +1,454 @@
+---
+import { AUDIO, DEFAULT_TRACK_ID, getTrack } from '@/lib/music';
+import { ui, type Lang } from '@/i18n/ui';
+
+interface Props {
+  lang: Lang;
+  variant?: 'full' | 'compact';
+}
+
+const { lang, variant = 'full' } = Astro.props;
+const track = getTrack(DEFAULT_TRACK_ID)!;
+
+const labels = {
+  play: ui[lang]['music.play'],
+  pause: ui[lang]['music.pause'],
+};
+---
+
+<div
+  class:list={['music', variant === 'compact' ? 'music--compact' : 'music--full']}
+  data-music={variant}
+  data-word-ready={ui[lang]['music.state.ready']}
+  data-word-active={ui[lang]['music.state.active']}
+  data-word-paused={ui[lang]['music.state.paused']}
+>
+  {variant === 'full' ? (
+    <div class="music__screen">
+      <span class="music__screenHead">
+        <span class="label label--caps">NOW PLAYING</span>
+        <span class="music__state">
+          <i class="dot dot--ready" aria-hidden="true"></i>
+          <span class="music__stateWord" data-music-state>{ui[lang]['music.state.ready']}</span>
+        </span>
+      </span>
+      <span class="music__title" data-music-title>{track.title}</span>
+      <span class="music__subtitle" data-music-subtitle>
+        {track.subtitle?.[lang] ?? track.credit?.[lang] ?? ''}
+      </span>
+    </div>
+  ) : (
+    <span class="music__meta">
+      <span class="music__title music__title--compact" data-music-title>{track.title}</span>
+      <span class="music__subtitle" data-music-subtitle>
+        {track.subtitle?.[lang] ?? track.credit?.[lang] ?? ''}
+      </span>
+    </span>
+  )}
+
+  <div class="music__controls">
+    <button
+      class="music__toggle"
+      type="button"
+      data-music-toggle
+      data-label-play-zh={ui.zh['music.play']}
+      data-label-play-en={ui.en['music.play']}
+      data-label-pause-zh={ui.zh['music.pause']}
+      data-label-pause-en={ui.en['music.pause']}
+      aria-label={labels.play}
+      aria-pressed="false"
+    >
+      <svg class="icon icon--play" viewBox="0 0 12 12" aria-hidden="true">
+        <path d="M3 1.4 10.2 6 3 10.6Z"></path>
+      </svg>
+      <svg class="icon icon--pause" viewBox="0 0 12 12" aria-hidden="true">
+        <path d="M3 1.5h2.1v9H3zM6.9 1.5H9v9H6.9z"></path>
+      </svg>
+    </button>
+
+    <input
+      class="music__progress"
+      data-music-progress
+      type="range"
+      min="0"
+      max="1000"
+      step="1"
+      value="0"
+      aria-label={lang === 'zh' ? '播放进度' : 'Playback position'}
+      data-aria-zh="播放进度"
+      data-aria-en="Playback position"
+      data-i18n-aria
+    />
+
+    <span class="music__time num" data-music-time>0:00 / 0:00</span>
+  </div>
+
+  {variant === 'compact' && (
+    <span class="music__state music__state--compact">
+      <i class="dot dot--ready" aria-hidden="true"></i>
+      <span class="music__stateWord" data-music-state>{ui[lang]['music.state.ready']}</span>
+    </span>
+  )}
+
+  {variant === 'full' && (
+    <label class="music__volume">
+      <span class="music__volumeLabel label label--caps label--dim">VOL</span>
+      <input
+        type="range"
+        min="0"
+        max="100"
+        step="1"
+        value={String(Math.round(AUDIO.volume * 100))}
+        data-music-volume
+        data-i18n-aria
+        data-aria-zh={ui.zh['music.volume']}
+        data-aria-en={ui.en['music.volume']}
+        aria-label={ui[lang]['music.volume']}
+      />
+    </label>
+  )}
+</div>
+
+<style>
+  .music {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .music--full {
+    padding: 14px;
+    border-radius: var(--radius-l);
+    background-color: var(--glass-2);
+    background-image: var(--grad-sheen);
+    backdrop-filter: blur(var(--blur)) saturate(1.4);
+    -webkit-backdrop-filter: blur(var(--blur)) saturate(1.4);
+    border: 1px solid var(--glass-stroke);
+    box-shadow: var(--inner-glow), var(--shadow-s);
+  }
+
+  .music--full .music__controls {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+  }
+
+  /* ---- 全尺寸：一块玻璃面板 + 一块小 LCD 屏 ---- */
+  .music__screen {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 11px 13px 12px;
+    border-radius: var(--radius-s);
+    background-image: var(--lcd-bg);
+    color: var(--lcd-ink);
+    border: 1px solid var(--lcd-line);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.10),
+      0 0 26px -16px var(--lcd-glow);
+  }
+
+  .music__screenHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 3px;
+  }
+
+  .music__screenHead :global(.label) {
+    color: var(--lcd-ink-dim);
+  }
+
+  .music__state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.08em;
+    color: var(--lcd-ink-dim);
+  }
+
+  /* 默认（页脚窄条，落在浅色玻璃上）：用普通 ink */
+  .music__title {
+    font-family: var(--font-mono);
+    font-size: var(--fs-m);
+    letter-spacing: 0.09em;
+    color: var(--ink);
+  }
+
+  .music__subtitle {
+    font-size: var(--fs-2xs);
+    color: var(--ink-3);
+    letter-spacing: 0.02em;
+  }
+
+  /* 只有落在深色 LCD 屏里的标题才用屏幕色 */
+  .music__screen .music__title {
+    color: var(--lcd-ink);
+    text-shadow: 0 0 16px var(--lcd-glow);
+  }
+
+  .music__screen .music__subtitle {
+    color: var(--lcd-ink-dim);
+  }
+
+
+  .music__toggle {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--glass-stroke);
+    background-color: var(--glass-4);
+    background-image: var(--grad-sheen);
+    color: var(--accent-2);
+    backdrop-filter: blur(var(--blur-s));
+    -webkit-backdrop-filter: blur(var(--blur-s));
+    box-shadow: var(--inner-glow), var(--shadow-xs);
+    transition: color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease),
+      box-shadow var(--dur-2) var(--ease), border-color var(--dur-1) var(--ease);
+  }
+
+  .music__toggle:hover {
+    border-color: var(--line-strong);
+    box-shadow: var(--inner-glow), var(--shadow-s), 0 0 0 4px var(--accent-wash);
+  }
+
+  .music__toggle:active {
+    transform: scale(0.95);
+  }
+
+  .icon {
+    width: 12px;
+    height: 12px;
+    fill: currentColor;
+  }
+
+  .icon--pause {
+    display: none;
+  }
+
+  .music[data-state='active'] .icon--play {
+    display: none;
+  }
+
+  .music[data-state='active'] .icon--pause {
+    display: block;
+  }
+
+  .music[data-state='active'] .dot--ready {
+    background-image: var(--grad-b);
+    background-color: transparent;
+    box-shadow: 0 0 0 3px var(--accent-wash), 0 0 10px -1px var(--glow);
+  }
+
+  .music__progress {
+    -webkit-appearance: none;
+    appearance: none;
+    flex: 1 1 auto;
+    width: 100%;
+    height: 20px;
+    margin: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .music__progress::-webkit-slider-runnable-track {
+    height: 3px;
+    border-radius: 999px;
+    background: linear-gradient(to right, var(--accent-3) 0 var(--progress, 0%), var(--line) var(--progress, 0%) 100%);
+  }
+
+  .music__progress::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    margin-top: -5px;
+    border: 0;
+    border-radius: 50%;
+    background-image: var(--grad-a);
+    box-shadow: 0 0 0 4px var(--accent-wash);
+  }
+
+  .music__progress::-moz-range-track {
+    height: 3px;
+    border-radius: 999px;
+    background: var(--line);
+  }
+
+  .music__progress::-moz-range-progress {
+    height: 3px;
+    border-radius: 999px;
+    background-image: var(--grad-b);
+  }
+
+  .music__progress::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border: 0;
+    border-radius: 50%;
+    background-image: var(--grad-a);
+    box-shadow: 0 0 0 4px var(--accent-wash);
+  }
+
+  .music__time {
+    flex: none;
+    font-size: var(--fs-2xs);
+    color: var(--ink-4);
+  }
+
+  .music__volume {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-top: 2px;
+  }
+
+  .music__volume input {
+    -webkit-appearance: none;
+    appearance: none;
+    flex: 1 1 auto;
+    width: 100%;
+    height: 20px;
+    background: transparent;
+    margin: 0;
+  }
+
+  .music__volume input::-webkit-slider-runnable-track {
+    height: 3px;
+    border-radius: 999px;
+    background-color: var(--line);
+  }
+
+  .music__volume input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    margin-top: -5px;
+    border-radius: 50%;
+    background-image: var(--grad-a);
+    border: 0;
+    box-shadow: 0 0 0 4px var(--accent-wash);
+  }
+
+  .music__volume input::-moz-range-track {
+    height: 3px;
+    border-radius: 999px;
+    background-color: var(--line);
+  }
+
+  .music__volume input::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border: 0;
+    border-radius: 50%;
+    background-image: var(--grad-a);
+    box-shadow: 0 0 0 4px var(--accent-wash);
+  }
+
+  /* ---- 页脚：一个辅助型的 Mini Player ----
+     它不该跟正文抢注意力：整条限宽、限高，按钮和字号都收小，
+     但进度条保持清晰可读。 */
+  .music--compact {
+    display: grid;
+    width: 100%;
+    max-width: 620px;
+    grid-template-columns: auto minmax(0, auto) minmax(80px, 1fr) auto auto;
+    grid-template-areas: 'toggle meta progress time state';
+    align-items: center;
+    gap: 7px 10px;
+    padding-block: 5px;
+  }
+
+  /* 紧凑变体里 .music__controls 只是个包裹层：
+     用 display:contents 让它消失，里面的播放键 / 进度条 / 时间
+     才能各自落到上面的 grid-area 上（否则它们会全挤在第一列里）。 */
+  .music--compact .music__controls {
+    display: contents;
+  }
+
+  .music--compact .music__toggle { grid-area: toggle; }
+  .music--compact .music__meta { grid-area: meta; }
+  .music--compact .music__progress { grid-area: progress; }
+  .music--compact .music__time { grid-area: time; }
+  .music--compact .music__state { grid-area: state; }
+
+  .music--compact .music__toggle {
+    width: 26px;
+    height: 26px;
+    min-height: 26px;
+  }
+
+  .music--compact .music__toggle .icon {
+    width: 9px;
+    height: 9px;
+  }
+
+  .music--compact .music__time {
+    font-size: 0.625rem;
+    color: var(--ink-4);
+    white-space: nowrap;
+  }
+
+  .music--compact .music__meta {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .music--compact .music__title--compact {
+    font-size: 0.625rem;
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+  }
+
+  .music--compact .music__subtitle {
+    font-size: 0.5625rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 20ch;
+  }
+
+  .music--compact .music__state--compact {
+    justify-self: end;
+    white-space: nowrap;
+    font-size: 0.5625rem;
+  }
+
+  @media (max-width: 720px) {
+    .music--compact {
+      max-width: none;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-areas:
+        'toggle meta state'
+        'progress progress time';
+      gap: 5px 9px;
+      padding-block: 4px;
+    }
+
+    /* 手机上进度条单独占一整行，不会被播放按钮挤掉 */
+    .music--compact .music__progress {
+      align-self: center;
+      min-width: 0;
+    }
+
+    .music--compact .music__time {
+      justify-self: end;
+    }
+  }
+
+  @media (max-width: 460px) {
+    .music--compact .music__subtitle {
+      display: none;
+    }
+  }
+</style>

@@ -1,0 +1,203 @@
+---
+import { render } from 'astro:content';
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import Passthrough from '@/components/Passthrough.astro';
+import T from '@/components/T.astro';
+import MiniLab from '@/components/MiniLab.astro';
+import { getExperiments } from '@/lib/content';
+import { useTranslations } from '@/i18n/utils';
+import type { Lang } from '@/i18n/ui';
+import type { RoutePair } from '@/lib/routes';
+
+interface Props {
+  lang: Lang;
+  routes: RoutePair;
+  embedded?: boolean;
+}
+
+const { lang, routes, embedded = false } = Astro.props;
+const Layout = embedded ? Passthrough : BaseLayout;
+const t = useTranslations(lang);
+
+const statusKey = {
+  online: 'lab.status.online',
+  building: 'lab.status.building',
+  planned: 'lab.status.planned',
+} as const;
+
+const experiments = await getExperiments(lang);
+const rows = await Promise.all(
+  experiments.map(async (experiment) => ({ experiment, Content: (await render(experiment)).Content })),
+);
+---
+
+<Layout lang={lang} routes={routes} title={t('lab.title')} description={t('lab.intro')}>
+  <div class="wrap page">
+    <header class="page__head rise">
+      <h1 class="page__title">LAB</h1>
+      <p class="lede"><T k="lab.intro" lang={lang} /></p>
+    </header>
+
+    {/* 控制器是整个 Lab 的中心：一台嵌在页面里的小型 MIDI 键盘。 */}
+    <section class="station rise rise--2" aria-label={t('minilab.aria')}>
+      <MiniLab lang={lang} />
+    </section>
+
+    {rows.length > 0 && (
+      <section class="experiments rise rise--3">
+        <h2 class="section-label"><T k="lab.experiment" lang={lang} /></h2>
+
+        <ul class="lablist">
+          {rows.map(({ experiment, Content }, index) => (
+            <li class="labitem">
+              <div class="labitem__head">
+                <span class="labitem__id num">
+                  {String(index + 1).padStart(3, '0')}
+                </span>
+                <h3 class="labitem__title">{experiment.data.title}</h3>
+                <span class="labitem__status">
+                  <i
+                    class:list={[
+                      'dot',
+                      experiment.data.status === 'online' && 'dot--on dot--pulse',
+                      experiment.data.status === 'building' && 'dot--ready',
+                      experiment.data.status === 'planned' && 'dot--idle',
+                    ]}
+                    aria-hidden="true"
+                  ></i>
+                  <T k={statusKey[experiment.data.status]} lang={lang} />
+                </span>
+              </div>
+
+              {experiment.data.summary && <p class="labitem__summary">{experiment.data.summary}</p>}
+
+              <div class="prose labitem__body">
+                <Content />
+              </div>
+
+              {experiment.data.link && (
+                <p class="labitem__link">
+                  <a class="more-link" href={experiment.data.link}>{experiment.data.link}</a>
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+  </div>
+</Layout>
+
+<style>
+  .page {
+    padding-block: clamp(28px, 4.6vw, 50px);
+    display: flex;
+    flex-direction: column;
+    gap: clamp(24px, 3.6vw, 44px);
+  }
+
+  .page__head {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 60ch;
+  }
+
+  .page__title {
+    margin: 0;
+    font-size: var(--fs-xxl);
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    font-weight: 600;
+  }
+
+  .station {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .experiments {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* 分区标题：小号、不要太抢 */
+  .section-label {
+    margin: 0;
+    font-size: var(--fs-2xs);
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    color: var(--ink-4);
+  }
+
+  .lablist {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(22px, 3.2vw, 38px);
+  }
+
+  .labitem {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .labitem__head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 4px 14px;
+  }
+
+  .labitem__id {
+    font-size: var(--fs-2xs);
+    color: var(--ink-4);
+  }
+
+  .labitem__title {
+    margin: 0;
+    font-size: clamp(1.1rem, 1rem + 0.6vw, 1.35rem);
+    letter-spacing: -0.014em;
+    font-weight: 600;
+  }
+
+  .labitem__status {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    justify-self: end;
+    font-size: var(--fs-2xs);
+    color: var(--ink-3);
+  }
+
+  .labitem__summary {
+    margin: 0;
+    max-width: 62ch;
+    color: var(--ink-2);
+    font-size: var(--fs-s);
+  }
+
+  .labitem__body {
+    font-size: var(--fs-s);
+    max-width: var(--measure);
+  }
+
+  .labitem__link {
+    margin: 2px 0 0;
+  }
+
+  @media (max-width: 640px) {
+    .labitem__head {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .labitem__status {
+      grid-column: 2;
+      justify-self: start;
+    }
+  }
+</style>

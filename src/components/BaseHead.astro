@@ -1,0 +1,86 @@
+---
+import type { Lang } from '@/i18n/ui';
+import { SITE } from '@/lib/site';
+import type { RoutePair } from '@/lib/routes';
+
+interface Props {
+  lang: Lang;
+  title?: string;
+  description?: string;
+  routes?: RoutePair;
+  rssHref?: string;
+  ogType?: 'website' | 'article';
+  publishedTime?: Date;
+  updatedTime?: Date;
+}
+
+const {
+  lang,
+  title,
+  description = '',
+  routes,
+  rssHref,
+  ogType = 'website',
+  publishedTime,
+  updatedTime,
+} = Astro.props;
+
+const siteName = SITE.name;
+const tagline = { zh: '个人数字空间', en: 'Personal digital space' }[lang];
+const pageTitle = title ? `${title} · ${siteName}` : `${siteName} · ${tagline}`;
+
+const fallbackOrigin = new URL(SITE.url);
+const canonical = new URL(Astro.url.pathname, Astro.site ?? fallbackOrigin);
+const pairs = routes ?? { zh: Astro.url.pathname, en: Astro.url.pathname };
+
+function absolute(path: string): string {
+  return new URL(path, Astro.site ?? fallbackOrigin).href;
+}
+---
+
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+{/* 在首次绘制之前把主题写到 <html> 上，避免切页/刷新时闪一下默认主题。 */}
+<script is:inline>
+  (function () {
+    var theme = 'modern';
+    try {
+      var stored = window.localStorage.getItem('space.theme');
+      if (stored === 'baroque' || stored === 'modern') theme = stored;
+    } catch (error) {
+      /* 隐私模式：用默认主题 */
+    }
+    document.documentElement.dataset.theme = theme;
+  })();
+</script>
+
+<title>{pageTitle}</title>
+<meta name="description" content={description} />
+<link rel="canonical" href={canonical.href} />
+
+<link rel="alternate" hreflang="zh-CN" href={absolute(pairs.zh)} />
+<link rel="alternate" hreflang="en" href={absolute(pairs.en)} />
+<link rel="alternate" hreflang="x-default" href={absolute(pairs.zh)} />
+
+{rssHref && <link rel="alternate" type="application/rss+xml" title={pageTitle} href={absolute(rssHref)} />}
+
+<meta property="og:type" content={ogType} />
+<meta property="og:site_name" content={siteName} />
+<meta property="og:title" content={pageTitle} />
+<meta property="og:description" content={description} />
+<meta property="og:url" content={canonical.href} />
+<meta property="og:locale" content={lang === 'zh' ? 'zh_CN' : 'en_US'} />
+<meta property="og:locale:alternate" content={lang === 'zh' ? 'en_US' : 'zh_CN'} />
+{publishedTime && <meta property="article:published_time" content={publishedTime.toISOString()} />}
+{updatedTime && <meta property="article:modified_time" content={updatedTime.toISOString()} />}
+
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content={pageTitle} />
+<meta name="twitter:description" content={description} />
+
+<meta name="theme-color" content="#eef3f9" />
+<meta name="generator" content={Astro.generator} />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="sitemap" href="/sitemap-index.xml" />

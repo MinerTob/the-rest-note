@@ -1,0 +1,33 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import HomePage from '@/views/HomePage.astro';
+import BlogIndexPage from '@/views/BlogIndexPage.astro';
+import LabPage from '@/views/LabPage.astro';
+import AboutPage from '@/views/AboutPage.astro';
+import { SITE } from '@/lib/site';
+import type { Lang } from '@/i18n/ui';
+import type { RoutePair } from '@/lib/routes';
+interface Props { lang: Lang; routes: RoutePair }
+const { lang, routes } = Astro.props;
+---
+<BaseLayout lang={lang} routes={routes} description={SITE.description[lang]} copyrightOnly>
+  <div class="journey" data-journey>
+    <section id="home" class="journey__section" data-journey-section="home">
+      <HomePage lang={lang} routes={routes} embedded />
+    </section>
+    <section id="blog" class="journey__section" data-journey-section="blog">
+      <BlogIndexPage lang={lang} routes={routes} embedded />
+    </section>
+    <section id="lab" class="journey__section" data-journey-section="lab">
+      <LabPage lang={lang} routes={routes} embedded />
+    </section>
+    <section id="about" class="journey__section journey__section--about" data-journey-section="about">
+      <AboutPage lang={lang} routes={routes} embedded />
+    </section>
+  </div>
+</BaseLayout>
+<style>
+  .journey__section { min-height: 100svh; scroll-margin-top: var(--nav-h); }
+  .journey__section--about { min-height: 0; }
+  @media (max-width:720px) { .journey__section { scroll-margin-top: 104px; } }
+</style>

@@ -1,0 +1,58 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import T from '@/components/T.astro';
+import { localizePath, useTranslations } from '@/i18n/utils';
+import type { Lang } from '@/i18n/ui';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const t = useTranslations(lang);
+---
+
+<BaseLayout lang={lang} title={t('error.title')} description={t('error.text')}>
+  <div class="wrap notfound">
+    <div class="notfound__panel glass glass--1">
+      <span class="notfound__code num">404</span>
+      <h1 class="notfound__title"><T k="error.text" lang={lang} /></h1>
+      <a class="more-link" href={localizePath('/', lang)}><T k="error.back" lang={lang} /></a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .notfound {
+    padding-block: clamp(56px, 12vw, 132px);
+    display: flex;
+    justify-content: center;
+  }
+
+  .notfound__panel {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: clamp(22px, 4vw, 34px);
+    max-width: 44ch;
+  }
+
+  /* 数字本身就是这块面板的视觉，不用再加标题 */
+  .notfound__code {
+    font-size: clamp(2.6rem, 2rem + 3vw, 4rem);
+    line-height: 0.9;
+    letter-spacing: -0.02em;
+    background-image: var(--grad-a);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .notfound__title {
+    margin: 0;
+    font-size: var(--fs-l);
+    font-weight: 500;
+    color: var(--ink-2);
+  }
+</style>

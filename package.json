@@ -1,0 +1,26 @@
+{
+  "name": "personal-digital-space",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A gradient + liquid-glass personal digital space with a 25-key MiniLab.",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@astrojs/rss": "^4.0.19",
+    "@astrojs/sitemap": "^3.7.4",
+    "astro": "^7.3.2",
+    "matter-js": "^0.20.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@types/matter-js": "^0.20.2",
+    "typescript": "^5.9.2"
+  }
+}

@@ -1,0 +1,10 @@
+---
+import BlogIndexPage from '@/views/BlogIndexPage.astro';
+import { blogRoutes, tagStaticPaths } from '@/lib/pages';
+
+export const getStaticPaths = () => tagStaticPaths('zh', blogRoutes);
+
+const { tag, routes } = Astro.props as { tag: string; routes: { zh: string; en: string } };
+---
+
+<BlogIndexPage lang="zh" routes={routes} currentTag={tag} />

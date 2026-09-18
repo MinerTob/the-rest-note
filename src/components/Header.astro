@@ -1,0 +1,300 @@
+---
+import T from './T.astro';
+import { NAV, SITE } from '@/lib/site';
+import { languages, locales, ui, type Lang } from '@/i18n/ui';
+import { localizePath, normalizePath, stripLangPrefix, useTranslations } from '@/i18n/utils';
+import type { RoutePair } from '@/lib/routes';
+
+interface Props {
+  lang: Lang;
+  routes: RoutePair;
+}
+
+const { lang, routes } = Astro.props;
+const t = useTranslations(lang);
+
+const current = normalizePath(stripLangPrefix(Astro.url.pathname));
+const homeHref = localizePath('/', lang);
+const journey = current === '/';
+const sectionByHref: Record<string, string> = {
+  '/': 'home', '/blog/': 'blog', '/lab/': 'lab', '/about/': 'about',
+};
+const navHref = (href: string, external?: boolean): string => {
+  if (external) return href;
+  const section = sectionByHref[href];
+  return journey && section ? `#${section}` : localizePath(href, lang);
+};
+
+const isActive = (href: string): boolean => {
+  const target = normalizePath(localizePath(href, lang));
+  if (target === '/') return current === '/';
+  return current === target || current.startsWith(target);
+};
+---
+
+<header class="site-header" id="top">
+  <div class="wrap site-header__inner">
+    <a class="brand" href={homeHref}>
+      <span class="brand__mark" aria-hidden="true">{SITE.mark}</span>
+      <span class="brand__name">{SITE.name}</span>
+    </a>
+
+    <nav
+      class="nav"
+      aria-label={t('nav.menu')}
+      data-i18n-aria
+      data-aria-zh={ui.zh['nav.menu']}
+      data-aria-en={ui.en['nav.menu']}
+    >
+      <ul class="nav__list">
+        {NAV.map((item) => (
+          <li>
+            <a
+              class="nav__link"
+              href={navHref(item.href, item.external)}
+              data-section-target={journey && !item.external ? sectionByHref[item.href] : undefined}
+              target={item.external ? '_blank' : undefined}
+              rel={item.external ? 'noopener noreferrer' : undefined}
+              aria-current={!item.external && isActive(item.href) ? 'page' : undefined}
+            >
+              <T k={item.key} lang={lang} />
+              {item.external && (
+                <>
+                  <span class="nav__ext" aria-hidden="true">↗</span>
+                  <span
+                    class="sr-only"
+                    data-i18n="a11y.external"
+                    data-zh={ui.zh['a11y.external']}
+                    data-en={ui.en['a11y.external']}
+                  >
+                    {t('a11y.external')}
+                  </span>
+                </>
+              )}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+
+    <div
+      class="langswitch"
+      role="group"
+      aria-label={t('lang.switch')}
+      data-i18n-aria
+      data-aria-zh={ui.zh['lang.switch']}
+      data-aria-en={ui.en['lang.switch']}
+    >
+      {locales.map((locale) =>
+        locale === lang ? (
+          <span class="langswitch__item is-current" aria-current="true">{languages[locale].short}</span>
+        ) : (
+          <a
+            class="langswitch__item"
+            href={routes[locale]}
+            hreflang={languages[locale].htmlLang}
+            data-lang-switch={locale}
+            data-i18n-aria
+            data-aria-zh={locale === 'en' ? '切换到 English' : '切换到中文'}
+            data-aria-en={locale === 'en' ? 'Switch to English' : 'Switch to Chinese'}
+            aria-label={t(locale === 'en' ? 'lang.to.en' : 'lang.to.zh')}
+          >
+            {languages[locale].short}
+          </a>
+        ),
+      )}
+    </div>
+  </div>
+</header>
+
+<style>
+  /* 顶部导航：一块悬浮的玻璃条。
+     没有分隔线 —— 玻璃自己的边框和投影已经把它和内容分开了。 */
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background-color: var(--glass-2);
+    background-image: var(--grad-sheen);
+    backdrop-filter: blur(var(--blur-strong)) saturate(1.5);
+    -webkit-backdrop-filter: blur(var(--blur-strong)) saturate(1.5);
+    box-shadow: var(--inner-glow), 0 18px 34px -34px var(--glass-cast);
+  }
+
+
+  .site-header__inner {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 20px;
+    min-height: var(--nav-h);
+    padding-block: 9px;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    text-decoration: none;
+    color: var(--ink);
+  }
+
+  .brand__mark {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 9px;
+    background-image: var(--grad-a);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.45),
+      0 6px 14px -8px var(--glow);
+  }
+
+  .brand__name {
+    font-size: var(--fs-s);
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+
+  .nav__list {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 20px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  /* 导航用小号 sans，不用全大写 —— 大写留给真正的 LCD 读数 */
+  .nav__link {
+    position: relative;
+    display: inline-block;
+    padding: 4px 1px;
+    font-size: var(--fs-xs);
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    color: var(--ink-3);
+    transition: color var(--dur-1) var(--ease);
+  }
+
+  .nav__link::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1.5px;
+    border-radius: 2px;
+    background-image: var(--grad-b);
+    transform: scaleX(0);
+    transform-origin: left center;
+    transition: transform var(--dur-2) var(--ease-out);
+  }
+
+  .nav__link:hover {
+    color: var(--ink);
+  }
+
+  .nav__link:hover::after {
+    transform: scaleX(0.45);
+  }
+
+  .nav__link[aria-current='page'] {
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  .nav__link[aria-current='page']::after {
+    transform: scaleX(1);
+  }
+
+  /* 站外项（GitHub）：一个很轻的箭头，说明点下去会离开这个站 */
+  .nav__ext {
+    margin-left: 4px;
+    font-size: 0.85em;
+    color: var(--ink-4);
+    transition:
+      color var(--dur-1) var(--ease),
+      transform var(--dur-2) var(--ease-out);
+  }
+
+  .nav__link:hover .nav__ext {
+    color: var(--ink-2);
+    transform: translate(1px, -1px);
+  }
+
+  .langswitch {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--glass-stroke);
+    border-radius: 999px;
+    background-color: var(--glass-1);
+    background-image: var(--grad-sheen);
+    box-shadow: var(--inner-glow);
+  }
+
+  .langswitch__item {
+    display: inline-grid;
+    place-items: center;
+    min-width: 30px;
+    min-height: 24px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.06em;
+    text-decoration: none;
+    color: var(--ink-4);
+    transition: color var(--dur-1) var(--ease), background-color var(--dur-1) var(--ease);
+  }
+
+  .langswitch__item:hover {
+    color: var(--ink-2);
+  }
+
+  .langswitch__item.is-current {
+    color: #fff;
+    background-image: var(--grad-a);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 12px -8px var(--glow);
+  }
+
+  @media (max-width: 720px) {
+    .site-header__inner {
+      grid-template-columns: 1fr auto;
+      gap: 8px 12px;
+      padding-block: 10px 0;
+    }
+
+    .nav {
+      grid-column: 1 / -1;
+      order: 3;
+      margin-inline: calc(var(--gutter) * -1);
+      padding-inline: var(--gutter);
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .nav::-webkit-scrollbar {
+      display: none;
+    }
+
+    .nav__list {
+      flex-wrap: nowrap;
+      gap: 0 18px;
+      width: max-content;
+      padding-bottom: 8px;
+    }
+
+    .nav__link {
+      white-space: nowrap;
+    }
+  }
+</style>

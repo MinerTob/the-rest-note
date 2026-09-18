@@ -1,0 +1,321 @@
+---
+import T from '@/components/T.astro';
+import { CONTACT } from '@/lib/contact';
+import { useTranslations } from '@/i18n/utils';
+import type { Lang } from '@/i18n/ui';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const t = useTranslations(lang);
+---
+
+{/*
+  Communication Dock —— 首页的四个通道。
+
+  不是"联系人列表"：每个通道是这块玻璃面上的一个小端口，有自己的
+  面色、边光和一枚通道灯。hover / focus 时亮起来的是光，尺寸不动
+  —— 不放大、不旋转、不弹跳。四个通道共用一块很轻的玻璃面，
+  它仍然是首页里最轻的一块。
+*/}
+<div class="dock glass glass--1 glass--live" data-contact>
+  <ul class="dock__grid">
+    {CONTACT.map((channel) => (
+      <li
+        class:list={['dock__cell', channel.href && channel.copy && 'dock__cell--dual']}
+        data-contact-row
+      >
+        {channel.href ? (
+          <a
+            class="ch"
+            href={channel.href}
+            target={channel.external ? '_blank' : undefined}
+            rel={channel.external ? 'noopener noreferrer' : undefined}
+          >
+            <span class="ch__head">
+              <span class="ch__led" aria-hidden="true" />
+              <span class="ch__label"><T k={channel.labelKey} lang={lang} /></span>
+              {channel.external ? (
+                <span class="ch__act">
+                  <span class="ch__glyph" aria-hidden="true">↗</span>
+                  <span class="sr-only">{t('a11y.external')}</span>
+                </span>
+              ) : null}
+            </span>
+            <span class="ch__value num">{channel.value}</span>
+          </a>
+        ) : (
+          <button class="ch" type="button" data-contact-copy={channel.copy}>
+            <span class="ch__head">
+              <span class="ch__led" aria-hidden="true" />
+              <span class="ch__label"><T k={channel.labelKey} lang={lang} /></span>
+              <span class="ch__act">
+                <span class="ch__idle"><T k="contact.copy" lang={lang} /></span>
+                <span class="ch__done" data-contact-done><T k="contact.copied" lang={lang} /></span>
+              </span>
+            </span>
+            <span class="ch__value num">{channel.value}</span>
+          </button>
+        )}
+
+        {channel.href && channel.copy ? (
+          <button
+            class="ch__copy"
+            type="button"
+            data-contact-copy={channel.copy}
+            aria-label={`${t('contact.copy')} · ${channel.value}`}
+          >
+            <span class="ch__idle"><T k="contact.copy" lang={lang} /></span>
+            <span class="ch__done" data-contact-done><T k="contact.copied" lang={lang} /></span>
+          </button>
+        ) : null}
+      </li>
+    ))}
+  </ul>
+</div>
+
+<style>
+  /* 一块很薄的玻璃面，里面是 2×2 的通道。padding 与圆角同心：
+     20px 的面 - 9px 的边 = 11px 的端口圆角。 */
+  .dock {
+    padding: 9px;
+  }
+
+  .dock__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .dock__cell {
+    position: relative;
+    display: flex;
+    min-width: 0;
+  }
+
+  /* ---- 单个通道：一小片有厚度的材质 ---- */
+  .ch {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    width: 100%;
+    min-width: 0;
+    padding: 11px 13px 13px;
+    border: 0;
+    border-radius: var(--radius-s);
+    background-color: transparent;
+    background-image: var(--dock-face);
+    /* 通道片自己再折射一次：叠在面板玻璃上，于是有"两层玻璃"的厚度 */
+    backdrop-filter: blur(var(--blur-s)) saturate(1.7) brightness(1.04);
+    -webkit-backdrop-filter: blur(var(--blur-s)) saturate(1.7) brightness(1.04);
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    text-decoration: none;
+    box-shadow:
+      inset 0 0 0 1px var(--dock-edge),
+      inset 0 1px 0 var(--dock-rim);
+    transition:
+      box-shadow var(--dur-2) var(--ease),
+      transform var(--dur-2) var(--ease-out);
+  }
+
+  /* hover 时亮起来的是这一层，不是尺寸 */
+  .ch::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-image: var(--dock-face-on);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur-2) var(--ease);
+  }
+
+  .ch:hover,
+  .ch:focus-visible {
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 0 0 1px var(--dock-edge-on),
+      inset 0 1px 0 var(--dock-rim-warm),
+      0 12px 24px -20px var(--dock-halo);
+  }
+
+  .ch:hover::after,
+  .ch:focus-visible::after {
+    opacity: 1;
+  }
+
+  .ch__head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  /* 通道灯：一枚很小的指示灯，hover 时更亮一点。
+     状态不只用颜色表达 —— 旁边始终写着通道名。 */
+  .ch__led {
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-image: var(--dock-led);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.55),
+      0 0 6px var(--dock-halo);
+    transition: box-shadow var(--dur-2) var(--ease);
+  }
+
+  .ch:hover .ch__led,
+  .ch:focus-visible .ch__led {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.85),
+      0 0 11px 1px var(--dock-led-glow);
+  }
+
+  .ch__label {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    letter-spacing: var(--track-mid);
+    color: var(--ink-3);
+    transition: color var(--dur-1) var(--ease);
+  }
+
+  .ch:hover .ch__label,
+  .ch:focus-visible .ch__label {
+    color: var(--ink-2);
+  }
+
+  .ch__value {
+    font-size: var(--fs-s);
+    color: var(--ink-2);
+    overflow-wrap: anywhere;
+    transition: color var(--dur-1) var(--ease);
+  }
+
+  .ch:hover .ch__value,
+  .ch:focus-visible .ch__value {
+    color: var(--ink);
+  }
+
+  .ch__act {
+    flex: 0 0 auto;
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.08em;
+    color: var(--ink-4);
+    transition: color var(--dur-1) var(--ease);
+  }
+
+  .ch__glyph {
+    display: inline-block;
+    transition: transform var(--dur-2) var(--ease);
+  }
+
+  .ch:hover .ch__act,
+  .ch:focus-visible .ch__act {
+    color: var(--accent-2);
+  }
+
+  .ch:hover .ch__glyph,
+  .ch:focus-visible .ch__glyph {
+    transform: translate(1px, -1px);
+  }
+
+  /* 既有 mailto 又能复制的那一条：复制入口浮在右上角，
+     不抢走主链接的整块点击区域。 */
+  .ch__copy {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    min-height: 26px;
+    padding: 4px 10px;
+    border: 0;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.08em;
+    color: var(--ink-4);
+    background-color: transparent;
+    box-shadow: inset 0 0 0 1px var(--dock-edge);
+    transition:
+      color var(--dur-1) var(--ease),
+      background-color var(--dur-1) var(--ease),
+      box-shadow var(--dur-1) var(--ease);
+  }
+
+  .ch__copy:hover,
+  .ch__copy:focus-visible {
+    color: var(--accent-2);
+    background-color: var(--dock-face);
+    box-shadow: inset 0 0 0 1px var(--dock-edge-on);
+  }
+
+  .dock__cell--dual .ch__head {
+    padding-right: 46px;
+  }
+
+  .ch__done {
+    display: none;
+  }
+
+  /* 复制成功：换一个词，边光亮一下。没有弹窗，也没有尺寸变化。 */
+  .dock__cell[data-copied='true'] .ch,
+  .dock__cell[data-copied='true'] .ch__copy {
+    box-shadow:
+      inset 0 0 0 1px var(--dock-edge-on),
+      inset 0 1px 0 var(--dock-rim-warm),
+      0 12px 24px -20px var(--dock-halo);
+  }
+
+  .dock__cell[data-copied='true'] .ch__idle {
+    display: none;
+  }
+
+  .dock__cell[data-copied='true'] .ch__done {
+    display: inline;
+    color: var(--accent-3);
+  }
+
+  /* 窄屏：四个通道竖排，触摸面积给够，邮箱这种长值也不会被挤 */
+  @media (max-width: 560px) {
+    .dock {
+      padding: 8px;
+    }
+
+    .dock__grid {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 8px;
+    }
+
+    .ch {
+      padding: 12px 13px 14px;
+    }
+
+    .ch__value {
+      font-size: var(--fs-s);
+    }
+
+    .dock__cell--dual .ch__head {
+      padding-right: 58px;
+    }
+
+    .ch__copy {
+      top: 6px;
+      right: 6px;
+      min-height: 34px;
+      padding: 6px 12px;
+    }
+  }
+</style>

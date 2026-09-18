@@ -1,0 +1,69 @@
+---
+import { CONTACT } from '@/lib/contact';
+import type { Lang } from '@/i18n/ui';
+interface Props { lang: Lang }
+const { lang } = Astro.props;
+const names: Record<string, string> = { wechat: 'WeChat', email: 'Email', bilibili: 'Bilibili', x: 'X' };
+---
+<ul class="contact-tiles" data-contact aria-label={lang === 'zh' ? '联系方式' : 'Contact channels'}>
+  {CONTACT.map(channel => {
+    const Tag = channel.href ? 'a' : 'button';
+    return <li class:list={['contact-tile', channel.href && channel.copy && 'contact-tile--dual']} data-contact-row>
+      <Tag class="contact-tile__main" href={channel.href} type={channel.href ? undefined : 'button'}
+        target={channel.external ? '_blank' : undefined} rel={channel.external ? 'noopener noreferrer' : undefined}
+        data-contact-copy={!channel.href ? channel.copy : undefined} title={channel.value}
+        aria-label={`${names[channel.id]}: ${channel.value}${channel.external ? (lang === 'zh' ? '（新标签页）' : ' (new tab)') : ''}`}>
+        <img src={`/icons/contact/${channel.id}.svg`} width="21" height="21" alt="" aria-hidden="true" />
+        <span class="contact-tile__text">
+          <span class="contact-tile__name">{names[channel.id]}</span>
+          <span class="contact-tile__value">{channel.value}</span>
+          {channel.copy && <span class="contact-tile__done" data-contact-done aria-live="polite">COPIED</span>}
+        </span>
+      </Tag>
+      {channel.href && channel.copy && <button class="contact-tile__copy" type="button" data-contact-copy={channel.copy}
+        aria-label={lang === 'zh' ? '复制邮箱地址' : 'Copy email address'} title={lang === 'zh' ? '复制邮箱' : 'Copy email'}>
+        <img src="/icons/contact/copy.svg" width="14" height="14" alt="" />
+      </button>}
+    </li>;
+  })}
+</ul>
+<style>
+  /* All material is painted on the rounded tile; content has no overlay plane. */
+  .contact-tile { background-clip: padding-box; }
+  .contact-tile__main, .contact-tile__copy { -webkit-tap-highlight-color: transparent; }
+  :global(html[data-theme='baroque']) .contact-tile::before {
+    background: radial-gradient(ellipse at 22% 0%, rgba(239,204,143,.12), transparent 72%), linear-gradient(135deg, rgba(169,124,62,.09), rgba(71,45,25,.08));
+    box-shadow: inset 0 1px 2px rgba(238,204,144,.2), inset 0 -2px 5px rgba(36,20,9,.1), 0 5px 14px -10px rgba(0,0,0,.3);
+    backdrop-filter: blur(12px) saturate(1.08);
+    -webkit-backdrop-filter: blur(12px) saturate(1.08);
+  }
+
+  :global(html[data-theme='baroque']) .contact-tile img { filter: invert(87%) sepia(24%) saturate(580%) hue-rotate(345deg); opacity: .9; }
+  .contact-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: min(100%, 390px); margin: 0; padding: 0; list-style: none; }
+  .contact-tile { position: relative; isolation: isolate; min-width: 0; height: 60px; border-radius: 16px; }
+  /* Static material sibling, never an ancestor of interactive/text paint layers. */
+  .contact-tile::before { content: ''; position: absolute; inset: 0; z-index: 0; border-radius: inherit; pointer-events: none; clip-path: inset(0 round 16px);
+    background: radial-gradient(ellipse at 22% 0%, rgba(255,255,255,.12), transparent 72%), linear-gradient(135deg, rgba(255,255,255,.06), transparent 48%, rgba(111,200,222,.04));
+    backdrop-filter: blur(12px) saturate(1.18); -webkit-backdrop-filter: blur(12px) saturate(1.18);
+    box-shadow: inset 0 1px 2px rgba(255,255,255,.18), inset 0 -2px 5px rgba(112,162,190,.04), 0 5px 14px -10px rgba(38,80,110,.18);
+
+  }
+
+
+  .contact-tile__main:hover .contact-tile__name { color: var(--accent-2); }
+
+
+  .contact-tile__main { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; width: 100%; height: 100%; padding: 10px 12px; border: 0; border-radius: inherit; appearance: none; -webkit-appearance: none; background: transparent; box-shadow: none; text-decoration: none; color: var(--ink); text-align: left; }
+  .contact-tile__main > img { flex: 0 0 21px; opacity: .76; }
+  .contact-tile__text { display: block; min-width: 0; }
+  .contact-tile__name { display: block; font-size: 12px; font-weight: 550; line-height: 1.5; }
+  .contact-tile__value, .contact-tile__done { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 10px; line-height: 1.6; color: var(--ink-2); }
+  .contact-tile__done { display: none; letter-spacing: .08em; }
+  [data-copied='true'] .contact-tile__value { display: none; }
+  [data-copied='true'] .contact-tile__done { display: block; }
+  .contact-tile--dual .contact-tile__main { padding-right: 32px; }
+  .contact-tile__copy { position: absolute; z-index: 2; right: 0; top: 8px; width: 30px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 9px; background: none; opacity: .65; }
+  .contact-tile__copy:hover { opacity: 1; }
+  @media (max-width: 360px) { .contact-tiles { gap: 8px; } .contact-tile__main { gap: 7px; padding-left: 10px; } }
+  @media (prefers-reduced-motion: reduce) { .contact-tile { transform: none; } }
+</style>

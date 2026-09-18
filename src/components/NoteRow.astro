@@ -1,0 +1,112 @@
+---
+import { formatIso, readingMinutes } from '@/lib/format';
+import { fill, useTranslations } from '@/i18n/utils';
+import type { Lang } from '@/i18n/ui';
+import type { Post } from '@/lib/content';
+import { postHref } from '@/lib/content';
+
+interface Props {
+  post: Post;
+  lang: Lang;
+}
+
+const { post, lang } = Astro.props;
+const t = useTranslations(lang);
+const minutes = fill(t('blog.readingTime'), { n: readingMinutes(post.body) });
+---
+
+<li class="noterow">
+  <a class="noterow__link" href={postHref(post)}>
+    <span class="noterow__date num">{formatIso(post.data.pubDate)}</span>
+    <span class="noterow__title">{post.data.title}</span>
+    <span class="noterow__meta meta">
+      {post.data.tags.slice(0, 2).join(' · ')} · {minutes}
+    </span>
+  </a>
+</li>
+
+<style>
+  .noterow {
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  /* 最后一行不留悬空的线：这条线只在行与行之间当边界用，不是装饰。 */
+  .noterow:last-child {
+    border-bottom-color: transparent;
+  }
+
+  .noterow__link {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: baseline;
+    gap: 4px 16px;
+    padding: 13px 2px;
+    text-decoration: none;
+    color: inherit;
+    transition: padding-left var(--dur-2) var(--ease);
+  }
+
+  /* hover 时从左端长出一条渐变短线，代替整行变色 */
+  .noterow__link::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 0;
+    height: 1px;
+    background-image: var(--grad-b);
+    transition: width var(--dur-2) var(--ease-out);
+  }
+
+  .noterow__link:hover::before {
+    width: 14px;
+  }
+
+  .noterow__link:hover {
+    padding-left: 20px;
+  }
+
+  .noterow__date {
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.04em;
+    color: var(--ink-4);
+  }
+
+  .noterow__title {
+    font-size: var(--fs-m);
+    color: var(--ink);
+    transition: color var(--dur-1) var(--ease);
+  }
+
+  .noterow__link:hover .noterow__title {
+    color: var(--accent-2);
+  }
+
+  .noterow__meta {
+    justify-self: end;
+    text-align: right;
+    font-size: var(--fs-2xs);
+  }
+
+  @media (max-width: 640px) {
+    .noterow__link {
+      grid-template-columns: 1fr;
+      gap: 3px;
+      padding-inline: 0;
+    }
+
+    .noterow__link::before {
+      display: none;
+    }
+
+    .noterow__link:hover {
+      padding-left: 0;
+    }
+
+    .noterow__meta {
+      justify-self: start;
+      text-align: left;
+    }
+  }
+</style>

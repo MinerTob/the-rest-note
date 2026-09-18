@@ -1,0 +1,101 @@
+---
+import T from './T.astro';
+import MusicSystem from './MusicSystem.astro';
+import { SITE } from '@/lib/site';
+import { localizePath } from '@/i18n/utils';
+import type { Lang } from '@/i18n/ui';
+import type { RoutePair } from '@/lib/routes';
+
+interface Props {
+  lang: Lang;
+  copyrightOnly?: boolean;
+  routes: RoutePair;
+  rssHref: string;
+}
+
+const { lang, rssHref, copyrightOnly = false } = Astro.props;
+const year = new Date().getFullYear();
+---
+
+<footer class:list={["site-footer", { "site-footer--copyright-only": copyrightOnly }]}>
+  <div class="wrap">
+    {!copyrightOnly && <div class="site-footer__music">
+      <MusicSystem lang={lang} variant="compact" />
+    </div>}
+
+    <div class="site-footer__row">
+      <p class="site-footer__meta mono">
+        © {year} {SITE.name} · <T k="footer.rights" lang={lang} />
+      </p>
+
+      {!copyrightOnly && <ul class="site-footer__links">
+        <li><a href={rssHref}>RSS</a></li>
+        {SITE.socials.map((social) => (
+          <li>
+            <a href={social.href} rel="me noopener" target="_blank">{social.label}</a>
+          </li>
+        ))}
+        <li><a href={localizePath('/about/', lang)}><T k="nav.about" lang={lang} /></a></li>
+        <li><a href="#top"><T k="footer.top" lang={lang} /></a></li>
+      </ul>}
+
+      {!copyrightOnly && <p class="site-footer__built mono"><T k="footer.built" lang={lang} /></p>}
+    </div>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    position: relative;
+    margin-top: clamp(40px, 7vw, 84px);
+    /* 底部留出的这段空白是给右下角那个主题控制器站的，
+       免得它在页面滚到底时压住页脚文字。 */
+    padding-block: 2px clamp(40px, 6vw, 54px);
+  }
+
+  .site-footer--copyright-only {
+    margin-top: 16px;
+  }
+
+  .site-footer__music {
+    padding-block: 4px;
+  }
+
+  .site-footer__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 24px;
+    padding-top: 18px;
+  }
+
+  .site-footer__meta,
+  .site-footer__built {
+    margin: 0;
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.04em;
+    color: var(--ink-4);
+  }
+
+  .site-footer__links {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: var(--fs-2xs);
+  }
+
+  .site-footer__links a {
+    text-decoration: none;
+    color: var(--ink-3);
+    letter-spacing: 0.04em;
+  }
+
+  .site-footer__links a:hover {
+    color: var(--accent-2);
+  }
+</style>

@@ -1,0 +1,380 @@
+---
+import T from './T.astro';
+import { MINILAB_KEYS, isBlackKey, isCKey, noteName } from '@/scripts/notes';
+import { fill, useTranslations } from '@/i18n/utils';
+import type { Lang } from '@/i18n/ui';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const t = useTranslations(lang);
+
+const keys = MINILAB_KEYS.map((midi) => ({
+  midi,
+  name: noteName(midi),
+  black: isBlackKey(midi),
+  c: isCKey(midi),
+}));
+
+const whites = keys.filter((key) => !key.black);
+const unit = 100 / whites.length;
+const blackWidth = unit * 0.62;
+
+const blacks = keys
+  .filter((key) => key.black)
+  .map((key) => ({
+    ...key,
+    left: (whites.findIndex((white) => white.midi === key.midi - 1) + 1) * unit - blackWidth / 2,
+  }));
+---
+
+<section
+  class="minilab"
+  data-minilab
+  aria-label={t('minilab.aria')}
+  data-word-ready={t('minilab.ready')}
+  data-word-engine-idle={t('minilab.engine.idle')}
+  data-word-engine-loading={t('minilab.engine.loading')}
+  data-word-engine-ready={t('minilab.engine.ready')}
+  data-word-engine-failed={t('minilab.engine.failed')}
+  data-word-midi-unsupported={t('midi.status.unsupported')}
+  data-word-midi-ready={t('midi.status.ready')}
+  data-word-midi-none={t('midi.status.none')}
+  data-word-midi-live={t('midi.status.live')}
+>
+  <header class="minilab__bar">
+    <span class="minilab__name">MINILAB</span>
+    <span class="minilab__keys-label">25 KEYS</span>
+
+    <span class="minilab__midi" data-minilab-midi-wrap>
+      <span class="minilab__midi-label">MIDI</span>
+      <i class="dot dot--idle" data-minilab-midi-dot aria-hidden="true"></i>
+      <span data-minilab-midi>{t('midi.status.ready')}</span>
+    </span>
+  </header>
+
+  <!-- 屏幕：只在 NOTE / E4 与 MUSIC / READY 之间切换，不堆参数 -->
+  <div class="minilab__screen">
+    <span class="minilab__mode" data-minilab-mode>MUSIC</span>
+    <span class="minilab__sep" aria-hidden="true">/</span>
+    <span class="minilab__value" data-minilab-value>{t('minilab.ready')}</span>
+  </div>
+
+  <div class="minilab__keys" data-minilab-keys style={`--black-w: ${blackWidth}%`}>
+    <div class="minilab__whites">
+      {whites.map((key, index) => (
+        <button
+          type="button"
+          class="key key--white"
+          data-midi={key.midi}
+          data-note={key.name}
+          aria-label={fill(t('minilab.keyAria'), { note: key.name })}
+          tabindex={index === 0 ? 0 : -1}
+        >
+          {key.c && <span class="key__tag">{key.name}</span>}
+        </button>
+      ))}
+    </div>
+
+    <div class="minilab__blacks" aria-hidden="false">
+      {blacks.map((key) => (
+        <button
+          type="button"
+          class="key key--black"
+          data-midi={key.midi}
+          data-note={key.name}
+          style={`left: ${key.left}%`}
+          aria-label={fill(t('minilab.keyAria'), { note: key.name })}
+          tabindex="-1"
+        ></button>
+      ))}
+    </div>
+  </div>
+
+  <footer class="minilab__foot">
+    <span class="minilab__foot-item">
+      <span class="minilab__foot-label"><T k="minilab.engine" lang={lang} /></span>
+      <span data-minilab-engine>{t('minilab.engine.idle')}</span>
+    </span>
+    <span class="minilab__foot-item minilab__foot-item--credit">
+      <T k="minilab.source.credit" lang={lang} />
+    </span>
+  </footer>
+
+  <p class="minilab__help"><T k="minilab.help" lang={lang} /></p>
+</section>
+
+<style>
+  .minilab {
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+    padding: 14px 15px 13px;
+    border-radius: var(--radius-l);
+    background-color: var(--glass-3);
+    background-image: var(--grad-sheen);
+    backdrop-filter: blur(var(--blur-strong)) saturate(1.4);
+    -webkit-backdrop-filter: blur(var(--blur-strong)) saturate(1.4);
+    border: 1px solid var(--glass-stroke);
+    box-shadow: var(--inner-glow), var(--shadow);
+  }
+
+  .minilab__bar {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex-wrap: wrap;
+  }
+
+  .minilab__name {
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.16em;
+    color: var(--ink-2);
+  }
+
+  .minilab__keys-label {
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.08em;
+    color: var(--ink-4);
+  }
+
+  .minilab__midi {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--glass-stroke);
+    background-color: var(--glass-1);
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.06em;
+    color: var(--ink-3);
+  }
+
+  .minilab__midi-label {
+    color: var(--ink-4);
+  }
+
+  /* 屏幕：这一块是深色 LCD，整站少数的深色之一 */
+  .minilab__screen {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 13px;
+    border-radius: var(--radius-s);
+    background-image: var(--lcd-bg);
+    border: 1px solid var(--lcd-line);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.10),
+      0 0 24px -16px var(--lcd-glow);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    letter-spacing: 0.14em;
+    color: var(--lcd-ink);
+    text-shadow: 0 0 12px var(--lcd-glow);
+  }
+
+  .minilab__mode,
+  .minilab__sep {
+    color: var(--lcd-ink-dim);
+  }
+
+  .minilab__value {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .minilab__keys {
+    position: relative;
+    height: clamp(92px, 15vw, 112px);
+    touch-action: none;
+    user-select: none;
+  }
+
+  .minilab__whites {
+    display: flex;
+    height: 100%;
+  }
+
+  .minilab__blacks {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .key {
+    padding: 0;
+    border: 0;
+    font: inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .key--white {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 7px;
+    background-color: var(--key-white-base);
+    background-image: var(--key-white-face);
+    border: 1px solid var(--key-white-line);
+    border-radius: 0 0 7px 7px;
+    margin-right: -1px;
+    box-shadow: var(--key-white-shadow);
+    transition:
+      background-color var(--dur-1) var(--ease),
+      background-image var(--dur-1) var(--ease),
+      transform var(--dur-1) var(--ease),
+      box-shadow var(--dur-1) var(--ease);
+  }
+
+  .key--white.is-on {
+    background-color: var(--key-white-on-base);
+    background-image: var(--key-white-on);
+    transform: translateY(2px);
+    box-shadow:
+      inset 0 -3px 8px -6px var(--glow),
+      inset 0 0 0 1px var(--accent-soft);
+  }
+
+  .key--black {
+    position: absolute;
+    top: 0;
+    width: var(--black-w);
+    height: 58%;
+    pointer-events: auto;
+    border-radius: 0 0 4px 4px;
+    background-image: var(--key-black-face);
+    border: 1px solid var(--key-black-line);
+    box-shadow: var(--key-black-shadow);
+    transition:
+      background-image var(--dur-1) var(--ease),
+      transform var(--dur-1) var(--ease),
+      box-shadow var(--dur-1) var(--ease);
+  }
+
+  .key--black.is-on {
+    background-image: var(--key-black-on);
+    transform: translateY(2px);
+  }
+
+  .key--white:focus-visible,
+  .key--black:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    z-index: 3;
+  }
+
+  .key__tag {
+    font-family: var(--font-mono);
+    font-size: 0.5625rem;
+    letter-spacing: 0.06em;
+    color: var(--ink-4);
+  }
+
+  /* ---- 隐藏提示模式：一次只亮一个键 ----
+     柔和的渐变高亮，不是游戏里的那种闪烁。 */
+  .key--white.is-hint {
+    background-image: var(--key-hint-face);
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 0 0 1px var(--key-hint-ring),
+      0 0 0 1px var(--glow),
+      0 0 22px -4px var(--glow-2);
+  }
+
+  .key--black.is-hint {
+    background-image: var(--key-hint-black);
+    box-shadow: 0 0 18px -3px var(--glow-2);
+  }
+
+  .key--white.is-accepted,
+  .key--black.is-accepted {
+    background-image: var(--grad-b);
+    box-shadow: 0 0 26px -2px var(--glow);
+  }
+
+  /* 按错：只是很轻地闪一下，琴键本身不动 */
+  .key.is-miss {
+    animation: key-miss 520ms var(--ease);
+  }
+
+  @keyframes key-miss {
+    0%, 100% { opacity: 1; }
+    38% { opacity: 0.58; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .key--white.is-hint,
+    .key--black.is-hint {
+      animation: key-hint 3.4s var(--ease) infinite;
+    }
+  }
+
+  @keyframes key-hint {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.06); }
+  }
+
+  .minilab__foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 14px;
+    padding-top: 9px;
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.05em;
+    color: var(--ink-4);
+  }
+
+  .minilab__foot-item {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+
+  .minilab__foot-label {
+    color: var(--ink-4);
+    opacity: 0.75;
+  }
+
+  .minilab__foot-item--credit {
+    text-align: right;
+    font-family: var(--font-sans);
+    letter-spacing: 0.01em;
+  }
+
+  .minilab__help {
+    margin: 0;
+    font-size: var(--fs-2xs);
+    color: var(--ink-4);
+  }
+
+  @media (max-width: 460px) {
+    .minilab {
+      padding: 12px 12px 11px;
+    }
+
+    .minilab__keys {
+      height: 104px;
+    }
+
+    .key--white {
+      padding-bottom: 5px;
+    }
+
+    .minilab__foot-item--credit {
+      display: none;
+    }
+  }
+</style>

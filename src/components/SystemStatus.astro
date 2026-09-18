@@ -1,0 +1,124 @@
+---
+import T from './T.astro';
+import { SYSTEM_STATUS } from '@/lib/site';
+import { localizePath } from '@/i18n/utils';
+import type { Lang } from '@/i18n/ui';
+
+interface Props {
+  lang: Lang;
+  /** inline 用于首页顶部横排；stack 用于窄栏 */
+  variant?: 'stack' | 'inline';
+}
+
+const { lang, variant = 'stack' } = Astro.props;
+
+const stateKey = {
+  online: 'sys.online',
+  ready: 'sys.ready',
+  idle: 'sys.idle',
+} as const;
+---
+
+<div class:list={['system', `system--${variant}`]}>
+  <span class="label label--caps label--dim system__label"><T k="system.label" lang={lang} /></span>
+
+  <ul class="system__list">
+    {SYSTEM_STATUS.map((item) => (
+      <li class="system__row">
+        {item.href ? (
+          <a class="system__name" href={localizePath(item.href, lang)}>
+            <T k={item.key} lang={lang} />
+          </a>
+        ) : (
+          <span class="system__name"><T k={item.key} lang={lang} /></span>
+        )}
+        <span class="system__state">
+          <i class={`dot dot--${item.state === 'online' ? 'on dot--pulse' : 'ready'}`} aria-hidden="true"></i>
+          <span class="system__word"><T k={stateKey[item.state]} lang={lang} /></span>
+        </span>
+      </li>
+    ))}
+  </ul>
+</div>
+
+<style>
+  .system {
+    display: flex;
+    gap: 8px;
+  }
+
+  /* ---- stack：窄栏里的三行清单 ---- */
+  .system--stack {
+    flex-direction: column;
+  }
+
+  .system--stack .system__list {
+    flex-direction: column;
+  }
+
+  .system--stack .system__row {
+    padding: 7px 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  /* ---- inline：首页顶部横排，只占一行 ---- */
+  .system--inline {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 14px;
+    padding-top: 14px;
+  }
+
+  .system--inline .system__label {
+    margin-right: 4px;
+  }
+
+  .system--inline .system__list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 2px 16px;
+  }
+
+  .system--inline .system__row {
+    gap: 8px;
+  }
+
+  .system__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+  }
+
+  .system__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .system__name {
+    font-size: var(--fs-s);
+    color: var(--ink-2);
+    text-decoration: none;
+  }
+
+  .system--inline .system__name {
+    font-size: var(--fs-xs);
+  }
+
+  a.system__name:hover {
+    color: var(--accent-2);
+  }
+
+  /* 状态字用小号字，不再全大写 —— 状态已经由颜色和灯表达 */
+  .system__state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.02em;
+    color: var(--ink-3);
+  }
+</style>

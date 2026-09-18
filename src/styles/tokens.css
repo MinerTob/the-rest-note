@@ -1,0 +1,501 @@
+/* ============================================================
+   Design tokens
+   ------------------------------------------------------------
+   两层结构：
+
+     1) Primitive —— 与主题无关：字体 / 字号 / 圆角 / 动效 / 布局
+     2) Theme     —— 颜色 / 渐变 / 玻璃 / LCD / 纸张
+
+        :root                      → modern（默认，无 JS 也是它）
+        html[data-theme="baroque"] → baroque
+
+   组件只允许使用语义 token，不要在组件里写死颜色。
+   这样 ThemeManager.setTheme() 才能一次性切换全站。
+   ============================================================ */
+
+:root {
+  /* ---------------- type ---------------- */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono",
+    Consolas, "DejaVu Sans Mono", monospace;
+
+  --fs-2xs: 0.6875rem;
+  --fs-xs: 0.78125rem;
+  --fs-s: 0.90625rem;
+  --fs-m: 1.03125rem;
+  --fs-l: 1.1875rem;
+  --fs-xl: clamp(1.4rem, 1.08rem + 1.15vw, 1.9rem);
+  --fs-xxl: clamp(1.95rem, 1.25rem + 2.6vw, 3rem);
+
+  --lh-tight: 1.22;
+  --lh-normal: 1.6;
+  --lh-loose: 1.8;
+
+  --track-wide: 0.15em;
+  --track-mid: 0.05em;
+
+  /* ---------------- geometry ---------------- */
+  --radius-xs: 8px;
+  --radius-s: 11px;
+  --radius: 16px;
+  --radius-l: 22px;
+  --radius-xl: 28px;
+  /* 玻璃面专用的圆角：比普通圆角更柔，像被表面张力拉住 */
+  --radius-liquid: 20px;
+  --radius-liquid-l: 28px;
+
+  /* ---------------- motion ---------------- */
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-1: 140ms;
+  --dur-2: 240ms;
+  --dur-3: 460ms;
+  --dur-4: 760ms;
+  --dur-theme: 620ms;
+
+  /* ---------------- layout ---------------- */
+  --gutter: clamp(16px, 2.4vw, 28px);
+  --maxw: 1320px;
+  --measure: 68ch;
+  --nav-h: 60px;
+
+  /* ---------------- blur ---------------- */
+  --blur-xs: 7px;
+  --blur-s: 13px;
+  --blur: 20px;
+  --blur-strong: 30px;
+
+  /* ============================================================
+     Theme: modern — Gradient / Liquid Glass / LCD
+     ============================================================ */
+
+  color-scheme: light;
+
+  /* ---- environment ---- */
+  --paper: #dbe6f7;
+  --paper-2: #e9edfc;
+  --paper-3: #cbd9f1;
+  --paper-ink: rgba(24, 34, 66, 0.02);
+
+  /* 背景：渐变是主角，但整片都是冷色 —— 蓝 / 冰蓝 / 青 / 蓝绿，
+     只在右下方留一点几乎看不见的蓝紫当环境光。
+     刻意不做蓝→紫→粉的彩虹，那样会变成 Lavender UI。 */
+  --bg-image:
+    radial-gradient(58vw 46vw at 76% -16%, rgba(255, 255, 255, 0.90), transparent 66%),
+    radial-gradient(96vw 82vw at -14% -18%, rgba(88, 146, 246, 0.50), transparent 72%),
+    radial-gradient(80vw 70vw at 108% 0%, rgba(56, 190, 228, 0.42), transparent 70%),
+    radial-gradient(88vw 76vw at 104% 102%, rgba(74, 204, 194, 0.30), transparent 74%),
+    radial-gradient(78vw 68vw at -16% 98%, rgba(98, 154, 240, 0.34), transparent 76%),
+    radial-gradient(72vw 58vw at 36% 62%, rgba(112, 192, 238, 0.17), transparent 78%),
+    radial-gradient(62vw 54vw at 68% 42%, rgba(146, 152, 234, 0.12), transparent 80%),
+    linear-gradient(158deg, #d6e2fb 0%, #d3e7f7 26%, #d5e3fa 52%, #d8e6f8 74%, #d4e4f7 100%);
+  /* 暗角：四周轻轻退后，让中间浮起来。不是网格，也不是线。 */
+  --bg-vignette: radial-gradient(126vw 106vh at 50% 36%, transparent 44%, rgba(72, 108, 190, 0.10) 100%);  /* 纹理：极轻的胶片噪点。不用网格线 —— 那会让背景像工程图纸。 */
+  --bg-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+  --bg-texture-size: 180px 180px;
+  --bg-texture-opacity: 0.055;
+
+  /* ---- ink ---- */
+  --ink: #1a2233;
+  --ink-2: #46536c;
+  --ink-3: #5f6c86;
+  --ink-4: #79859f;
+
+  /* ---- lines ---- */
+  --line: rgba(84, 106, 168, 0.17);
+  --line-soft: rgba(84, 106, 168, 0.10);
+  --line-strong: rgba(84, 106, 168, 0.30);
+  /* 用于 1px 的渐变描边：玻璃边缘的"折射"感 */
+  --line-gradient: linear-gradient(
+    90deg,
+    rgba(96, 140, 240, 0.5),
+    rgba(86, 178, 234, 0.42) 46%,
+    rgba(78, 198, 214, 0.48)
+  );
+
+  /* ---- accent ---- */
+  --accent: #4a6ee0;
+  --accent-2: #3a76d8;
+  --accent-3: #2fa3c9;
+  --accent-4: #33a6b6;
+  --accent-deep: #3550bd;
+  --accent-soft: #93aeee;
+  --accent-wash: rgba(74, 110, 224, 0.08);
+  --accent-wash-2: rgba(74, 110, 224, 0.16);
+  --glow: rgba(96, 140, 240, 0.42);
+  --glow-2: rgba(92, 178, 232, 0.30);
+  --glow-3: rgba(80, 200, 216, 0.28);
+
+  /* ---- control：解锁之后才出现的小控制器 ----
+     刻意不用页面主色，而是中性银 + 一点香槟金，
+     让它看起来像藏在这个空间里的一件实体设备。 */
+  --ctrl-bg: rgba(247, 244, 237, 0.62);
+  --ctrl-tint: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(214, 198, 164, 0.16) 58%,
+    rgba(190, 172, 138, 0.22) 100%
+  );
+  --ctrl-stroke: rgba(146, 134, 112, 0.34);
+  --ctrl-stroke-strong: rgba(146, 134, 112, 0.52);
+  --ctrl-ink: #46423a;
+  --ctrl-ink-2: #8a8071;
+  --ctrl-dot: rgba(180, 152, 94, 0.9);
+  --ctrl-highlight: rgba(255, 255, 255, 0.65);
+  --ctrl-shadow: 0 10px 24px -16px rgba(58, 54, 44, 0.55);
+  --ctrl-shadow-lift: 0 14px 30px -16px rgba(58, 54, 44, 0.62);
+
+  /* ---- gradients ---- */
+  --grad-a: linear-gradient(135deg, #4f83ee 0%, #4f9fe8 52%, #46bfd4 100%);
+  --grad-b: linear-gradient(135deg, #3fb6dd 0%, #4f7fe8 100%);
+  --grad-c: linear-gradient(120deg, #4b83e8 0%, #46bcd8 100%);
+  --grad-quiet: linear-gradient(135deg, rgba(79, 131, 238, 0.16), rgba(79, 159, 232, 0.13) 52%, rgba(70, 191, 212, 0.11));
+  --grad-sheen: linear-gradient(
+    158deg,
+    rgba(255, 255, 255, 0.42) 0%,
+    rgba(255, 255, 255, 0.10) 22%,
+    rgba(255, 255, 255, 0) 44%
+  );
+  /* 玻璃边缘的"折射"：左上最亮，右下带出环境色 */
+  --grad-edge: linear-gradient(
+    152deg,
+    rgba(255, 255, 255, 0.92) 0%,
+    rgba(255, 255, 255, 0.14) 24%,
+    rgba(150, 202, 240, 0.18) 56%,
+    rgba(126, 206, 232, 0.46) 100%
+  );
+
+  /* ---- glass：四个层级，越靠前越轻 ----
+     透明度压得比较低，是因为材质靠 backdrop blur 折射背景的渐变，
+     而不是靠"刷一层白"。 */
+  --glass-1: rgba(255, 255, 255, 0.055);
+  --glass-2: rgba(255, 255, 255, 0.105);
+  --glass-3: rgba(255, 255, 255, 0.20);
+  --glass-4: rgba(255, 255, 255, 0.42);
+  --glass: var(--glass-2);        /* 旧别名 */
+  --glass-2-old: var(--glass-2);  /* 占位，避免旧引用落空 */
+  --glass-line: rgba(255, 255, 255, 0.88);
+  --glass-line-2: rgba(255, 255, 255, 0.26);
+  --glass-edge: rgba(255, 255, 255, 0.95);
+  --glass-stroke: rgba(152, 186, 226, 0.15);
+  --glass-cast: rgba(48, 66, 140, 0.10);
+  /* 玻璃的"厚度"：贴着下沿的一层冷光，别用描边去表达 */
+  --glass-rim: rgba(126, 186, 236, 0.30);
+  /* 面板内部叠加的一层：左上角的镜面高光 + 极淡的冷暖色偏。
+     它让玻璃不再是灰白，而是微微折射环境的颜色。 */
+  --glass-tint:
+    radial-gradient(96% 54% at 4% -18%, rgba(255, 255, 255, 0.26), transparent 66%),
+    linear-gradient(
+      142deg,
+      rgba(102, 166, 240, 0.12) 0%,
+      rgba(255, 255, 255, 0) 42%,
+      rgba(96, 176, 236, 0.10) 74%,
+      rgba(80, 198, 216, 0.11) 100%
+    );
+  /* 表面层：一层很薄的镜面 + 底部的环境反射。
+     它贴在内容下面（z-index:-1），所以只改材质，不给文字蒙雾。 */
+  --glass-surface:
+    radial-gradient(122% 86% at 8% -28%, rgba(255, 255, 255, 0.52), transparent 60%),
+    radial-gradient(96% 76% at 94% 126%, rgba(120, 198, 238, 0.22), transparent 68%);
+
+  /* ---- dock：首页的 Communication Dock ----
+     刻意不用页面主色：冷银边光 + 淡青通道灯 + 一点香槟高光，
+     让它像这个数字空间里的一件独立通信设备。 */
+  --dock-face: linear-gradient(
+    164deg,
+    rgba(255, 255, 255, 0.22) 0%,
+    rgba(244, 250, 255, 0.07) 46%,
+    rgba(226, 240, 250, 0.035) 100%
+  );
+  --dock-face-on:
+    radial-gradient(120% 92% at 10% -22%, rgba(255, 252, 244, 0.44), transparent 56%),
+    linear-gradient(
+      164deg,
+      rgba(255, 255, 255, 0.50) 0%,
+      rgba(238, 249, 255, 0.16) 48%,
+      rgba(214, 238, 248, 0.08) 100%
+    );
+  --dock-edge: rgba(214, 234, 246, 0.40);
+  --dock-edge-on: rgba(230, 246, 252, 0.80);
+  --dock-rim: rgba(255, 255, 255, 0.70);
+  --dock-rim-warm: rgba(255, 249, 236, 0.52);
+  --dock-halo: rgba(120, 200, 232, 0.42);
+  --dock-led: radial-gradient(circle at 34% 30%, #ffffff 0%, rgba(152, 226, 240, 0.95) 48%, rgba(88, 184, 220, 0.92) 100%);
+  --dock-led-glow: rgba(126, 216, 236, 0.60);
+
+  /* ---- sheet：阅读面（正文所在的那一层） ---- */
+  --sheet-bg: rgba(255, 255, 255, 0.82);
+  --sheet-ink: #1c2434;
+  --sheet-ink-2: #4a5568;
+  --sheet-line: rgba(116, 138, 206, 0.20);
+  --sheet-texture: none;
+
+  --reading-ink: var(--sheet-ink);
+  --reading-ink-2: var(--sheet-ink-2);
+
+  /* ---- lcd：小面积数字显示屏 ---- */
+  --lcd-bg: linear-gradient(155deg, rgba(32, 48, 88, 0.94) 0%, rgba(46, 60, 108, 0.90) 46%, rgba(26, 40, 76, 0.95) 100%);
+  --lcd-bg-flat: #1e2c50;
+  --lcd-ink: #dbeaff;
+  --lcd-ink-dim: rgba(178, 206, 244, 0.62);
+  --lcd-line: rgba(152, 192, 255, 0.18);
+  --lcd-glow: rgba(120, 184, 255, 0.5);
+  --lcd-accent: #7fd4f0;
+  --lcd-scan: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.055) 0 1px, transparent 1px 3px);
+  /* 浅色 LCD 屏（读数用，避免大面积深色块） */
+  --lcd-screen-bg: linear-gradient(176deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.44));
+  --lcd-screen-ink: #323f9e;
+  --lcd-screen-ink-dim: rgba(62, 78, 162, 0.62);
+  --lcd-screen-line: rgba(116, 138, 206, 0.30);
+  --lcd-screen-glow: rgba(110, 150, 245, 0.30);
+
+  /* ---- keys：MiniLab 的琴键 ----
+     现代主题里是"冷白玻璃键"，不是纯白塑料。 */
+  --key-white-base: rgba(255, 255, 255, 0.72);
+  --key-white-on-base: rgba(222, 232, 255, 0.94);
+  --key-white-face: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.93) 0%,
+    rgba(245, 248, 255, 0.86) 62%,
+    rgba(226, 236, 252, 0.93) 100%
+  );
+  --key-white-line: rgba(118, 140, 210, 0.32);
+  --key-white-shadow: inset 0 -7px 11px -9px rgba(40, 60, 120, 0.40), 0 1px 2px rgba(40, 54, 108, 0.06);
+  --key-white-on: linear-gradient(180deg, rgba(228, 236, 255, 0.96) 0%, rgba(199, 213, 250, 0.96) 100%);
+  --key-black-face: linear-gradient(180deg, #35415c 0%, #1a2233 100%);
+  --key-black-line: rgba(12, 18, 34, 0.9);
+  --key-black-shadow: 0 2px 5px -1px rgba(20, 30, 60, 0.42), inset 0 1px 0 rgba(190, 214, 255, 0.2);
+  --key-black-on: linear-gradient(180deg, #5a86ee 0%, #3f63c8 100%);
+  --key-hint-face: linear-gradient(180deg, #e6efff 0%, #cadfff 48%, #d4f0fb 100%);
+  --key-hint-black: linear-gradient(180deg, #6f92f2 0%, #4f9fe0 100%);
+  --key-hint-ring: rgba(255, 255, 255, 0.85);
+
+  /* ---- status ---- */
+  --ok: #2f9b90;
+  --ok-glow: rgba(64, 196, 180, 0.45);
+  --wait: #ad8639;
+  --off: #a1abc0;
+
+  /* ---- elevation ---- */
+  --shadow-xs: 0 1px 2px rgba(40, 54, 108, 0.05);
+  --shadow-s: 0 2px 6px -2px rgba(40, 54, 108, 0.08), 0 14px 30px -24px rgba(40, 54, 108, 0.5);
+  --shadow: 0 2px 8px -3px rgba(40, 54, 108, 0.10), 0 28px 52px -34px rgba(40, 54, 108, 0.55);
+  --shadow-lift: 0 6px 14px -6px rgba(40, 54, 108, 0.14), 0 36px 66px -38px rgba(40, 54, 108, 0.6);
+  --inner-glow: inset 0 1px 0 var(--glass-line);
+
+  --selection-bg: rgba(96, 140, 240, 0.22);
+
+  /* 兼容旧引用 */
+  --grid: rgba(96, 118, 178, 0.05);
+  --grid-size: 32px;
+}
+
+/* ============================================================
+   Theme: baroque — Baroque / Classical / Wooden
+   深色实木 + 米白纸张 + 古典金
+   ============================================================ */
+
+html[data-theme='baroque'] {
+  color-scheme: dark;
+
+  --paper: #241811;
+  --paper-2: #2f2017;
+  --paper-3: #1b110b;
+  --paper-ink: rgba(255, 226, 178, 0.02);
+
+  --bg-image:
+    radial-gradient(56vw 46vw at 10% -10%, rgba(198, 146, 76, 0.22), transparent 62%),
+    radial-gradient(50vw 42vw at 98% 4%, rgba(158, 104, 52, 0.18), transparent 60%),
+    radial-gradient(50vw 44vw at 84% 88%, rgba(118, 76, 40, 0.20), transparent 64%),
+    linear-gradient(168deg, #37271b 0%, #2b1d14 38%, #241811 70%, #302117 100%);
+  /* 暗角：木色主题里更需要它，四周沉下去，中间的烛光才亮得起来 */
+  --bg-vignette: radial-gradient(126vw 106vh at 50% 36%, transparent 40%, rgba(14, 8, 4, 0.34) 100%);
+  /* 木纹：两组几乎平行的细线，形成极轻的纹理 */
+  --bg-texture:
+    repeating-linear-gradient(92deg, rgba(255, 224, 176, 0.022) 0 2px, transparent 2px 7px),
+    repeating-linear-gradient(88deg, rgba(0, 0, 0, 0.055) 0 1px, transparent 1px 12px);
+  --bg-texture-size: auto;
+  --bg-texture-opacity: 1;
+
+  --ink: #f2e5cd;
+  --ink-2: #d9c3a0;
+  --ink-3: #b6976f;
+  --ink-4: #8d7151;
+
+  --line: rgba(214, 178, 120, 0.22);
+  --line-soft: rgba(214, 178, 120, 0.12);
+  --line-strong: rgba(214, 178, 120, 0.36);
+  --line-gradient: linear-gradient(
+    90deg,
+    rgba(214, 172, 96, 0.6),
+    rgba(168, 118, 58, 0.4) 48%,
+    rgba(228, 196, 134, 0.52)
+  );
+
+  --accent: #d9ab5f;
+  --accent-2: #b8763f;
+  --accent-3: #9c7a45;
+  --accent-4: #a8583f;
+  --accent-deep: #f0cd84;
+  --accent-soft: #a8843f;
+  --accent-wash: rgba(214, 170, 100, 0.10);
+  --accent-wash-2: rgba(214, 170, 100, 0.18);
+  --glow: rgba(217, 176, 100, 0.30);
+  --glow-2: rgba(176, 122, 64, 0.24);
+  --glow-3: rgba(228, 196, 134, 0.22);
+
+  /* ---- control：同一枚控制器，在木色主题里变成黄铜 ---- */
+  --ctrl-bg: rgba(58, 44, 30, 0.52);
+  --ctrl-tint: linear-gradient(
+    145deg,
+    rgba(255, 232, 190, 0.20) 0%,
+    rgba(180, 140, 80, 0.14) 100%
+  );
+  --ctrl-stroke: rgba(214, 178, 120, 0.40);
+  --ctrl-stroke-strong: rgba(240, 210, 150, 0.58);
+  --ctrl-ink: #f0dcb4;
+  --ctrl-ink-2: rgba(226, 196, 142, 0.72);
+  --ctrl-dot: rgba(232, 200, 134, 0.92);
+  --ctrl-highlight: rgba(255, 240, 210, 0.28);
+  --ctrl-shadow: 0 10px 24px -16px rgba(0, 0, 0, 0.70);
+  --ctrl-shadow-lift: 0 14px 30px -16px rgba(0, 0, 0, 0.78);
+
+  --grad-a: linear-gradient(135deg, #dcb970 0%, #b98a44 54%, #8d6231 100%);
+  --grad-b: linear-gradient(135deg, #cba460 0%, #9a6c37 100%);
+  --grad-c: linear-gradient(120deg, #bb9550 0%, #8a5f34 100%);
+  --grad-quiet: linear-gradient(135deg, rgba(217, 178, 104, 0.15), rgba(150, 104, 56, 0.11));
+  --grad-sheen: linear-gradient(
+    158deg,
+    rgba(255, 236, 200, 0.17) 0%,
+    rgba(255, 236, 200, 0.055) 32%,
+    rgba(255, 236, 200, 0) 58%
+  );
+  --grad-edge: linear-gradient(
+    145deg,
+    rgba(246, 224, 186, 0.38) 0%,
+    rgba(246, 224, 186, 0.07) 32%,
+    rgba(140, 100, 56, 0.32) 100%
+  );
+
+  --glass-1: rgba(96, 68, 46, 0.22);
+  --glass-2: rgba(90, 64, 43, 0.32);
+  --glass-3: rgba(80, 56, 38, 0.46);
+  --glass-4: rgba(70, 49, 34, 0.60);
+  --glass: var(--glass-2);
+  --glass-line: rgba(246, 226, 190, 0.16);
+  --glass-line-2: rgba(246, 226, 190, 0.09);
+  --glass-edge: rgba(246, 226, 190, 0.24);
+  --glass-stroke: rgba(214, 178, 120, 0.18);
+  --glass-cast: rgba(0, 0, 0, 0.30);
+  --glass-tint: rgba(190, 140, 76, 0.06);
+  --glass-rim: rgba(216, 168, 96, 0.22);
+  --glass-surface:
+    radial-gradient(122% 86% at 8% -28%, rgba(255, 236, 200, 0.22), transparent 60%),
+    radial-gradient(96% 76% at 94% 126%, rgba(210, 160, 90, 0.16), transparent 68%);
+
+  /* dock：同一件设备，在木色主题里变成黄铜 + 暖白通道灯 */
+  --dock-face: linear-gradient(
+    164deg,
+    rgba(246, 228, 198, 0.16) 0%,
+    rgba(240, 214, 170, 0.06) 100%
+  );
+  --dock-face-on:
+    radial-gradient(120% 92% at 10% -22%, rgba(255, 236, 196, 0.28), transparent 56%),
+    linear-gradient(164deg, rgba(246, 228, 198, 0.26) 0%, rgba(240, 214, 170, 0.10) 100%);
+  --dock-edge: rgba(214, 178, 120, 0.26);
+  --dock-edge-on: rgba(240, 210, 150, 0.52);
+  --dock-rim: rgba(255, 240, 210, 0.30);
+  --dock-rim-warm: rgba(255, 244, 214, 0.36);
+  --dock-halo: rgba(228, 184, 108, 0.36);
+  --dock-led: radial-gradient(circle at 34% 30%, #fff4dc 0%, rgba(232, 196, 130, 0.95) 48%, rgba(176, 126, 66, 0.92) 100%);
+  --dock-led-glow: rgba(232, 190, 116, 0.55);
+
+  /* 阅读面 = 乐谱纸 */
+  --sheet-bg: rgba(243, 233, 214, 0.95);
+  --sheet-ink: #2c2116;
+  --sheet-ink-2: #4f3d29;
+  --sheet-line: rgba(120, 92, 54, 0.24);
+  --sheet-texture:
+    repeating-linear-gradient(46deg, rgba(120, 92, 54, 0.032) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(-46deg, rgba(120, 92, 54, 0.026) 0 1px, transparent 1px 5px);
+
+  --lcd-bg: linear-gradient(155deg, rgba(62, 45, 28, 0.94) 0%, rgba(44, 31, 19, 0.95) 100%);
+  --lcd-bg-flat: #2c1f13;
+  --lcd-ink: #f0dcb4;
+  --lcd-ink-dim: rgba(226, 196, 142, 0.6);
+  --lcd-line: rgba(216, 182, 116, 0.22);
+  --lcd-glow: rgba(224, 186, 110, 0.36);
+  --lcd-accent: #e8c886;
+  --lcd-scan: repeating-linear-gradient(0deg, rgba(255, 236, 200, 0.045) 0 1px, transparent 1px 3px);
+  --lcd-screen-bg: linear-gradient(176deg, rgba(52, 37, 22, 0.74), rgba(34, 23, 14, 0.82));
+  --lcd-screen-ink: #f1cf88;
+  --lcd-screen-ink-dim: rgba(228, 198, 142, 0.6);
+  --lcd-screen-line: rgba(216, 182, 116, 0.26);
+  --lcd-screen-glow: rgba(224, 186, 110, 0.30);
+
+  /* ---- keys：胡桃木琴房里的一台老键盘（暖白键 + 乌木键） ---- */
+  --key-white-base: #efe4cd;
+  --key-white-on-base: #e6d2a6;
+  --key-white-face: linear-gradient(180deg, #f8f1e2 0%, #eee2cb 64%, #ded0b4 100%);
+  --key-white-line: rgba(150, 116, 70, 0.36);
+  --key-white-shadow: inset 0 -7px 11px -9px rgba(88, 62, 32, 0.46), 0 1px 2px rgba(0, 0, 0, 0.22);
+  --key-white-on: linear-gradient(180deg, #f2e2bd 0%, #e2ca97 100%);
+  --key-black-face: linear-gradient(180deg, #3d2c1d 0%, #201509 100%);
+  --key-black-line: rgba(18, 11, 4, 0.9);
+  --key-black-shadow: 0 2px 5px -1px rgba(0, 0, 0, 0.52), inset 0 1px 0 rgba(242, 216, 162, 0.24);
+  --key-black-on: linear-gradient(180deg, #cca866 0%, #9c7237 100%);
+  --key-hint-face: linear-gradient(180deg, #f5e6c2 0%, #e5cc95 52%, #f0dcb2 100%);
+  --key-hint-black: linear-gradient(180deg, #d3ae6a 0%, #a9803f 100%);
+  --key-hint-ring: rgba(255, 240, 208, 0.85);
+
+  --ok: #86a862;
+  --ok-glow: rgba(150, 190, 110, 0.4);
+  --wait: #d0a45c;
+  --off: #8d7151;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-s: 0 2px 8px -2px rgba(0, 0, 0, 0.34), 0 16px 32px -26px rgba(0, 0, 0, 0.75);
+  --shadow: 0 2px 10px -3px rgba(0, 0, 0, 0.36), 0 30px 56px -36px rgba(0, 0, 0, 0.85);
+  --shadow-lift: 0 6px 16px -6px rgba(0, 0, 0, 0.42), 0 38px 70px -38px rgba(0, 0, 0, 0.9);
+  --inner-glow: inset 0 1px 0 var(--glass-line);
+
+  --selection-bg: rgba(214, 170, 100, 0.28);
+
+  --grid: rgba(255, 224, 176, 0.022);
+  --grid-size: 7px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 1ms;
+    --dur-2: 1ms;
+    --dur-3: 1ms;
+    --dur-4: 1ms;
+    --dur-theme: 1ms;
+  }
+}
+
+/* Personality tags: separate hues within each theme, kept readable over the ambient background. */
+:root {
+  --identity-music: #cbdff8;
+  --identity-anime: #e8d9ee;
+  --identity-aviation: #c4e5ed;
+  --identity-photography: #f1dcc4;
+  --identity-astronomy: #dcdaf2;
+  --identity-optimistic: #c9e7d9;
+  --identity-direct: #f0d0cb;
+  --identity-persistent: #eee2b7;
+  --identity-analytical: #cedde7;
+}
+html[data-theme="baroque"] {
+  --identity-music: #654c26;
+  --identity-anime: #643e49;
+  --identity-aviation: #34575a;
+  --identity-photography: #735039;
+  --identity-astronomy: #514665;
+  --identity-optimistic: #3d5945;
+  --identity-direct: #723e35;
+  --identity-persistent: #69602f;
+  --identity-analytical: #3e505e;
+}

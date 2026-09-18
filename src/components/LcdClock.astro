@@ -1,0 +1,107 @@
+---
+import T from './T.astro';
+import { SITE } from '@/lib/site';
+import type { Lang } from '@/i18n/ui';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const city = SITE.location.city[lang];
+---
+
+<div class="clock glass glass--1" data-clock>
+  <div class="clock__head">
+    <span class="label label--caps label--dim"><T k="clock.label" lang={lang} /></span>
+    <span class="clock__zone num">{SITE.location.offset}</span>
+  </div>
+
+  <div class="clock__screen">
+    <span class="clock__time num" data-clock-time>--:--:--</span>
+  </div>
+
+  <div class="clock__foot">
+    <span class="clock__date num" data-clock-date>----.--.-- ---</span>
+    <span class="clock__city num">{city}</span>
+  </div>
+</div>
+
+<style>
+  .clock {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 13px 15px 12px;
+  }
+
+  .clock__head,
+  .clock__foot {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .clock__zone,
+  .clock__date,
+  .clock__city {
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.05em;
+    color: var(--ink-4);
+  }
+
+  /* 屏：不是一块深色砖，而是一层比周围更亮的内嵌玻璃 */
+  .clock__screen {
+    position: relative;
+    overflow: hidden;
+    padding: 9px 12px 10px;
+    border-radius: var(--radius-s);
+    background-image: var(--lcd-screen-bg);
+    border: 1px solid var(--lcd-screen-line);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.6),
+      inset 0 -8px 16px -12px var(--lcd-screen-glow);
+  }
+
+  /* 极细的横向刷新纹 */
+  .clock__screen::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--lcd-screen-ink) 7%, transparent) 0 1px,
+      transparent 1px 3px
+    );
+    pointer-events: none;
+  }
+
+  .clock__time {
+    position: relative;
+    z-index: 1;
+    display: block;
+    font-size: clamp(1.55rem, 1.25rem + 1.1vw, 1.95rem);
+    line-height: 1;
+    letter-spacing: 0.055em;
+    color: var(--lcd-screen-ink);
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 18px var(--lcd-screen-glow);
+  }
+
+  /* 每秒一次、非常轻的刷新感 */
+  .clock__time.is-tick {
+    animation: lcd-refresh 300ms var(--ease);
+  }
+
+  @keyframes lcd-refresh {
+    0% { opacity: 0.66; }
+    100% { opacity: 1; }
+  }
+
+  @media (max-width: 520px) {
+    .clock__time {
+      font-size: 1.6rem;
+    }
+  }
+</style>

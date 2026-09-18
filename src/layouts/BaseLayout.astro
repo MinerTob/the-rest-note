@@ -1,0 +1,86 @@
+---
+import { ClientRouter } from 'astro:transitions';
+import BaseHead from '@/components/BaseHead.astro';
+import Header from '@/components/Header.astro';
+import Footer from '@/components/Footer.astro';
+import ThemeSwitcher from '@/components/ThemeSwitcher.astro';
+import SystemMessage from '@/components/SystemMessage.astro';
+import EntryGate from '@/components/EntryGate.astro';
+import T from '@/components/T.astro';
+import { languages, type Lang } from '@/i18n/ui';
+import { localizePath } from '@/i18n/utils';
+import type { RoutePair } from '@/lib/routes';
+import '@/styles/global.css';
+
+interface Props {
+  lang: Lang;
+  copyrightOnly?: boolean;
+  title?: string;
+  description?: string;
+  routes?: RoutePair;
+  rssHref?: string;
+  ogType?: 'website' | 'article';
+  publishedTime?: Date;
+  updatedTime?: Date;
+}
+
+const {
+  lang,
+  title,
+  description = '',
+  routes,
+  rssHref,
+  ogType,
+  publishedTime,
+  updatedTime,
+  copyrightOnly = false,
+} = Astro.props;
+
+const pairs: RoutePair = routes ?? {
+  zh: localizePath(Astro.url.pathname, 'zh'),
+  en: localizePath(Astro.url.pathname, 'en'),
+};
+
+const rss = rssHref ?? (lang === 'zh' ? '/rss.xml' : '/en/rss.xml');
+---
+
+<!doctype html>
+<html lang={languages[lang].htmlLang} data-lang={lang}>
+  <head>
+    <BaseHead
+      lang={lang}
+      title={title}
+      description={description}
+      routes={pairs}
+      rssHref={rss}
+      ogType={ogType}
+      publishedTime={publishedTime}
+      updatedTime={updatedTime}
+    />
+    <ClientRouter />
+  </head>
+
+  <body class:list={{ 'copyright-only': copyrightOnly }}>
+    {/* 背景渐变层。persist：客户端路由切换时保持同一个节点，背景不会闪。
+        不用 body 背景图是因为它需要 fixed 定位才能让光晕不随滚动跑掉。 */}
+    <div class="ambient" aria-hidden="true" transition:persist="ambient"></div>
+
+    <EntryGate />
+
+    <a class="skip-link" href="#main"><T k="a11y.skip" lang={lang} /></a>
+    <Header lang={lang} routes={pairs} />
+    <main id="main">
+      <slot />
+    </main>
+    {copyrightOnly && <Footer lang={lang} routes={pairs} rssHref={rss} copyrightOnly />}
+
+    {/* 解锁过隐藏曲目之后才会出现的小控制器，平时完全不存在 */}
+    <ThemeSwitcher lang={lang} />
+
+    <SystemMessage />
+
+    <script>
+      import '@/scripts/app.ts';
+    </script>
+  </body>
+</html>

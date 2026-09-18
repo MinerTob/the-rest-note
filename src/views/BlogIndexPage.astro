@@ -1,0 +1,163 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import Passthrough from '@/components/Passthrough.astro';
+import T from '@/components/T.astro';
+import NoteRow from '@/components/NoteRow.astro';
+import { collectTags, getPosts } from '@/lib/content';
+import { localizePath, useTranslations } from '@/i18n/utils';
+import type { Lang } from '@/i18n/ui';
+import type { RoutePair } from '@/lib/routes';
+
+interface Props {
+  lang: Lang;
+  routes: RoutePair;
+  currentTag?: string;
+  embedded?: boolean;
+}
+
+const { lang, routes, currentTag, embedded = false } = Astro.props;
+const Layout = embedded ? Passthrough : BaseLayout;
+const t = useTranslations(lang);
+
+const all = await getPosts(lang);
+const posts = currentTag ? all.filter((post) => post.data.tags.includes(currentTag)) : all;
+const tags = collectTags(all);
+
+const groups = posts.reduce<{ year: number; posts: typeof posts }[]>((accumulator, post) => {
+  const year = post.data.pubDate.getFullYear();
+  const last = accumulator[accumulator.length - 1];
+  if (last && last.year === year) {
+    last.posts.push(post);
+  } else {
+    accumulator.push({ year, posts: [post] });
+  }
+  return accumulator;
+}, []);
+---
+
+<Layout
+  lang={lang}
+  routes={routes}
+  title={t('blog.title')}
+  description={t('blog.intro')}
+  rssHref={lang === 'zh' ? '/rss.xml' : '/en/rss.xml'}
+>
+  <div class="wrap page">
+    <header class="page__head rise">
+      <h1 class="page__title">BLOG</h1>
+      <p class="lede"><T k="blog.intro" lang={lang} /></p>
+    </header>
+
+    {tags.length > 0 && (
+      <nav class="tagbar rise rise--2" aria-label={t('blog.tags')}>
+        <a class:list={['chip', !currentTag && 'is-active']} href={localizePath('/blog/', lang)}>
+          <T k="blog.all" lang={lang} />
+          <span class="tagbar__count num">{all.length}</span>
+        </a>
+        {tags.map((tag) => (
+          <a
+            class:list={['chip', currentTag === tag.tag && 'is-active']}
+            href={localizePath(`/blog/tags/${encodeURIComponent(tag.tag)}/`, lang)}
+          >
+            {tag.tag}
+            <span class="tagbar__count num">{tag.count}</span>
+          </a>
+        ))}
+      </nav>
+    )}
+
+    {posts.length > 0 ? (
+      <div class="archive rise rise--2">
+        {groups.map((group) => (
+          <section class="archive__group">
+            <p class="archive__year num">{group.year}</p>
+            <ul class="notelist">
+              {group.posts.map((post) => (
+                <NoteRow post={post} lang={lang} />
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    ) : (
+      <p class="muted"><T k="blog.empty" lang={lang} /></p>
+    )}
+  </div>
+</Layout>
+
+<style>
+  .page {
+    padding-block: clamp(28px, 4.6vw, 50px);
+    display: flex;
+    flex-direction: column;
+    gap: clamp(22px, 3.4vw, 38px);
+  }
+
+  .page__head {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 60ch;
+  }
+
+  .page__title {
+    margin: 0;
+    font-size: var(--fs-xxl);
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    font-weight: 600;
+  }
+
+  .tagbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .tagbar__count {
+    color: var(--ink-4);
+    font-size: 0.95em;
+  }
+
+  .tagbar :global(a.chip.is-active) {
+    color: var(--ink);
+    border-color: var(--accent-soft);
+    background-color: var(--accent-wash);
+  }
+
+  .archive {
+    display: flex;
+    flex-direction: column;
+    gap: clamp(22px, 3.6vw, 38px);
+  }
+
+  .archive__group {
+    display: grid;
+    grid-template-columns: 68px minmax(0, 1fr);
+    gap: 20px;
+  }
+
+  .archive__year {
+    margin: 0;
+    padding-top: 14px;
+    font-size: var(--fs-2xs);
+    color: var(--ink-4);
+  }
+
+  .notelist {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @media (max-width: 720px) {
+    .archive__group {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 6px;
+    }
+
+    .archive__year {
+      padding-top: 0;
+    }
+  }
+</style>

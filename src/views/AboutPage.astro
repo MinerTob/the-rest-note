@@ -1,0 +1,34 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import Passthrough from '@/components/Passthrough.astro';
+import IdentityStage from '@/components/IdentityStage.astro';
+import { SITE } from '@/lib/site';
+import { useTranslations } from '@/i18n/utils';
+import type { Lang } from '@/i18n/ui';
+import type { RoutePair } from '@/lib/routes';
+interface Props { lang: Lang; routes: RoutePair; embedded?: boolean }
+const { lang, routes, embedded = false } = Astro.props;
+const Layout = embedded ? Passthrough : BaseLayout;
+const t = useTranslations(lang);
+---
+<Layout lang={lang} routes={routes} title={t('about.title')} description={SITE.description[lang]} copyrightOnly>
+  <div class="wrap about-page">
+    <IdentityStage lang={lang} />
+  </div>
+</Layout>
+<style>
+  :global(body.copyright-only) { --maxw: 1080px; }
+  .about-page {
+    width: 1080px;
+    max-width: 100%;
+    margin-inline: auto;
+    padding-block: clamp(12px, 2.5vh, 24px) 8px;
+  }
+
+  @media (max-width: 600px) {
+    .about-page {
+      width: 100%;
+      max-width: 1080px;
+    }
+  }
+</style>

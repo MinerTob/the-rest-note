@@ -1,0 +1,7 @@
+---
+import ContactTiles from './ContactTiles.astro';
+import type { Lang } from '@/i18n/ui';
+interface Props { lang: Lang }
+const { lang } = Astro.props;
+---
+<div class="contact-modern"><ContactTiles lang={lang} /></div>

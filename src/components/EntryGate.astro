@@ -1,0 +1,252 @@
+---
+import { SITE } from '@/lib/site';
+---
+
+<div class="entry-gate" data-entry-gate role="dialog" aria-modal="true" aria-label="Enter website">
+  <div class="entry-gate__light entry-gate__light--a" aria-hidden="true"></div>
+  <div class="entry-gate__light entry-gate__light--b" aria-hidden="true"></div>
+  <div class="entry-gate__grain" aria-hidden="true"></div>
+
+  <div class="entry-gate__panel glass glass--3">
+    <span class="entry-gate__mark" aria-hidden="true">{SITE.mark}</span>
+    <p class="entry-gate__eyebrow">PERSONAL DIGITAL SPACE</p>
+    <h1 class="entry-gate__title">{SITE.name}</h1>
+    <p
+      class="entry-gate__tagline"
+      data-entry-copy
+      data-zh={SITE.tagline.zh}
+      data-en={SITE.tagline.en}
+    >{SITE.tagline.en}</p>
+
+    <button class="entry-gate__button" type="button" data-entry-button aria-label="Enter website">
+      <span data-entry-copy data-zh="进入空间" data-en="Enter the space">Enter the space</span>
+      <span class="entry-gate__arrow" aria-hidden="true">→</span>
+    </button>
+    <p
+      class="entry-gate__hint"
+      data-entry-copy
+      data-zh="欢迎光临这片小天地"
+      data-en="Welcome to this little corner"
+    >Welcome to this little corner</p>
+  </div>
+</div>
+
+<style>
+  .entry-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    padding: var(--gutter);
+    background-color: var(--paper);
+    background-image: var(--bg-image);
+    isolation: isolate;
+    opacity: 0;
+    transform: translate3d(0, 0, 0);
+    backface-visibility: hidden;
+  }
+
+  .entry-gate::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: var(--bg-vignette);
+    pointer-events: none;
+  }
+
+  .entry-gate.is-ready {
+    opacity: 1;
+  }
+
+  .entry-gate__grain {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: var(--bg-texture);
+    background-size: var(--bg-texture-size);
+    opacity: var(--bg-texture-opacity, 0.06);
+    pointer-events: none;
+  }
+
+  .entry-gate__light {
+    position: absolute;
+    z-index: -1;
+    width: min(70vw, 760px);
+    aspect-ratio: 1;
+    border-radius: 50%;
+    filter: blur(18px);
+    opacity: 0.48;
+    pointer-events: none;
+  }
+
+  .entry-gate__light--a {
+    top: -40%;
+    left: -18%;
+    background: radial-gradient(circle, var(--glow), transparent 66%);
+  }
+
+  .entry-gate__light--b {
+    right: -24%;
+    bottom: -48%;
+    background: radial-gradient(circle, var(--glow-2), transparent 68%);
+  }
+
+  .entry-gate__panel {
+    width: min(100%, 560px);
+    padding: clamp(34px, 7vw, 62px) clamp(26px, 7vw, 64px);
+    text-align: center;
+    box-shadow: var(--inner-glow), var(--shadow-lift);
+  }
+
+  .entry-gate__mark {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 24px;
+    border-radius: 15px;
+    background-image: var(--grad-a);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42), 0 14px 30px -16px var(--glow);
+  }
+
+  .entry-gate__eyebrow,
+  .entry-gate__hint {
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    letter-spacing: var(--track-wide);
+    color: var(--ink-4);
+  }
+
+  .entry-gate__eyebrow {
+    margin: 0 0 12px;
+  }
+
+  .entry-gate__title {
+    margin: 0;
+    font-size: clamp(2.2rem, 8vw, 4.8rem);
+    font-weight: 600;
+    line-height: 0.98;
+    letter-spacing: -0.055em;
+    background-image: var(--grad-a);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+  }
+
+  .entry-gate__tagline {
+    max-width: 32ch;
+    margin: 20px auto 30px;
+    color: var(--ink-2);
+    font-size: var(--fs-s);
+    line-height: 1.7;
+  }
+
+  .entry-gate__button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    min-width: min(100%, 220px);
+    min-height: 48px;
+    padding: 11px 20px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background-image: var(--grad-a);
+    color: #fff;
+    font-size: var(--fs-s);
+    font-weight: 500;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38), 0 16px 34px -18px var(--glow);
+    transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease);
+  }
+
+  .entry-gate__button:hover,
+  .entry-gate__button:focus-visible {
+    transform: translateY(-2px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.48), 0 22px 42px -18px var(--glow);
+  }
+
+  .entry-gate__button:active {
+    transform: translateY(1px);
+  }
+
+  .entry-gate__arrow {
+    font-size: 1.2em;
+    transition: transform var(--dur-2) var(--ease-out);
+  }
+
+  .entry-gate__button:hover .entry-gate__arrow {
+    transform: translateX(4px);
+  }
+
+  .entry-gate__hint {
+    margin: 14px 0 0;
+    letter-spacing: 0.04em;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .entry-gate.is-ready {
+      animation: gate-arrive 720ms var(--ease-out) both;
+    }
+
+    .entry-gate__panel {
+      animation: gate-panel-arrive 860ms var(--ease-out) 80ms both;
+    }
+
+    .entry-gate__light--a {
+      animation: gate-drift-a 9s ease-in-out infinite alternate;
+    }
+
+    .entry-gate__light--b {
+      animation: gate-drift-b 11s ease-in-out infinite alternate;
+    }
+
+    .entry-gate.is-leaving {
+      animation: gate-leave 760ms var(--ease) both;
+      pointer-events: none;
+      will-change: opacity, transform;
+    }
+
+    .entry-gate.is-leaving .entry-gate__panel {
+      animation: gate-panel-leave 520ms var(--ease) both;
+    }
+  }
+
+  @keyframes gate-arrive {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes gate-panel-arrive {
+    from { opacity: 0; transform: translateY(18px) scale(0.975); filter: blur(8px); }
+    to { opacity: 1; transform: none; filter: none; }
+  }
+
+  @keyframes gate-leave {
+    0% { opacity: 1; transform: translate3d(0, 0, 0); visibility: visible; }
+    99% { opacity: 0; transform: translate3d(0, -110%, 0); visibility: visible; }
+    100% { opacity: 0; transform: translate3d(0, -110%, 0); visibility: hidden; }
+  }
+
+  @keyframes gate-panel-leave {
+    to { opacity: 0; transform: translateY(-28px); }
+  }
+
+  @keyframes gate-drift-a {
+    to { transform: translate(10vw, 8vh) scale(1.08); }
+  }
+
+  @keyframes gate-drift-b {
+    to { transform: translate(-8vw, -6vh) scale(1.12); }
+  }
+
+  @media (max-width: 520px) {
+    .entry-gate__panel { padding-block: 38px; }
+    .entry-gate__tagline { margin-bottom: 26px; }
+  }
+</style>

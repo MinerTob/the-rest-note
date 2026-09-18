@@ -1,0 +1,111 @@
+---
+import { IDENTITY_TAGS, tagLabel } from '@/lib/identity';
+import type { Lang } from '@/i18n/ui';
+interface Props { lang: Lang }
+const { lang } = Astro.props;
+const zh = lang === 'zh';
+---
+<section class="identity" data-identity data-lang={lang} aria-label={zh ? '88 键音乐个性介绍' : '88-key musical introduction'}>
+  <header class="identity__head">
+    <div><p class="label">88 KEYS · A LITTLE OF ME</p><h2>{zh ? '让音乐介绍我' : 'Let the music introduce me'}</h2></div>
+    <span class="identity__piece">CHOPIN<br />NOCTURNE · OP. 9 № 2</span>
+  </header>
+  <ul class="identity__tags" data-identity-arena>
+    {IDENTITY_TAGS.map(tag => <li class="identity__tag" data-identity-tag={tag.id} tabindex="0" role="button" aria-label={tagLabel(tag, lang) + (zh ? '：拖动抛掷，或用方向键移动' : ': drag to throw, or use arrow keys')}>{tagLabel(tag, lang)}</li>)}
+  </ul>
+  <div class="identity__scroll" tabindex="0" aria-label={zh ? '88 键瀑布流，窄屏可横向滚动' : '88-key piano roll; scroll horizontally on narrow screens'}>
+    <canvas class="identity__canvas" data-identity-canvas role="img" aria-label={zh ? 'A0 至 C8：音符落下并点亮对应琴键' : 'A0 to C8: falling notes light the corresponding keys'}></canvas>
+  </div>
+  <div class="identity__controls">
+    <button class="identity__control" data-identity-restart disabled aria-label={zh ? '从头播放' : 'Play from beginning'} title={zh ? '从头播放' : 'Play from beginning'}>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3v4h4M3.7 6.1A5.5 5.5 0 1 1 2.8 10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button class="identity__control identity__control--primary" data-identity-play disabled aria-label={zh ? '播放' : 'Play'}>
+      <svg class="identity__icon-play" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.4 10.2 6 3 10.6Z"/></svg>
+      <svg class="identity__icon-pause" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.5h2.1v9H3zM6.9 1.5H9v9H6.9z"/></svg>
+    </button>
+    <input class="identity__progress" data-identity-progress type="range" min="0" max="1000" step="1" value="0" aria-label={zh ? '演奏进度' : 'Performance position'} disabled />
+    <output class="num" data-identity-time>0:00 / 0:00</output>
+    <label class="identity__volume">{zh ? '音量' : 'Volume'}<input data-identity-volume type="range" min="0" max="1" step="0.01" value="0.85" /></label>
+  </div>
+  <p class="identity__status" data-identity-status role="status">{zh ? '音符落下，九个标签依次落定。' : 'Falling notes bring nine little pieces of me into place.'}</p>
+  <noscript>{zh ? '启用 JavaScript 后可播放钢琴瀑布流。' : 'Enable JavaScript to play the piano roll.'}</noscript>
+  <div class="identity__landing" aria-hidden="true"></div>
+</section>
+<style>
+  .identity { min-width: 0; padding-block: 0; }
+  .identity__head { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+  .identity__head p { margin:0 0 7px; letter-spacing:.14em; }
+  .identity h2 { margin:0; font-size:var(--fs-xl); font-weight:500; }
+  .identity__piece { font-family:var(--font-mono); font-size:10px; line-height:1.8; text-align:right; color:var(--ink-3); letter-spacing:.08em; }
+  .identity__tags { display:flex; flex-wrap:wrap; gap:8px; min-height:70px; align-content:center; padding:18px 0; margin:0; list-style:none; }
+  .identity__tag { padding:5px 12px; border-radius:999px; background:var(--grad-quiet); color:var(--ink-2); font-size:var(--fs-xs); box-shadow:inset 0 1px 0 var(--glass-line-2); }
+  :global([data-identity-arena]) { pointer-events:none; }
+  :global(body > [data-identity-arena]) { position:absolute; inset:0 0 auto; width:100%; padding:0; margin:0; z-index:30; overflow:hidden; list-style:none; }
+  :global(body > [data-identity-arena] .identity__tag) { position:absolute; left:0; top:0; pointer-events:auto; touch-action:none; user-select:none; cursor:grab; white-space:nowrap; padding:11px 22px; min-height:46px; font-size:clamp(15px, 1.2vw, 17px); font-weight:500; line-height:1.6; background:var(--identity-color, var(--paper-2)); color:var(--ink); background-image:linear-gradient(135deg, var(--glass-line-2), transparent 70%); box-shadow:0 3px 12px var(--accent-wash),inset 0 1px 0 var(--glass-line-2); }
+  :global(body > [data-identity-arena] .identity__tag:not([data-revealed])) { visibility:hidden; }
+  :global(body > [data-identity-arena] [data-dragging='true']) { cursor:grabbing; }
+  :global(body > [data-identity-arena] .identity__tag:focus-visible) { outline:2px solid var(--accent); outline-offset:3px; }
+  .identity__landing { height:112px; }
+  .identity__scroll { margin-top:16px; }
+  .identity__scroll { overflow-x:auto; border-radius:14px; background:linear-gradient(180deg, transparent, var(--accent-wash)); scrollbar-width:thin; }
+  .identity__canvas { width:100%; min-width:720px; height:clamp(100px, calc(100svh - 490px), 300px); display:block; max-width:none; }
+  .identity__controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding-top:14px; }
+  .identity__control { flex:none; display:grid; place-items:center; width:36px; height:36px; padding:0; border:1px solid var(--glass-stroke); border-radius:50%; background:var(--glass-3); color:var(--accent-2); box-shadow:var(--inner-glow),var(--shadow-xs); }
+  .identity__control:hover:not(:disabled) { border-color:var(--line-strong); box-shadow:var(--inner-glow),var(--shadow-s),0 0 0 4px var(--accent-wash); }
+  .identity__control:disabled { opacity:.42; cursor:wait; }
+  .identity__control svg { width:14px; height:14px; fill:currentColor; }
+  .identity__control--primary { width:42px; height:42px; background-image:var(--grad-a); color:#fff; }
+  .identity__icon-pause { display:none; }
+  .identity[data-state='playing'] .identity__icon-play { display:none; }
+  .identity[data-state='playing'] .identity__icon-pause { display:block; }
+  .identity__progress { -webkit-appearance:none; appearance:none; flex:1 1 180px; min-width:110px; height:20px; margin:0; background:transparent; cursor:pointer; }
+  .identity__progress::-webkit-slider-runnable-track { height:3px; border-radius:999px; background:linear-gradient(to right,var(--accent-3) 0 var(--progress,0%),var(--line) var(--progress,0%) 100%); }
+  .identity__progress::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:12px; height:12px; margin-top:-5px; border:0; border-radius:50%; background-image:var(--grad-a); box-shadow:0 0 0 4px var(--accent-wash); }
+  .identity__progress::-moz-range-track { height:3px; border-radius:999px; background:var(--line); }
+  .identity__progress::-moz-range-progress { height:3px; border-radius:999px; background-image:var(--grad-b); }
+  .identity__progress::-moz-range-thumb { width:12px; height:12px; border:0; border-radius:50%; background-image:var(--grad-a); box-shadow:0 0 0 4px var(--accent-wash); }
+  .identity__volume { display:flex; gap:8px; align-items:center; margin-left:auto; color:var(--ink-3); font-size:12px; }
+  .identity__volume input { width:90px; accent-color:var(--accent); }
+  .identity__controls output { min-width:88px; font-size:11px; color:var(--ink-3); text-align:right; }
+  .identity__status { min-height:1.6em; margin:10px 0 0; color:var(--ink-3); font-size:12px; }
+  @media(max-width:560px) { .identity__landing { height:160px; } .identity__piece { max-width:120px; font-size:9px; } .identity__tags { min-height:120px; } .identity__controls { gap:8px; } .identity__volume { margin-left:0; } }
+  :global([data-identity-tag="music"]) { --identity-color:var(--identity-music); }
+  :global([data-identity-tag="anime"]) { --identity-color:var(--identity-anime); }
+  :global([data-identity-tag="aviation"]) { --identity-color:var(--identity-aviation); }
+  :global([data-identity-tag="photography"]) { --identity-color:var(--identity-photography); }
+  :global([data-identity-tag="astronomy"]) { --identity-color:var(--identity-astronomy); }
+  :global([data-identity-tag="optimistic"]) { --identity-color:var(--identity-optimistic); }
+  :global([data-identity-tag="direct"]) { --identity-color:var(--identity-direct); }
+  :global([data-identity-tag="persistent"]) { --identity-color:var(--identity-persistent); }
+  :global([data-identity-tag="analytical"]) { --identity-color:var(--identity-analytical); }
+  /* Small tactile stickers; their physical dimensions stay at half the previous size. */
+  :global(body > [data-identity-arena] .identity__tag) {
+    border-radius: 16px 16px 16px 6px;
+    letter-spacing: .025em;
+    box-shadow: inset 0 1px 0 var(--glass-line-2), inset 0 -2px 0 color-mix(in srgb, var(--identity-color), var(--ink) 12%), 0 4px 10px color-mix(in srgb, var(--identity-color), transparent 65%);
+    transition: box-shadow 160ms ease;
+  }
+  :global(body > [data-identity-arena] .identity__tag::before) {
+    content: var(--identity-glyph, '·');
+    position: absolute; left: 7px; top: 50%; transform: translateY(-50%);
+    font-size: 10px; opacity: .6; pointer-events: none;
+  }
+  :global(body > [data-identity-arena] .identity__tag:hover),
+  :global(body > [data-identity-arena] [data-dragging='true']) {
+    box-shadow: inset 0 1px 0 var(--glass-line-2), 0 7px 18px color-mix(in srgb, var(--identity-color), transparent 35%);
+  }
+  :global(html[data-theme='baroque'] body > [data-identity-arena] .identity__tag) {
+    border-radius: 7px 14px 7px 14px;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink), transparent 78%), inset 0 2px 0 var(--glass-line-2), 0 4px 10px var(--accent-wash);
+  }
+  :global([data-identity-tag='music']) { --identity-glyph: '♪'; }
+  :global([data-identity-tag='anime']) { --identity-glyph: '✧'; }
+  :global([data-identity-tag='aviation']) { --identity-glyph: '↗'; }
+  :global([data-identity-tag='photography']) { --identity-glyph: '◉'; }
+  :global([data-identity-tag='astronomy']) { --identity-glyph: '☾'; }
+  :global([data-identity-tag='optimistic']) { --identity-glyph: '☀'; }
+  :global([data-identity-tag='direct']) { --identity-glyph: '→'; }
+  :global([data-identity-tag='persistent']) { --identity-glyph: '∞'; }
+  :global([data-identity-tag='analytical']) { --identity-glyph: '∴'; }
+</style>

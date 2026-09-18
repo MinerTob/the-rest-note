@@ -1,0 +1,302 @@
+---
+import { render } from 'astro:content';
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import T from '@/components/T.astro';
+import { formatIso, formatLongDate, readingMinutes } from '@/lib/format';
+import { fill, localizePath, useTranslations } from '@/i18n/utils';
+import type { Lang } from '@/i18n/ui';
+import type { RoutePair } from '@/lib/routes';
+import type { Post } from '@/lib/content';
+import { postHref } from '@/lib/content';
+
+interface Props {
+  lang: Lang;
+  routes: RoutePair;
+  post: Post;
+  translation?: Post;
+  newer?: Post;
+  older?: Post;
+}
+
+const { lang, routes, post, translation, newer, older } = Astro.props;
+const t = useTranslations(lang);
+const { Content, headings } = await render(post);
+
+const minutes = fill(t('blog.readingTime'), { n: readingMinutes(post.body) });
+const toc = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
+---
+
+<BaseLayout
+  lang={lang}
+  routes={routes}
+  title={post.data.title}
+  description={post.data.description}
+  ogType="article"
+  publishedTime={post.data.pubDate}
+  updatedTime={post.data.updatedDate}
+  rssHref={lang === 'zh' ? '/rss.xml' : '/en/rss.xml'}
+>
+  <div class="wrap post">
+    {/* 标题直接落在背景渐变上，不套卡片 —— 阅读从干净的排版开始 */}
+    <header class="post__head rise">
+      <p class="post__meta meta">
+        <span class="num">{formatIso(post.data.pubDate)}</span>
+        <span class="post__sep" aria-hidden="true">·</span>
+        <span>{minutes}</span>
+        {post.data.tags.length > 0 && (
+          <>
+            <span class="post__sep" aria-hidden="true">·</span>
+            <span>{post.data.tags.join(' / ')}</span>
+          </>
+        )}
+      </p>
+
+      <h1 class="post__title">{post.data.title}</h1>
+
+      {post.data.description && <p class="post__desc">{post.data.description}</p>}
+
+      <p class="post__dates meta">
+        <T k="blog.published" lang={lang} />
+        <time datetime={post.data.pubDate.toISOString()}>{formatLongDate(post.data.pubDate, lang)}</time>
+        {post.data.updatedDate && (
+          <>
+            <span aria-hidden="true">·</span>
+            <T k="blog.updated" lang={lang} />
+            <time datetime={post.data.updatedDate.toISOString()}>
+              {formatLongDate(post.data.updatedDate, lang)}
+            </time>
+          </>
+        )}
+      </p>
+
+      {!translation && lang === 'zh' && (
+        <p class="post__notice">
+          <T k="blog.noTranslation" lang={lang} />
+        </p>
+      )}
+    </header>
+
+    {toc.length > 2 && (
+      <details class="toc glass glass--1" open>
+        <summary class="toc__summary">
+          <span class="toc__label"><T k="blog.toc" lang={lang} /></span>
+        </summary>
+        <ul class="toc__list">
+          {toc.map((heading) => (
+            <li class:list={['toc__item', heading.depth === 3 && 'toc__item--sub']}>
+              <a href={`#${heading.slug}`}>{heading.text}</a>
+            </li>
+          ))}
+        </ul>
+      </details>
+    )}
+
+    {/* 正文 = sheet 纸面。玻璃和渐变只出现在正文之外。 */}
+    <div class="post__body prose rise rise--2">
+      <Content />
+    </div>
+
+    <nav class="post__nav" aria-label={t('blog.prev')}>
+      {older ? (
+        <a class="post__nav-item" href={postHref(older)}>
+          <span class="post__nav-label"><T k="blog.prev" lang={lang} /></span>
+          <span class="post__nav-title">{older.data.title}</span>
+        </a>
+      ) : (
+        <span></span>
+      )}
+      {newer && (
+        <a class="post__nav-item post__nav-item--end" href={postHref(newer)}>
+          <span class="post__nav-label"><T k="blog.next" lang={lang} /></span>
+          <span class="post__nav-title">{newer.data.title}</span>
+        </a>
+      )}
+    </nav>
+
+    <p class="post__back">
+      <a class="more-link" href={localizePath('/blog/', lang)}>
+        <T k="blog.back" lang={lang} />
+      </a>
+    </p>
+  </div>
+</BaseLayout>
+
+<style>
+  .post {
+    padding-block: clamp(24px, 4vw, 46px);
+    display: flex;
+    flex-direction: column;
+    gap: clamp(20px, 3vw, 34px);
+    max-width: calc(var(--measure) + var(--gutter) * 2);
+    margin-inline: auto;
+  }
+
+  .post__head {
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+  }
+
+  .post__meta {
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-2xs);
+    color: var(--ink-4);
+  }
+
+  .post__sep {
+    color: var(--line-strong);
+  }
+
+  .post__title {
+    margin: 0;
+    font-size: clamp(1.65rem, 1.3rem + 1.5vw, 2.3rem);
+    line-height: 1.2;
+    letter-spacing: -0.026em;
+    font-weight: 600;
+  }
+
+  .post__desc {
+    margin: 0;
+    font-size: var(--fs-l);
+    line-height: 1.58;
+    color: var(--ink-2);
+  }
+
+  .post__dates {
+    margin: 2px 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px;
+    font-size: var(--fs-2xs);
+    color: var(--ink-4);
+  }
+
+  .post__notice {
+    margin: 0;
+    padding: 5px 10px;
+    border: 1px solid var(--line-soft);
+    border-radius: 999px;
+    background-color: var(--glass-1);
+    font-size: var(--fs-2xs);
+    color: var(--ink-3);
+    align-self: flex-start;
+  }
+
+  .toc {
+    padding: 11px 15px;
+    align-self: stretch;
+  }
+
+  .toc__summary {
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .toc__summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .toc__summary::after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    margin-left: 2px;
+    border-right: 1px solid var(--ink-4);
+    border-bottom: 1px solid var(--ink-4);
+    transform: rotate(45deg) translateY(-2px);
+    transition: transform var(--dur-2) var(--ease);
+  }
+
+  .toc[open] .toc__summary::after {
+    transform: rotate(-135deg) translateY(-1px);
+  }
+
+  .toc__label {
+    font-size: var(--fs-2xs);
+    color: var(--ink-3);
+  }
+
+  .toc__list {
+    margin: 10px 0 2px;
+    padding: 10px 0 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .toc__item a {
+    font-size: var(--fs-s);
+    color: var(--ink-3);
+    text-decoration: none;
+    transition: color var(--dur-1) var(--ease);
+  }
+
+  .toc__item a:hover {
+    color: var(--accent-2);
+  }
+
+  .toc__item--sub {
+    padding-left: 14px;
+  }
+
+  .post__nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .post__nav-item {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    text-decoration: none;
+    color: inherit;
+  }
+
+  .post__nav-item--end {
+    text-align: right;
+    align-items: flex-end;
+  }
+
+  .post__nav-label {
+    font-size: var(--fs-2xs);
+    color: var(--ink-4);
+  }
+
+  .post__nav-title {
+    font-size: var(--fs-s);
+    color: var(--ink-2);
+    transition: color var(--dur-1) var(--ease);
+  }
+
+  .post__nav-item:hover .post__nav-title {
+    color: var(--accent-2);
+  }
+
+  .post__back {
+    margin: 0;
+  }
+
+  @media (max-width: 620px) {
+    .post__nav {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .post__nav-item--end {
+      text-align: left;
+      align-items: flex-start;
+    }
+  }
+</style>

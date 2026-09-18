@@ -1,0 +1,10 @@
+---
+import PostPage from '@/views/PostPage.astro';
+import { postStaticPaths, type PostProps } from '@/lib/pages';
+
+export const getStaticPaths = () => postStaticPaths('zh');
+
+const { post, translation, newer, older, routes } = Astro.props as PostProps;
+---
+
+<PostPage lang="zh" post={post} translation={translation} newer={newer} older={older} routes={routes} />

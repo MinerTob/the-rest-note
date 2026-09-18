@@ -1,0 +1,223 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import Passthrough from '@/components/Passthrough.astro';
+import T from '@/components/T.astro';
+import NoteRow from '@/components/NoteRow.astro';
+import LcdClock from '@/components/LcdClock.astro';
+import SystemStatus from '@/components/SystemStatus.astro';
+import MusicSystem from '@/components/MusicSystem.astro';
+import ContactPanel from '@/components/ContactPanel.astro';
+import '@/styles/home-glass.css';
+import { FOCUS, SITE } from '@/lib/site';
+import { getPosts } from '@/lib/content';
+import { localizePath } from '@/i18n/utils';
+import type { Lang } from '@/i18n/ui';
+import type { RoutePair } from '@/lib/routes';
+
+interface Props {
+  lang: Lang;
+  routes: RoutePair;
+  embedded?: boolean;
+}
+
+const { lang, routes, embedded = false } = Astro.props;
+const Layout = embedded ? Passthrough : BaseLayout;
+
+const posts = (await getPosts(lang)).slice(0, 4);
+---
+
+<Layout
+  lang={lang}
+  routes={routes}
+  description={SITE.description[lang]}
+  rssHref={lang === 'zh' ? '/rss.xml' : '/en/rss.xml'}
+>
+  <div class="wrap home">
+    {/* 两列各自独立流动：左列是内容，右列是"仪表"。
+        不用等高栅格，否则文章少的时候左列会空出一大块。 */}
+    <div class="home__col home__col--main">
+      {/* 身份：只有名字、几个词、和一行系统读数。没有自我介绍。 */}
+      <section class="home__id rise">
+        <h1 class="home__name">{SITE.name}</h1>
+        <p class="home__tagline">{SITE.tagline[lang]}</p>
+        <ul class="home__focus">
+          {FOCUS.map((word) => (
+            <li class="chip">{word}</li>
+          ))}
+        </ul>
+        <SystemStatus lang={lang} variant="inline" />
+      </section>
+
+      <section class="home__notes rise rise--2">
+        <header class="section-head">
+          <h2 class="section-head__title"><T k="home.recent" lang={lang} /></h2>
+          <a class="more-link" href={localizePath('/blog/', lang)}>
+            <T k="home.recent.all" lang={lang} />
+          </a>
+        </header>
+
+        {posts.length > 0 ? (
+          <ul class="notelist">
+            {posts.map((post) => (
+              <NoteRow post={post} lang={lang} />
+            ))}
+          </ul>
+        ) : (
+          <p class="muted home__empty"><T k="home.empty" lang={lang} /></p>
+        )}
+      </section>
+
+      <section class="home__contact">
+        <header class="section-head">
+          <h2 class="section-head__title"><span class="contact-title-modern">找到我 <span lang="en">/ FIND ME</span></span><span class="contact-title-baroque"><T k="home.contact" lang={lang} /></span></h2>
+        </header>
+
+        <ContactPanel lang={lang} />
+      </section>
+    </div>
+
+    <div class="home__col home__col--side">
+      <aside class="home__clock rise rise--2">
+        <LcdClock lang={lang} />
+      </aside>
+
+      <aside class="home__sound rise rise--3">
+        <MusicSystem lang={lang} variant="full" />
+      </aside>
+
+      <aside class="home__lab rise rise--4">
+        <span class="label label--caps label--dim"><T k="home.lab" lang={lang} /></span>
+        <p class="home__labNote"><T k="home.lab.note" lang={lang} /></p>
+        <a class="more-link" href={localizePath('/lab/', lang)}>
+          <T k="home.lab" lang={lang} />
+        </a>
+      </aside>
+    </div>
+  </div>
+</Layout>
+
+<style>
+  .contact-title-modern span { margin-left: 5px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--ink-3); }
+  .contact-title-baroque { display: none; }
+  :global(html[data-theme='baroque']) .contact-title-modern { display: inline; }
+  :global(html[data-theme='baroque']) .contact-title-baroque { display: none; }
+
+  /* 两列连续栅格：左列是内容，右列是系统读数。
+     DOM 顺序按手机上想要的顺序写，桌面靠 grid-row 归位。 */
+  .home {
+    display: grid;
+    grid-template-columns: minmax(0, 1.62fr) minmax(0, 1fr);
+    gap: clamp(24px, 4vw, 56px);
+    padding-block: clamp(26px, 4.4vw, 48px);
+    align-items: start;
+  }
+
+  /* 每一列自己纵向流动，不受另一列的高度影响 */
+  .home__col {
+    display: flex;
+    flex-direction: column;
+    gap: clamp(28px, 4vw, 52px);
+    min-width: 0;
+  }
+
+  .home__col--side {
+    gap: clamp(16px, 2vw, 24px);
+  }
+
+  .home__id {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding-top: 6px;
+  }
+
+  .home__lab {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 2px;
+  }
+
+  .home__name {
+    margin: 0;
+    font-size: var(--fs-xxl);
+    line-height: 1.02;
+    letter-spacing: -0.035em;
+    font-weight: 600;
+    background-image: var(--grad-a);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .home__tagline { margin:0; max-width:40ch; color:var(--ink-2); font-size:var(--fs-s); line-height:1.8; text-wrap:pretty; }
+
+  .home__focus {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .home__labNote {
+    margin: 0;
+    font-size: var(--fs-xs);
+    color: var(--ink-2);
+  }
+
+  .home__empty {
+    margin: 0;
+    padding: 14px 2px;
+    font-size: var(--fs-s);
+  }
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 10px;
+  }
+
+  .section-head__title {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    margin: 0;
+    font-size: var(--fs-s);
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    color: var(--ink-2);
+  }
+
+
+  .notelist {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  /* 窄屏：两列拆开，重新按"先看什么"的顺序排 */
+  @media (max-width: 900px) {
+    .home {
+      display: flex;
+      flex-direction: column;
+      gap: clamp(26px, 6vw, 40px);
+    }
+
+    .home__col {
+      display: contents;
+    }
+
+    .home__id { order: 1; }
+    .home__clock { order: 2; }
+    .home__notes { order: 3; }
+    /* 联系面是四个通道的容器，窄屏要占满整列，不能缩成内容宽 */
+    .home__contact { order: 4; align-self: stretch; }
+    .home__sound { order: 5; }
+    .home__lab { order: 6; }
+  }
+
+</style>

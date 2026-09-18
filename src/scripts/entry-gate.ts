@@ -1,0 +1,110 @@
+import type { MusicManager } from './music-manager';
+
+let entered = false;
+const ENTRY_KEY = 'rest-note.entry-passed';
+
+function hasPassedEntry(): boolean {
+  try {
+    return window.sessionStorage.getItem(ENTRY_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function rememberEntry(): void {
+  try {
+    window.sessionStorage.setItem(ENTRY_KEY, '1');
+  } catch {
+    /* Privacy mode: keep the in-memory flag for client-side navigation. */
+  }
+}
+
+function forgetEntry(): void {
+  try {
+    window.sessionStorage.removeItem(ENTRY_KEY);
+  } catch {
+    /* Storage may be unavailable in privacy mode. */
+  }
+}
+
+function navigationType(): PerformanceNavigationTiming['type'] {
+  const navigation = performance.getEntriesByType('navigation')[0] as
+    | PerformanceNavigationTiming
+    | undefined;
+  return navigation?.type ?? 'navigate';
+}
+
+function applySystemLanguage(gate: HTMLElement): void {
+  const language = navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+  for (const element of gate.querySelectorAll<HTMLElement>('[data-entry-copy]')) {
+    element.textContent = element.dataset[language] ?? element.dataset.en ?? '';
+  }
+
+  const label = language === 'zh' ? '进入网站' : 'Enter website';
+  gate.setAttribute('aria-label', label);
+  gate.querySelector<HTMLButtonElement>('[data-entry-button]')?.setAttribute('aria-label', label);
+  gate.dataset.language = language;
+  gate.classList.add('is-ready');
+}
+
+function setPageLocked(gate: HTMLElement, locked: boolean): void {
+  document.body.classList.toggle('entry-locked', locked);
+  for (const child of [...document.body.children]) {
+    if (!(child instanceof HTMLElement) || child === gate || child.classList.contains('ambient')) continue;
+    child.inert = locked;
+  }
+}
+
+export function initEntryGate(music: MusicManager): boolean {
+  const gate = document.querySelector<HTMLElement>('[data-entry-gate]');
+  if (!gate) return false;
+
+  // 地址栏输入、书签或外部链接属于一次新的 navigate：必须重新入场。
+  // 只有 reload / back_forward 才沿用已经点击过“进入”的会话标记。
+  const navigation = navigationType();
+  if (!entered && navigation === 'navigate') forgetEntry();
+  entered ||= navigation !== 'navigate' && hasPassedEntry();
+  if (entered) {
+    gate.remove();
+    document.body.classList.remove('entry-locked');
+    return false;
+  }
+
+  applySystemLanguage(gate);
+  setPageLocked(gate, true);
+  const button = gate.querySelector<HTMLButtonElement>('[data-entry-button]');
+  if (!button || gate.dataset.bound) return true;
+  gate.dataset.bound = 'true';
+
+	  const enter = () => {
+	    if (entered) return;
+	    entered = true;
+	    rememberEntry();
+
+    // This call must stay directly inside the trusted click handler: it is what
+    // unlocks audible playback under browser autoplay policies.
+    void music.play();
+
+	    gate.classList.add('is-leaving');
+	    button.disabled = true;
+	    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+	    let cleaned = false;
+	    const cleanup = () => {
+	      if (cleaned) return;
+	      cleaned = true;
+	      setPageLocked(gate, false);
+	      gate.remove();
+	      const main = document.querySelector<HTMLElement>('#main');
+	      if (main) {
+	        main.setAttribute('tabindex', '-1');
+	        main.focus({ preventScroll: true });
+	      }
+	    };
+	    gate.addEventListener('animationend', cleanup, { once: true });
+	    window.setTimeout(cleanup, reduced ? 0 : 820);
+	  };
+
+  button.addEventListener('click', enter, { once: true });
+  window.requestAnimationFrame(() => button.focus({ preventScroll: true }));
+  return true;
+}

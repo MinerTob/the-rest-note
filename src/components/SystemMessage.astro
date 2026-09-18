@@ -1,0 +1,71 @@
+---
+/** 系统提示的容器：平时不可见，被彩蛋触发时才短暂出现。 */
+---
+
+<div class="system-message" data-system-message data-visible="false" role="status" aria-live="polite">
+  <span class="system-message__text" data-system-message-text></span>
+  <span class="system-message__detail" data-system-message-detail hidden></span>
+</div>
+
+<style>
+  /* 小面积的深色 LCD 片，是整站唯一几处深色 —— 用来制造层次。 */
+  .system-message {
+    position: fixed;
+    left: var(--gutter);
+    bottom: clamp(16px, 3vw, 28px);
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-width: min(78vw, 340px);
+    padding: 10px 16px 11px;
+    border-radius: var(--radius-s);
+    background-image: var(--lcd-bg);
+    color: var(--lcd-ink);
+    border: 1px solid var(--lcd-line);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.10),
+      var(--shadow),
+      0 0 28px -14px var(--lcd-glow);
+    opacity: 0;
+    transform: translateY(6px);
+    pointer-events: none;
+    /* visibility 让它在隐藏时彻底离开无障碍树与 Tab 顺序 */
+    visibility: hidden;
+    transition:
+      opacity var(--dur-3) var(--ease),
+      transform var(--dur-3) var(--ease),
+      visibility 0s linear var(--dur-3);
+  }
+
+  .system-message[data-visible='true'] {
+    visibility: visible;
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity var(--dur-3) var(--ease),
+      transform var(--dur-3) var(--ease),
+      visibility 0s;
+  }
+
+  .system-message__text {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    letter-spacing: 0.13em;
+    color: var(--lcd-ink);
+    text-shadow: 0 0 12px var(--lcd-glow);
+  }
+
+  .system-message__detail {
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.04em;
+    color: var(--lcd-ink-dim);
+  }
+
+  @media (max-width: 520px) {
+    .system-message {
+      right: var(--gutter);
+      max-width: none;
+    }
+  }
+</style>

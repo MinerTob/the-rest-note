@@ -1,0 +1,102 @@
+---
+import { ui, type Lang } from '@/i18n/ui';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const label = ui[lang]['theme.switch'];
+---
+
+{/* 只有解锁过至少一首隐藏曲目之后才存在的小椭圆控件。
+    没有解锁时它连位置都不占（hidden），访客看不出这里有东西。
+    颜色刻意不用页面主色：中性银 + 一点香槟金，像一枚实体控制器。 */}
+<div class="themeswitch" data-theme-switch hidden>
+  <button
+    class="themeswitch__btn"
+    type="button"
+    data-theme-switch-btn
+    data-label-zh={ui.zh['theme.switch']}
+    data-label-en={ui.en['theme.switch']}
+    aria-label={label.replace('{theme}', 'baroque')}
+  >
+    <span class="themeswitch__label">{ui[lang]['theme.label']}</span>
+    <span class="themeswitch__value" data-theme-switch-value>BAROQUE</span>
+  </button>
+</div>
+
+<style>
+  .themeswitch {
+    position: fixed;
+    right: clamp(14px, 3vw, 30px);
+    bottom: clamp(14px, 3vw, 26px);
+    z-index: 60;
+  }
+
+  .themeswitch[hidden] {
+    display: none;
+  }
+
+  .themeswitch__btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 28px;
+    padding: 5px 13px 5px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--ctrl-stroke);
+    background-color: var(--ctrl-bg);
+    background-image: var(--ctrl-tint);
+    backdrop-filter: blur(var(--blur-s)) saturate(1.15);
+    -webkit-backdrop-filter: blur(var(--blur-s)) saturate(1.15);
+    box-shadow: inset 0 1px 0 var(--ctrl-highlight), var(--ctrl-shadow);
+    color: var(--ctrl-ink);
+    line-height: 1;
+    transition:
+      transform var(--dur-2) var(--ease),
+      box-shadow var(--dur-2) var(--ease),
+      border-color var(--dur-1) var(--ease);
+  }
+
+  .themeswitch__btn:hover {
+    transform: translateY(-1px);
+    border-color: var(--ctrl-stroke-strong);
+    box-shadow: inset 0 1px 0 var(--ctrl-highlight), var(--ctrl-shadow-lift);
+  }
+
+  .themeswitch__btn:active {
+    transform: translateY(0);
+  }
+
+  .themeswitch__label {
+    font-family: var(--font-mono);
+    font-size: 0.5625rem;
+    letter-spacing: 0.17em;
+    text-transform: uppercase;
+    color: var(--ctrl-ink-2);
+  }
+
+  .themeswitch__value {
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.14em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 一颗很小的实体指示灯，不是纯装饰：它跟着主题换色 */
+  .themeswitch__btn::after {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background-color: var(--ctrl-dot);
+    box-shadow: 0 0 9px -1px var(--ctrl-dot);
+  }
+
+  @media (max-width: 460px) {
+    .themeswitch__label {
+      display: none;
+    }
+  }
+</style>
