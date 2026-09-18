@@ -132,7 +132,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 合成器（无采样兜底） | `src/scripts/synth.ts` | `KeysSynth.unlock()` / `noteOn()` / `noteOff()` / `allNotesOff()` | — |
 | 真实 MIDI 键盘 | `src/scripts/midi.ts` | `MidiBridge`、`getMidiBridge()` | 事件 `midi:noteon` / `midi:noteoff` / `midi:change` |
 | 彩蛋（隐藏曲目） | `src/lib/easter-eggs.ts`、`src/lib/sequences.ts`、`src/scripts/easter-eggs.ts` | `EASTER_EGGS`、`createSequenceDetector()`、`createSequenceSession()`、`EasterEggManager` | `[data-note]`（琴键）、事件 `minilab:note` / `egg:hint` / `egg:accept` / `egg:miss` |
-| About 身份实验场 | `src/components/IdentityStage.astro`、`src/scripts/identity-player.ts`、`identity-physics.ts`、`src/lib/identity.ts`、`identity-midi.ts` | `createIdentityPhysics()`（`reveal()` / `restore()` / `placeMissing()` / `snapshot()`）、`initIdentity()`、`disposeIdentity()`、`setIdentityActive()`、`identityRevealPlan()` | `[data-identity*]`、`[data-identity-tag][data-revealed]`、cookie `rest-note-identity-<visit>` |
+| About 身份实验场 | `src/components/IdentityStage.astro`、`src/scripts/identity-player.ts`、`identity-physics.ts`、`src/lib/identity.ts`、`identity-midi.ts` | `createIdentityPhysics()`（`reveal()` / `restore()` / `placeMissing()` / `snapshot()`，内部 `makeBody()` 管尺寸自愈）、`initIdentity()`、`disposeIdentity()`、`setIdentityActive()`、`identityRevealPlan()` | `[data-identity*]`、`[data-identity-tag][data-revealed]`、cookie `rest-note-identity-v2-<visit>` |
 | 自我介绍页（第十个标签的去处） | `src/views/IntroPage.astro`、`src/pages/about/intro/index.astro`、`src/content/pages/intro.zh.md` / `intro.en.md`、`src/lib/pages.ts` | `getPage('intro', lang)`、`render(entry)`、`introRoutes` | `[data-identity-link]`（写在 About 页的标签上） |
 | 联系方式 / 复制 | `src/components/ContactTiles.astro`、`ContactPanel*.astro`、`src/scripts/contact.ts`、`src/lib/contact.ts` | `initContact()`、`CONTACT`、`isInteractive()` | `[data-contact]`、`[data-contact-row]`、`[data-contact-copy]` |
 | 系统提示 LCD | `src/components/SystemMessage.astro`、`src/scripts/system-message.ts` | `initSystemMessages()` | `[data-system-message]`、window 事件 `space:message` |
@@ -442,18 +442,20 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
 ```
 
 - 标签的入场不是 `scale(0)→scale(1)`，而是被"弹出来"的物理动画：ejection → flight（浅抛物线 + 轻微旋转）→ landing → settle。动画参数在 `IDENTITY_MOTION`。
-- 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数，cookie 名 `rest-note-identity-<visit>`，visit id 每次会话一个）。这份记忆**只当"先摆出来"的兜底**（万一声音还没解锁，页面也不会是一片空地）：`physics.restore()` 之后 `needsAnimation` 仍然是 `true`，音乐一响 `reveal()` 就把已有的身体重新抛回场上再落一次 —— 每次回到这一页，方块都是活的（本人报过"返回之后方块的物理效果就没了"）。`reset()`（重新演奏按钮）会连内部的 `dropped` 一起清空、并 `clearLayout()`，所以下一轮整排重抛。
+- 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数，cookie 名 `rest-note-identity-v2-<visit>`，visit id 每次会话一个；`v2` 是落点格式版本，见下）。这份记忆**只当"先摆出来"的兜底**（万一声音还没解锁，页面也不会是一片空地）：`physics.restore()` 之后 `needsAnimation` 仍然是 `true`，音乐一响 `reveal()` 就把已有的身体重新抛回场上再落一次 —— 每次回到这一页，方块都是活的（本人报过"返回之后方块的物理效果就没了"）。`reset()`（重新演奏按钮）会连内部的 `dropped` 一起清空、并 `clearLayout()`，所以下一轮整排重抛。
+- **落点存的是文档像素坐标**（`{ x, y, angle }` = 本体中心 + 角度），不是归一化比例。曾经存过比例（`(x-left)/(right-left)`、`(floor-y)/floor`），但两种语言的页面高度差几像素，比例还原时会被整体缩放，实测偏 20-80px —— 本人看到的就是"切语言之后标签位移"。改格式记得同时改 `LAYOUT_VERSION`（cookie 名字里那个 `v2`），否则新代码会把旧格式的值当像素读。
+- `bounds()` 与 `restore()` 的夹取只做"别出视口、别陷进地板"（`x ∈ [8, width-8]`、`y ∈ [8, floor-4]`），**不按方块自己的尺寸算**。按尺寸算会出事：脚本刚接手时量到的元素尺寸常常是错的（样式还没应用，实测 46px 的标签量成 134px），一夹就把方块顶歪 44px；按舞台宽度夹也会把更宽的英文标签整排推走（实测偏 75px）。另外 `bounds()` 里有**尺寸自愈**：元素尺寸和造本体时记下的不一样，就用同一个中心重造本体（位置不动，只补尺寸），`document.fonts.ready` 之后还会再量一次。
 - **切语言是唯一的例外：落点原样留着，缺的补齐，不重弹。** 判定靠 `lang.ts` 的 `takeLanguageSwap()`（sessionStorage `space.lang-swap`，见 §5.4），流程是：
   ```ts
   physics.restore(readLayout() ?? []);      // 摆好记忆里的落点
   needsAnimation = !takeLanguageSwap();     // 切语言这一趟 = false
   if (!needsAnimation) physics.placeMissing();  // 没记到的标签补进"静止队形"（不抛、不滚）
   ```
-  三个坑，改这里之前先看：
+  四个坑，改这里之前先看：
   1. **别用模块变量判"这一趟是切语言"**。`navigate()` 在 View Transition 更新完 DOM 时就返回了，新页面的脚本是随后才加载执行的 —— 点击处理器里的收尾早就跑完，模块变量必然已经清空（实测新页面读到的永远是 `false`）。跨页只能用 sessionStorage 记号。
   2. **别用 `restored < tags.length` 当"要不要重落"的判据**。cookie 快照是"上一次全部静止时"写的，而人往往在标签还滚着的时候就点了切换 —— 实测快照只有 7/10 条，`restore()` 返回 7，于是十个标签被整排重抛，看起来就是"切语言之后全弹了一遍"（本人报的 bug）。
   3. **离开页面前要写"此刻"的落点**，不能只靠静止时的那次快照：`disposeCurrent`（`astro:before-swap` → `disposeIdentity()`）里会 `writeLayout(physics.snapshot())`，把正在运动的身体也一并记下来，切到对面语言时才能一个不差地摆回原位。
-  另外：`restore()` 存的是**归一化坐标**（相对舞台左右边界与地面），所以两种语言页面高度略有差别时，落点会跟着边界轻微缩放（实测最大 80px，视觉上是"待在原处"）；这是有意为之 —— 换个窗口尺寸回来也不会跑到屏幕外。
+  4. **别用"刚接手时量到的元素尺寸"去夹位置**。新页面的脚本可能在样式应用之前就跑起来了，这时候 `offsetWidth/offsetHeight` 全是错的（实测 46px 量成 134px），拿它算边界会把方块顶歪 44px。所以夹取只跟视口和地板有关；`bounds()` 会在尺寸对不上时用同一个中心重造本体（见上面那条）。判断"是否零位移"要看**中心点**，别拿 `getBoundingClientRect()` 的 top/left 比 —— 旋转过的方块，盒子一变宽它的外接矩形就会整体移动，那是量法的问题不是 bug。
 - **第十个标签（`intro`）是唯一的例外**：它比别的标签大 0.2 倍，点一下进整页自我介绍（§5.14）。放大用的是 font-size / padding 同比例放大（`calc(基准 * 1.2)`），**不能用 `transform: scale()`** —— 物理引擎每帧都会重写 inline `transform`。
 - 点按判定在 `identity-physics.ts`：按下后位移 < 8px、且 0.7s 内抬手才算"点击"；拖动过就不算（"抛掷"不能被误认成"点开"）。命中 + 元素带 `data-identity-link` 才回调 `onActivate`，由 `identity-player.ts` 走 `astro:transitions/client` 的 `navigate()`（失败退回 `location.assign`）；键盘上按回车同样打开。
 - **拖动不能触发链接**：第十个标签是 `<a href>`，浏览器在 `pointerup` 之后还会自己补一发 `click`（`setPointerCapture` 让目标仍是它），光靠点按判定拦不住。所以只要这一次抬手不算点按，就把 `swallowClickUntil` 设成"现在 + 300ms"，由文档级捕获阶段的 `click` 监听把这一发 `click.preventDefault()` 掉 —— 拖完标签不会跟着跳页（本人报过的 bug），点一下照常进自我介绍页。
@@ -673,6 +675,20 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 验证：npm test / npm run check / 浏览器实测结果
 ```
 
+### 2026-09-19 · 关于页切语言：标签真正零位移（落点改存像素坐标 + 尺寸自愈）
+
+- 需求：本人复报"事实证明位移还是存在"，并让我自己进自我介绍页和关于页各试一次。
+- 复现与根因（无头 Chrome 1280×800，比的是标签**中心点**，不是外接矩形）：
+  1) `bounds()` 里 `y: Math.min(b.position.y, floor - 50)` 是一刀切：躺在地板上的方块中心是 `floor - h/2 ≈ 545`，被抬到 `floor - 50 = 518` —— 整整 **27px**，切语言时看着就是"位移"。
+  2) 落点当时存的是归一化比例，两种语言页面高度差几像素就会整体缩放，实测偏 20-80px。
+  3) 夹取按方块尺寸算，而**新页面的脚本比样式先到**：实测 46px 的标签被量成 134px，`floor - h/2` 于是把它夹歪 44px。
+  4) 按舞台宽度夹 x，会把更宽的英文标签往左推，最宽的那个偏 75px。
+- 文件：`src/scripts/identity-physics.ts`、`src/scripts/identity-player.ts`、`DEVELOPMENT.md`。
+- 函数：`IdentityLayout` 改存文档像素坐标，`snapshot()` 直接给 `body.position`；新增内部 `makeBody()`（造本体 + 记下尺寸）；`bounds()` 加**尺寸自愈**（尺寸对不上就用同一个中心重造本体）和松夹取（只跟视口、地板有关）；`restore()` 同样松夹取、并先移除同位的旧本体；`dispose()` 加 `disposed` 守卫；`document.fonts.ready` 之后再跑一次 `bounds()`。`identity-player.ts` 加 `LAYOUT_VERSION = 'v2'`。
+- 钩子/数据：cookie 更名 `rest-note-identity-<visit>` → `rest-note-identity-v2-<visit>`（格式变了，旧值被当像素读会把方块甩到左上角）。
+- 要点：位置**不能**依赖"当时量到的元素尺寸"和"舞台当时多高"；夹取只做"别出视口、别陷地板"；判断有没有位移看中心点（旋转过的方块，盒子一变宽外接矩形就会动）。细节见 §5.8。
+- 验证：无头 Chrome（1280×800）实测 `/about/` → 点 EN，等标签完全静止（漂移 0）后比中心点：**十个标签全部 `[0, 0]`**（修前 -10 ~ -44px）；"记录值 vs 实际渲染" `[0, 0]`。`/about/intro/` 切语言：`scrollY` 60 → 60，`h1`、返回按钮位置不变。`npm test` 69/69、`npm run check` 0 错误 0 警告、`npm run build` 17 页。
+
 ### 2026-09-19 · 关于页切语言：标签不再重弹，落点和滚动位置都留在原处
 
 - 需求：本人反馈"其他地方点击切换翻译都正常了，但在关于页面点击切换翻译后还是会发生位移，而且那些所有的标签会重新弹出来"。
@@ -683,7 +699,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 函数：`lang.ts` 删掉模块态 `swappingLanguage` / `isLanguageSwap()`，改为 `markLanguageSwap(pathname)`（换页前写 sessionStorage 记号）+ `takeLanguageSwap()`（目标页取走一次，对不上就丢掉）；`identity-physics.ts` 新增 `placeMissing()`（把没记到的标签补进静止队形，不抛不滚）；`identity-player.ts` 改成 `needsAnimation = !takeLanguageSwap()`、切语言时 `physics.placeMissing()`，并在 `disposeCurrent`（`astro:before-swap` 调 `disposeIdentity()`）里 `writeLayout(physics.snapshot())` 把"此刻"的落点写全。
 - 钩子/数据：新增 sessionStorage `space.lang-swap`（一次性）；没有新的 `data-*`、没有新的自定义事件。
 - 要点：跨页状态**不能放模块变量**（新页面脚本的执行时机在 `navigate()` 返回之后）；落点快照要"离开前现写"，不能只靠静止时的旧快照；判"要不要重落"也别用 `restored < tags.length`。三条坑写在 §5.8。
-- 验证：无头 Chrome（1280×620）实测 `/about/` → 点 EN：切前 `y=53`、10 个标签落定、cookie 7/10；切后 `/en/about/` 仍是 `y=53`，`[data-revealed]` 全程 10 个（修前掉到 7 再涨回 10 = 重弹），cookie 补齐 10/10，标签最大位移从 **414px 降到 80px**（剩下的 80px 是两种语言舞台高度差带来的归一化缩放，不是重弹）。`npm test` 69/69、`npm run check` 0 错误 0 警告、`npm run build` 17 页。
+- 验证：无头 Chrome（1280×620）实测 `/about/` → 点 EN：切前 `y=53`、10 个标签落定、cookie 7/10；切后 `/en/about/` 仍是 `y=53`，`[data-revealed]` 全程 10 个（修前掉到 7 再涨回 10 = 重弹），cookie 补齐 10/10，标签最大位移从 **414px 降到 80px**（当时以为这 80px 只是归一化缩放，后来发现它是真的位移，见最上面那条）。`npm test` 69/69、`npm run check` 0 错误 0 警告、`npm run build` 17 页。
 
 ### 2026-09-19 · 修掉"焦点圈又冒出来"：身份标签与入场页按钮上的蓝框
 

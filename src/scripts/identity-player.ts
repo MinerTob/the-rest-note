@@ -31,6 +31,8 @@ let disposeCurrent: (() => void) | undefined;
 let setActiveCurrent: ((active: boolean) => void) | undefined;
 
 const VISIT_KEY = 'rest-note.identity-visit';
+/** 落点格式版本：v1 存归一化比例，v2 起存文档像素坐标 —— 换名字，免得把旧值当像素读。 */
+const LAYOUT_VERSION = 'v2';
 function layoutCookieName(): string {
   let visit = '';
   try {
@@ -42,7 +44,7 @@ function layoutCookieName(): string {
   } catch {
     visit = Math.random().toString(36).slice(2);
   }
-  return `rest-note-identity-${visit}`;
+  return `rest-note-identity-${LAYOUT_VERSION}-${visit}`;
 }
 const layoutCookie = layoutCookieName();
 function readLayout(): IdentityLayout | undefined {
