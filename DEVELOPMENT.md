@@ -610,6 +610,15 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 验证：npm test / npm run check / 浏览器实测结果
 ```
 
+### 2026-09-19 · 仓库重建 + 上传 GitHub（Git LFS）
+
+- 需求：把项目从旧的 ximu 仓库里拆出来独立成新仓库；补全 README；清掉旧 git 历史；音频等大文件交给 Git LFS。
+- 文件：`README.md`（重写补全：目录 / 功能一览 / 技术栈 / 部署 / 仓库与 Git LFS / 许可与署名，并修正 SITE.name 等过时描述）、`.gitignore`（新增 `.codegraph/`、`.git-backup-ximu/`、`*.tsbuildinfo`、系统杂物）、`.gitattributes`（新增：`* text=auto eol=lf` + LFS 规则）、`DEVELOPMENT.md`。
+- 函数：无 —— 不动任何运行时代码。
+- 钩子/数据：无。
+- 仓库状态：旧历史整份备份到 `.git-backup-ximu/`（已 gitignore，可删）；`.git` 清空后 `git init -b main`；`origin` = https://github.com/MinerTob/the-rest-note 。
+- LFS：`git lfs ls-files` 32 个对象（30 个钢琴采样 + `dao-xiang.mp3` + `secret/canon.mp3`，约 12 MB）。SVG / MIDI 刻意**不**走 LFS。
+- 验证：`git log` 只有一条初始提交；`git status` 干净；推送后远端 `main` 与全部 LFS 对象上传完成。
 ### 2026-09-19 · 语言切换改为"文字滑出 / 滑入"
 
 - 需求：切换语言时**只有文字动** —— 旧文字向左滑出，新语言文字从右滑入；删掉之前"整页各层一起滑动"的动画。

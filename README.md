@@ -342,12 +342,18 @@ html[data-theme='...']     → 其它主题
 
 ## 仓库与 Git LFS
 
+仓库地址：<https://github.com/MinerTob/the-rest-note>
+
 仓库用 **Git LFS** 管理媒体大文件，规则写在 `.gitattributes`：
 
 ```
-*.mp3 *.wav *.mid *.mp4 *.webm *.mov *.mkv *.zip   # 音频 / 视频 / 压缩包
-*.png *.jpg *.jpeg *.gif *.webp *.ico *.svg        # 图片
+*.mp3 *.wav *.flac *.m4a *.ogg *.aac                              # 音频
+*.mp4 *.webm *.mov *.mkv                                          # 视频
+*.png *.jpg *.jpeg *.gif *.webp *.avif *.ico *.bmp *.psd          # 位图
+*.zip *.7z *.rar                                                  # 压缩包
 ```
+
+SVG 图标**不**走 LFS：它们是纯文本，留在普通 Git 里才能 diff 和 review。新增音频/图片时按上面的后缀走，不用改规则。
 
 克隆与更新：
 
