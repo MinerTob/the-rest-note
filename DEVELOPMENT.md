@@ -610,6 +610,20 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 验证：npm test / npm run check / 浏览器实测结果
 ```
 
+### 2026-09-19 · 部署到 Render（Static Site）
+
+- 需求：把仓库部署到 Render，线上可访问。
+- 站点：https://the-rest-note.onrender.com （Static Site，Service ID `srv-damndi8u01pc7389r0q0`）
+- 配置：仓库 `MinerTob/the-rest-note`、分支 `main`、Build Command `npm ci && npm run build`、Publish Directory `dist`、**没有环境变量**。
+- 文件：`DEVELOPMENT.md`（本条）。`.node-version` 与 `package.json` 的 `engines` 沿用上一条，未改动。
+- 函数：无 —— 不动任何运行时代码。
+- 钩子/数据：无。
+- 要点：
+  - **Render 会正常拉取 Git LFS 对象。** 实测上线后的 `public/music/*.mp3` 与 `public/audio/piano/*.mp3` 是真实音频（字节数与本地完全一致），不是 128 字节的 LFS 指针。之前担心的「静态托管拿不到 LFS」在这条链路上不存在，所以构建命令里**不需要**额外的 `git lfs pull`。
+  - Node 版本由仓库的 `.node-version`（`22.22.0`）决定，构建日志打印 `Using Node.js version 22.22.0 via /opt/render/project/src/.node-version`。**不要在 Render 后台加 `NODE_VERSION` 环境变量** —— 它的优先级高于 `.node-version`，会把仓库里的版本声明顶掉（已踩过一次，加完又删掉了）。
+  - 推送 `main` 会触发自动部署（Auto-Deploy 默认开启）。
+  - `astro.config.mjs` 的 `site` 与 `SITE.url` 仍是 `https://example.com`，换正式域名之前 canonical / RSS / sitemap 都指向示例域名。
+- 验证：三次部署全部 `Deploy succeeded | Live`（首次 18.8s、去掉环境变量后 15.2s、换成 `npm ci` 后 20.3s）；线上 `/`、`/blog/`、`/en/`、`/lab/`、`/about/`、`/rss.xml`、`/sitemap-index.xml` 均 200；4 个音频文件线上字节数与本地逐字节一致；真实浏览器打开首页，LCD 时钟（UTC+08:00 新加坡）、MiniLab 25 键、88 键标签、背景音乐（DAO XIANG 播放中 `0:01 / 3:38`）全部正常。
 ### 2026-09-19 · 修复 Render 部署失败（Node 版本）
 
 - 需求：Render 上绑这个仓库后构建失败。
