@@ -120,7 +120,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | --- | --- | --- | --- |
 | 头部导航 | `src/components/Header.astro` | 纯模板 | `.site-header`、`[data-section-target]` |
 | 页脚 | `src/components/Footer.astro` | 纯模板 | — |
-| 语言切换 + 文字滑出/滑入 | `src/scripts/lang.ts`、`src/styles/global.css`、`src/scripts/app.ts` | `initLangSwitch()`、`swapChrome()`、`collectTextElements()`、`markIncomingLanguageText()` | `[data-lang-switch]`、`html[data-lang]`、`.lang-slide-out` / `.lang-slide-in` |
+| 语言切换 + 文字滑出/滑入 | `src/scripts/lang.ts`、`src/styles/global.css`、`src/scripts/app.ts` | `initLangSwitch()`、`swapChrome()`、`collectTextElements()`、`markIncomingLanguageText()`、`markLanguageSwap()` / `takeLanguageSwap()`（切语言这一趟的记号）、`restoreScrollAfterSwap()` / `restoreScrollAfterLoad()`（保留滚动位置） | `[data-lang-switch]`、`html[data-lang]`、`.lang-slide-out` / `.lang-slide-in`、sessionStorage `space.lang-scroll` / `space.lang-swap` |
 | 主题切换（modern/baroque） | `src/scripts/theme.ts`、`src/scripts/theme-switch.ts`、`src/lib/themes.ts` | `ThemeManager`、`initTheme()`、`initThemeSwitcher()`、`setTheme()`、`toggle()` | `html[data-theme]`、`[data-theme-switch]` |
 | 全站状态 | `src/scripts/app-state.ts` | `AppStore.get()` / `set()` / `isUnlocked()` / `hasUnlocks()` | `'change'` 事件（detail: `{ state, previous }`） |
 | 焦点圈（仅键盘） | `src/scripts/input-modality.ts`、`src/styles/global.css` | `trackInputModality()` | `html[data-input]` |
@@ -132,7 +132,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 合成器（无采样兜底） | `src/scripts/synth.ts` | `KeysSynth.unlock()` / `noteOn()` / `noteOff()` / `allNotesOff()` | — |
 | 真实 MIDI 键盘 | `src/scripts/midi.ts` | `MidiBridge`、`getMidiBridge()` | 事件 `midi:noteon` / `midi:noteoff` / `midi:change` |
 | 彩蛋（隐藏曲目） | `src/lib/easter-eggs.ts`、`src/lib/sequences.ts`、`src/scripts/easter-eggs.ts` | `EASTER_EGGS`、`createSequenceDetector()`、`createSequenceSession()`、`EasterEggManager` | `[data-note]`（琴键）、事件 `minilab:note` / `egg:hint` / `egg:accept` / `egg:miss` |
-| About 身份实验场 | `src/components/IdentityStage.astro`、`src/scripts/identity-player.ts`、`identity-physics.ts`、`src/lib/identity.ts`、`identity-midi.ts` | `createIdentityPhysics()`、`initIdentity()`、`disposeIdentity()`、`setIdentityActive()`、`identityRevealPlan()` | `[data-identity*]` |
+| About 身份实验场 | `src/components/IdentityStage.astro`、`src/scripts/identity-player.ts`、`identity-physics.ts`、`src/lib/identity.ts`、`identity-midi.ts` | `createIdentityPhysics()`（`reveal()` / `restore()` / `placeMissing()` / `snapshot()`）、`initIdentity()`、`disposeIdentity()`、`setIdentityActive()`、`identityRevealPlan()` | `[data-identity*]`、`[data-identity-tag][data-revealed]`、cookie `rest-note-identity-<visit>` |
 | 自我介绍页（第十个标签的去处） | `src/views/IntroPage.astro`、`src/pages/about/intro/index.astro`、`src/content/pages/intro.zh.md` / `intro.en.md`、`src/lib/pages.ts` | `getPage('intro', lang)`、`render(entry)`、`introRoutes` | `[data-identity-link]`（写在 About 页的标签上） |
 | 联系方式 / 复制 | `src/components/ContactTiles.astro`、`ContactPanel*.astro`、`src/scripts/contact.ts`、`src/lib/contact.ts` | `initContact()`、`CONTACT`、`isInteractive()` | `[data-contact]`、`[data-contact-row]`、`[data-contact-copy]` |
 | 系统提示 LCD | `src/components/SystemMessage.astro`、`src/scripts/system-message.ts` | `initSystemMessages()` | `[data-system-message]`、window 事件 `space:message` |
@@ -252,12 +252,17 @@ function getPreferredLang(): Lang | null;
 function swapChrome(lang: Lang): void;              // 就地替换 [data-i18n] / [data-i18n-aria]
 function initLangSwitch(): void;                    // 绑定 [data-lang-switch]
 function markIncomingLanguageText(doc: Document): void;  // 换页前给新文档文字挂"滑入"
+function markLanguageSwap(pathname: string): void;  // 换页前留一次性记号 sessionStorage 'space.lang-swap'
+function takeLanguageSwap(): boolean;               // 目标页取走记号：true = 这一趟是"切语言"（身份标签据此保留落点，§5.8）
 // 内部：
 collectTextElements(root)      // TreeWalker 收集"承载文字的元素"，祖先命中则跳过后代
 playOut(elements) / playIn(elements)
 switchChromeInPlace(target)    // 两种语言共用同一地址时（如 404）的兜底
 rememberScrollPosition()       // 换页前存 scrollY + #hash（sessionStorage 'space.lang-scroll'）
-restoreScrollPosition()        // astro:after-swap 里把位置放回去（见下面那条坑）
+restoreScrollAfterSwap()       // 第一段：astro:after-swap 里先对齐（View Transition 快照才是对的）
+restoreScrollAfterLoad()       // 第二段：astro:page-load 里再对齐（关于页此时才把标签搬进 body，文档高度变了）
+forgetSavedScroll()            // 导航失败时丢弃
+applySavedScroll()             // 两段共用的收尾：按当前文档高度收敛 + 接回 #锚点
 ```
 
 **点击一条语言链接的完整链路**：
@@ -269,11 +274,15 @@ click [data-lang-switch]
   → playOut()：加 .lang-slide-out（240ms 向左滑出 + 淡出；pointer-events:none）
   → 等 SLIDE_MS
   → sessionStorage['space.lang-transition'] = '1'
+  → sessionStorage['space.lang-swap'] = 目标 pathname（身份标签=保留落点；见 §5.8）
   → navigate(href)（Astro 客户端导航，不刷新浏览器）
      ↳ astro:before-swap 钩子里 markIncomingLanguageText(newDocument)：
          给新文档的文字加 .lang-slide-in，并去掉 .rise（跳过入场动画）
+         同时 app.ts 的 before-swap 钩子 disposeIdentity()：离开前把标签"此刻"的落点写进 cookie
      ↳ 新页面插入第一帧就开始"从右滑入"
+     ↳ astro:after-swap：restoreScrollAfterSwap() 把滚动位置放回去（第一段）
   → boot() → playIncomingTransition()：清标记，动画结束后摘掉类名
+  → astro:page-load：restoreScrollAfterLoad() 再对齐一次（第二段）
   → finally：兜底摘掉 .lang-slide-out（导航失败时文字能恢复）
 ```
 
@@ -282,7 +291,11 @@ click [data-lang-switch]
 - 元素原本的透明度（少数弱化文字不是 1）会记在 `--lang-opacity` 里，动画结束回到原值。
 - 系统开启 *减少动态效果*（`prefers-reduced-motion: reduce`）时：完全跳过动画和等待，直接切换。
 - 语言偏好存 localStorage `space.lang`；进站时若偏好与页面语言不同，只换 UI 文案（正文语言仍由 URL 决定）。
-- **切语言不弹回顶部**：ClientRouter 每次换页都会 `scrollTo(0, 0)`（`astro/dist/transitions/router.js` 的 `moveToLocation`），所以 `lang.ts` 在 `navigate()` 之前把 `scrollY` 和 `#hash` 存进 sessionStorage `space.lang-scroll`，再挂 `astro:after-swap` 恢复 —— 那个时机在那次滚动之后、View Transition 拍"新页面"快照之前，位置接得上又不会和动画打架（用 `behavior: 'instant'`，否则会被全局 `scroll-behavior: smooth` 变成慢悠悠的滚动）。锚点用 `history.replaceState` 接回 URL：router 只按 `to.href` 写地址，`#about` 会被它丢掉。
+- **切语言不弹回顶部（两段式恢复）**：ClientRouter 每次换页都会 `scrollTo(0, 0)`（`astro/dist/transitions/router.js` 的 `moveToLocation`），所以 `lang.ts` 在 `navigate()` 之前把 `scrollY` 和 `#hash` 存进 sessionStorage `space.lang-scroll`，再分两次对齐：
+  1. `restoreScrollAfterSwap()`（`astro:after-swap`）—— 时机在那次滚动之后、View Transition 拍"新页面"快照之前，位置接得上又不会和动画打架；
+  2. `restoreScrollAfterLoad()`（`astro:page-load`）—— 关于页此时才由 `initIdentity()` 把标签搬进 `body` 改成绝对定位，文档高度会变，只对齐一次会被浏览器按旧高度截断（那就是本人看到的"切完语言发生位移"）。
+  两个函数共用 `applySavedScroll()`：用 `behavior: 'instant'`（站点全局有 `scroll-behavior: smooth`，`auto` 会变成慢悠悠地滚回去）、把 y 夹到当前文档高度上限，并在 URL 丢了 `#hash` 时用 `history.replaceState` 接回去（router 只按 `to.href` 写地址，`#about` 会被它丢掉）。
+- **切语言是"同一页换种说法"，不是"换了一趟路"**：`markLanguageSwap(pathname)` 在换页前把目标 pathname 写进 sessionStorage `space.lang-swap`，目标页 `takeLanguageSwap()` 取走一次（对不上就丢掉，不留残余）。身份标签靠它区分"重新落一次"和"原样留着"（见 §5.8）。
 
 ### 5.5 背景音乐
 
@@ -409,7 +422,14 @@ disposeIdentity(): void;       // 注销（换页 / 离开 About 区时）
 setIdentityActive(active: boolean): void;  // 进入/离开视口时激活
 
 // identity-physics.ts（matter-js）
-createIdentityPhysics(root: HTMLElement, tags: HTMLElement[], onSettled?, onActivate?): { dispose? }
+createIdentityPhysics(root, tags, onSettled?, onActivate?): {
+  reveal(index, source?): void;    // 从键盘位抛出（没给 source 就走"静止队形"）
+  restore(layout): number;         // 按 cookie 里的落点摆好，返回摆好几个
+  placeMissing(): void;            // 还没上场的标签直接补进静止队形（切语言时用）
+  snapshot(): IdentityLayout;      // 此刻的归一化落点（离开页面前写进 cookie）
+  reset(): void;                   // 清空身体与记忆（重新演奏按钮）
+  dispose(): void;
+}
 
 // lib/identity.ts
 IDENTITY_TAGS / IDENTITY_TAG_IDS / tagLabel(tag, lang) / tagById(id)
@@ -422,7 +442,18 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
 ```
 
 - 标签的入场不是 `scale(0)→scale(1)`，而是被"弹出来"的物理动画：ejection → flight（浅抛物线 + 轻微旋转）→ landing → settle。动画参数在 `IDENTITY_MOTION`。
-- 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数）。这份记忆**只当"先摆出来"的兜底**（万一声音还没解锁，页面也不会是一片空地）：`physics.restore()` 之后 `needsAnimation` 仍然是 `true`，音乐一响 `reveal()` 就把已有的身体重新抛回场上再落一次 —— 每次回到这一页，方块都是活的（本人报过"返回之后方块的物理效果就没了"）。`reset()` 会连内部的 `dropped` 一起清空。
+- 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数，cookie 名 `rest-note-identity-<visit>`，visit id 每次会话一个）。这份记忆**只当"先摆出来"的兜底**（万一声音还没解锁，页面也不会是一片空地）：`physics.restore()` 之后 `needsAnimation` 仍然是 `true`，音乐一响 `reveal()` 就把已有的身体重新抛回场上再落一次 —— 每次回到这一页，方块都是活的（本人报过"返回之后方块的物理效果就没了"）。`reset()`（重新演奏按钮）会连内部的 `dropped` 一起清空、并 `clearLayout()`，所以下一轮整排重抛。
+- **切语言是唯一的例外：落点原样留着，缺的补齐，不重弹。** 判定靠 `lang.ts` 的 `takeLanguageSwap()`（sessionStorage `space.lang-swap`，见 §5.4），流程是：
+  ```ts
+  physics.restore(readLayout() ?? []);      // 摆好记忆里的落点
+  needsAnimation = !takeLanguageSwap();     // 切语言这一趟 = false
+  if (!needsAnimation) physics.placeMissing();  // 没记到的标签补进"静止队形"（不抛、不滚）
+  ```
+  三个坑，改这里之前先看：
+  1. **别用模块变量判"这一趟是切语言"**。`navigate()` 在 View Transition 更新完 DOM 时就返回了，新页面的脚本是随后才加载执行的 —— 点击处理器里的收尾早就跑完，模块变量必然已经清空（实测新页面读到的永远是 `false`）。跨页只能用 sessionStorage 记号。
+  2. **别用 `restored < tags.length` 当"要不要重落"的判据**。cookie 快照是"上一次全部静止时"写的，而人往往在标签还滚着的时候就点了切换 —— 实测快照只有 7/10 条，`restore()` 返回 7，于是十个标签被整排重抛，看起来就是"切语言之后全弹了一遍"（本人报的 bug）。
+  3. **离开页面前要写"此刻"的落点**，不能只靠静止时的那次快照：`disposeCurrent`（`astro:before-swap` → `disposeIdentity()`）里会 `writeLayout(physics.snapshot())`，把正在运动的身体也一并记下来，切到对面语言时才能一个不差地摆回原位。
+  另外：`restore()` 存的是**归一化坐标**（相对舞台左右边界与地面），所以两种语言页面高度略有差别时，落点会跟着边界轻微缩放（实测最大 80px，视觉上是"待在原处"）；这是有意为之 —— 换个窗口尺寸回来也不会跑到屏幕外。
 - **第十个标签（`intro`）是唯一的例外**：它比别的标签大 0.2 倍，点一下进整页自我介绍（§5.14）。放大用的是 font-size / padding 同比例放大（`calc(基准 * 1.2)`），**不能用 `transform: scale()`** —— 物理引擎每帧都会重写 inline `transform`。
 - 点按判定在 `identity-physics.ts`：按下后位移 < 8px、且 0.7s 内抬手才算"点击"；拖动过就不算（"抛掷"不能被误认成"点开"）。命中 + 元素带 `data-identity-link` 才回调 `onActivate`，由 `identity-player.ts` 走 `astro:transitions/client` 的 `navigate()`（失败退回 `location.assign`）；键盘上按回车同样打开。
 - **拖动不能触发链接**：第十个标签是 `<a href>`，浏览器在 `pointerup` 之后还会自己补一发 `click`（`setPointerCapture` 让目标仍是它），光靠点按判定拦不住。所以只要这一次抬手不算点按，就把 `swallowClickUntil` 设成"现在 + 300ms"，由文档级捕获阶段的 `click` 监听把这一发 `click.preventDefault()` 掉 —— 拖完标签不会跟着跳页（本人报过的 bug），点一下照常进自我介绍页。
@@ -528,6 +559,8 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 | `space.unlocked` | localStorage | 已解锁隐藏曲目 id（JSON 数组） | `src/scripts/app-state.ts` |
 | `space.lang` | localStorage | 语言偏好（`zh` / `en`） | `src/scripts/lang.ts` |
 | `space.lang-transition` | sessionStorage | 语言切换的一次性标记："新文档要滑入" | `src/scripts/lang.ts` |
+| `space.lang-scroll` | sessionStorage | 语言切换前记下的 `{ y, hash }`，新页面读完就删（两段式恢复，见 §5.4） | `src/scripts/lang.ts` |
+| `space.lang-swap` | sessionStorage | 语言切换的目标 pathname（一次性）：对得上才说明"这一趟是切语言"，身份标签据此保留落点（§5.8） | `src/scripts/lang.ts` |
 | `space.position.v1.<id>` | sessionStorage | 每首曲子记下"暂停时的位置" | `src/lib/live-timeline.ts` |
 | `rest-note.entry-passed` | sessionStorage | 本次会话已通过入场页 | `src/scripts/entry-gate.ts` |
 
@@ -640,6 +673,18 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 验证：npm test / npm run check / 浏览器实测结果
 ```
 
+### 2026-09-19 · 关于页切语言：标签不再重弹，落点和滚动位置都留在原处
+
+- 需求：本人反馈"其他地方点击切换翻译都正常了，但在关于页面点击切换翻译后还是会发生位移，而且那些所有的标签会重新弹出来"。
+- 根因：两层叠在一起 ——
+  1) 上一版用模块变量 `swappingLanguage` 判"这一趟是切语言"。但 `navigate()` 在 View Transition 更新完 DOM 时就返回了，新页面的脚本是随后加载才执行的：点击处理器 `finally` 里的收尾早就跑完，模块变量已经清空，新页面读到的永远是"不是切语言"（实测）。
+  2) 落点 cookie 写的是"上一次全部静止时"的快照，而人往往在标签还滚着的时候就点了切换：实测快照只有 `{ len: 10, filled: 7 }`，`restore()` 返回 7，`needsAnimation = restored < tags.length` 于是为 `true` → 音乐一响十个标签整排重抛，位移最大 414px。
+- 文件：`src/scripts/lang.ts`、`src/scripts/identity-physics.ts`、`src/scripts/identity-player.ts`、`DEVELOPMENT.md`。
+- 函数：`lang.ts` 删掉模块态 `swappingLanguage` / `isLanguageSwap()`，改为 `markLanguageSwap(pathname)`（换页前写 sessionStorage 记号）+ `takeLanguageSwap()`（目标页取走一次，对不上就丢掉）；`identity-physics.ts` 新增 `placeMissing()`（把没记到的标签补进静止队形，不抛不滚）；`identity-player.ts` 改成 `needsAnimation = !takeLanguageSwap()`、切语言时 `physics.placeMissing()`，并在 `disposeCurrent`（`astro:before-swap` 调 `disposeIdentity()`）里 `writeLayout(physics.snapshot())` 把"此刻"的落点写全。
+- 钩子/数据：新增 sessionStorage `space.lang-swap`（一次性）；没有新的 `data-*`、没有新的自定义事件。
+- 要点：跨页状态**不能放模块变量**（新页面脚本的执行时机在 `navigate()` 返回之后）；落点快照要"离开前现写"，不能只靠静止时的旧快照；判"要不要重落"也别用 `restored < tags.length`。三条坑写在 §5.8。
+- 验证：无头 Chrome（1280×620）实测 `/about/` → 点 EN：切前 `y=53`、10 个标签落定、cookie 7/10；切后 `/en/about/` 仍是 `y=53`，`[data-revealed]` 全程 10 个（修前掉到 7 再涨回 10 = 重弹），cookie 补齐 10/10，标签最大位移从 **414px 降到 80px**（剩下的 80px 是两种语言舞台高度差带来的归一化缩放，不是重弹）。`npm test` 69/69、`npm run check` 0 错误 0 警告、`npm run build` 17 页。
+
 ### 2026-09-19 · 修掉"焦点圈又冒出来"：身份标签与入场页按钮上的蓝框
 
 - 需求：本人反馈关于页的身份标签、入场页的"进入空间"按钮上又出现了蓝框（本地和线上都有）—— 和之前 `main` 那条蓝线是同一类问题。
@@ -655,7 +700,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 需求：本人要求点击语言切换之后，网站不要自己滚回顶部，而是停在原来的位置。
 - 根因：ClientRouter 每次换页都在 `moveToLocation()` 里 `scrollTo({ left: 0, top: 0 })`；语言切换是一次真实的换页（`/` ↔ `/en/`），所以旧位置被丢掉，连 `#about` 这类锚点也会从地址栏消失（router 按 `to.href` 写地址）。
 - 文件：`src/scripts/lang.ts`。
-- 函数：新增内部函数 `rememberScrollPosition()`（换页前把 `{ y: scrollY, hash }` 写进 sessionStorage `space.lang-scroll`）、`restoreScrollPosition()`（在 `astro:after-swap` 里恢复）；常量 `SCROLL_KEY`；`initLangSwitch()` 里注册一次 `astro:after-swap` 监听（`scrollRestoreReady` 守卫，避免重复绑定）。
+- 函数：新增内部函数 `rememberScrollPosition()`（换页前把 `{ y: scrollY, hash }` 写进 sessionStorage `space.lang-scroll`）、`restoreScrollPosition()`（在 `astro:after-swap` 里恢复；后来拆成 `restoreScrollAfterSwap()` + `restoreScrollAfterLoad()` 两段，见最上面那条）；常量 `SCROLL_KEY`；`initLangSwitch()` 里注册一次 `astro:after-swap` 监听（`scrollRestoreReady` 守卫，避免重复绑定）。
 - 钩子/数据：新增 sessionStorage key `space.lang-scroll`（一次性：读完就删）。
 - 要点：必须用 `behavior: 'instant'` —— 站点全局有 `scroll-behavior: smooth`，`auto` 会变成慢悠悠地滚回去。时机选 `astro:after-swap`（router 滚动之后、View Transition 拍新页面快照之前），位置接得上且不与动画打架。
 - 验证：无头 Chrome 实测 —— 普通位置：切语言前 `y=1500` → 切到 `/en/` 后仍是 `y=1500`；带锚点：`/#about`（`y=2716`）→ `/en/#about`（`y=2716`，锚点也接回地址栏）；控制台 0 报错。`npm test` 69/69、`npm run check` 0 错误 0 警告、`npm run build` 17 页。
@@ -767,7 +812,8 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 9. **双语键漏了一半**：`ui.ts` 里 zh / en 两个字典都要加，否则取不到会回退成 key 本身。
 10. **手写的 `-webkit-` 前缀会被构建吞掉**：`backdrop-filter` 与 `-webkit-backdrop-filter` 成对书写时，lightningcss 合并后只留前缀那份，Chromium 不认 → 玻璃效果全没（见 §10 的修复记录）。只写标准属性，前缀交给构建工具。
 11. **第十个标签（自我介绍）**：它比别的标签大 0.2 倍 —— 放大只能改 font-size / padding（写成 `calc(基准 * 1.2)`），写 `transform: scale()` 会被物理引擎每帧覆盖；"点开"的判定在 `identity-physics.ts`（位移 < 8px 且 0.7s 内抬手），拖动抛掷时这次抬手不算点按，`swallowClickUntil` 还会在捕获阶段吃掉浏览器自带的 `click`（300ms 窗口），所以**拖完不会跳页，点一下照常进自我介绍页**。要改尺寸就改 `IdentityStage.astro` 里 `[data-identity-link]` 那组规则；要改文案就改 `src/lib/identity.ts` 的最后一个条目。
-12. **回到 About 后方块一动不动**：别去找引擎 —— 十有八九是落点 cookie 命中、`restore()` 把方块"存档摆好"了。`needsAnimation` 现在恒为 `true`，音乐一响就会把方块重新抛回场上再落一次（见 §5.8）。
+12. **回到 About 后方块一动不动**：别去找引擎 —— 十有八九是落点 cookie 命中、`restore()` 把方块"存档摆好"了。除了"切语言"那一趟（`takeLanguageSwap()` 为真，刻意保留落点），`needsAnimation` 恒为 `true`，音乐一响就会把方块重新抛回场上再落一次（见 §5.8）。
+14. **切语言之后标签整排重弹 / 页面位移**：先看 §5.8 那三条坑 —— 用模块变量判"这一趟是切语言"、用 `restored < tags.length` 判"要不要重落"、离开页面前没写"此刻"的落点，都会重现这个 bug。
 13. **又看到蓝框 / 蓝线**：焦点圈只在"最近一次操作是键盘"时才画（`html[data-input]`，见 §5.13 与 §10）。脚本 `focus()` 之后浏览器会把元素当成键盘焦点，所以任何裸写的 `:focus-visible`（或脚本聚焦点的鼠标态）都会在鼠标玩家那里画出蓝框。
 
 ---

@@ -10,6 +10,7 @@ import { IDENTITY_TRACK_SRC } from "@/lib/identity";
 import { PianoEngine } from "./piano";
 import { getGlobal } from "./global";
 import { savedPosition, savePosition, restartPosition } from "@/lib/live-timeline";
+import { takeLanguageSwap } from './lang';
 
 const SOURCE = IDENTITY_TRACK_SRC;
 const TIMELINE = "identity:nocturne";
@@ -118,10 +119,12 @@ export function initIdentity(): void {
     // 万一 router 还没就绪，退回一次普通跳转。
     void navigate(href).catch(() => window.location.assign(href));
   });
-  // 落点记忆只当"先摆出来"的兜底：万一声音还没解锁，也不会是一片空地。
-  // 真正的开场永远是"方块再落一次"，所以每次回到这一页都还能玩。
+  // 落点记忆先摆出来当兜底：万一声音还没解锁，也不会是一片空地。
   physics.restore(readLayout() ?? []);
-  needsAnimation = true;
+  // 从别的页面走进来（或第一次来）→ 方块再落一次，每次都能玩；
+  // 切语言只是"同一页换种说法" → 保留落点，缺的补齐，不重弹也不位移。
+  needsAnimation = !takeLanguageSwap();
+  if (!needsAnimation) physics.placeMissing();
   piano.addEventListener(
     "piano:context",
     () => {
@@ -461,6 +464,9 @@ export function initIdentity(): void {
   disposeCurrent = () => {
     disposed = true;
     pause();
+    // 离开这一页之前把"此刻"的落点写下来（不是上一次静止时的旧快照）：
+    // 换页时标签多半还躺着没睡，旧快照会缺几条，下次回到这一页就会整排重抛。
+    writeLayout(physics.snapshot());
     abort.abort();
     resizeObserver.disconnect();
     themeObserver.disconnect();

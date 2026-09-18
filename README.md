@@ -41,15 +41,16 @@
 | 标签归档 | `/blog/tags/[tag]/` | 两种语言各一套 |
 | 首页 | `/`、`/en/` | 左列内容（身份 → 最近 → 联系我），右列仪表（LOCAL TIME → MUSIC SYSTEM → LAB） |
 | 实验室 | `/lab/`、`/en/lab/` | 条目页；`component: minilab` 会在条目下渲染小乐器 |
-| 关于 | `/about/`、`/en/about/` | 88 键瀑布流 + MIDI 夜曲 + 九个身份标签 |
+| 关于 | `/about/`、`/en/about/` | 88 键瀑布流 + MIDI 夜曲 + 十个身份标签 |
+| 自我介绍 | `/about/intro/`、`/en/about/intro/` | 关于页第十个标签点进来的长文页；中英各一篇，续播同一首夜曲，左上角可返回 |
 | 背景音乐 | 全局 | 淡入淡出、交叉淡入淡出、静音 / 暂停，音量与状态记忆 |
 | MiniLab | `/lab/#minilab` | 25 键（C4–C6）；鼠标 / 触摸 / 电脑键盘 / `Tab`+方向键 / Web MIDI |
 | 机关（彩蛋） | MiniLab | 提示模式里弹对旋律 → 换主题 + 换曲 + 解锁隐藏曲目 |
 | 主题系统 | 右下角开关 | `modern` / `baroque` 两套，改一个 `<html>` 属性，不重新渲染 |
-| 语言切换 | 右上角 `ZH / EN` | 跳到同一页的另一种语言；**只有文字动**：旧的向左滑出、新的从右滑入 |
+| 语言切换 | 右上角 `ZH / EN` | 跳到同一页的另一种语言；**只有文字动**：旧的向左滑出、新的从右滑入；切完停在原处（不弹回页面顶部），关于页那十个标签也留在原来的落点 |
 | 系统提示 | 左下角 LCD | 复制、状态变更等的轻量反馈，不弹窗 |
 | RSS / sitemap | `/rss.xml`、`/en/rss.xml` | `@astrojs/rss` + `@astrojs/sitemap` |
-| 无障碍 | 全局 | skip link、`aria-label`、可见 focus、不靠颜色单独表达状态、尊重 `prefers-reduced-motion` |
+| 无障碍 | 全局 | skip link、`aria-label`、focus 圈只在键盘操作时出现（鼠标玩家看不到蓝框）、不靠颜色单独表达状态、尊重 `prefers-reduced-motion` |
 
 ## 技术栈
 
@@ -165,6 +166,7 @@ frontmatter 里的 `lang` 必须和文件后缀一致。两边的文件名相同
 
 Blog 的 frontmatter：`title` / `description` / `pubDate` / `updatedDate?` / `lang` / `tags[]` / `draft`。
 Lab 还支持 `order`（排序）、`status`（状态灯颜色）；`component: minilab` 会在该条目下面渲染那台小乐器。
+单篇长文页（关于 / 自我介绍）放在 `src/content/pages/`：`about.zh.md` / `about.en.md` 给 About 页侧栏，`intro.zh.md` / `intro.en.md` 给 `/about/intro/`。正文里的 `##` 就是"加大加粗"的小标题，别再加装饰线。
 
 ## 双语是怎么工作的
 
@@ -172,6 +174,7 @@ Lab 还支持 `order`（排序）、`status`（状态灯颜色）；`component: 
 - 文案：导航、按钮、状态等 UI 文案来自 `src/i18n/ui.ts` 的字典，组件用 `<T k="..." lang={lang} />` 输出，会同时带上 `data-zh` / `data-en`。
 - 切换：点右上角 `ZH / EN` 会直接跳到**当前页面对应的另一种语言地址**（文章会跳到同一篇的译文），并把这个选择记在 `localStorage`。
 - 切换动画：只有文字动 —— 旧语言的文字向左滑出，新语言的文字从右滑入；页面骨架、玻璃卡片和背景原地不动，也不会重播入场动画。实现在 `src/scripts/lang.ts`，是唯一的语言切换动画，不要再往里加整页级别的过渡。
+- 切换后停在原处：滚动位置（含 `#锚点`）和关于页那十个标签的落点都会保留 —— 换页时 ClientRouter 会先滚回顶部，`lang.ts` 把它接回来，并留一个一次性记号告诉新页面「这一趟只是换语言」。
 - 两个语言共用同一套页面代码，不存在两份 HTML 模板。
 
 ## 音频
@@ -263,15 +266,17 @@ MiniLab 是固定 25 键（C4–C6），支持鼠标、触摸（含按住滑动�
 
 `src/components/IdentityStage.astro` + `src/scripts/identity-player.ts` 展示 A0–C8 的 88 键瀑布流。进入 About 后自动接入现有 Salamander / PianoEngine 采样演奏；首次访问被浏览器阻止自动播放时，在第一次点击或按键后接入。离开 About 恢复当前主题音乐；About 内暂停时保持安静。
 
-乐谱为 `public/music/secret/f-chopin-nocturne-op9-no2-in-e-flat-major.mid`。其 480 PPQ、1/8 弱起加四个 12/8 完整小节，对应 tick 11760，按原始变速表积分为 33.464427875 秒。九个标签在此之前全部落定，整首继续并循环；循环保留标签，重新开始按钮才重新展示标签动画。
+乐谱为 `public/music/secret/f-chopin-nocturne-op9-no2-in-e-flat-major.mid`。其 480 PPQ、1/8 弱起加四个 12/8 完整小节，对应 tick 11760，按原始变速表积分为 33.464427875 秒。十个标签在此之前全部落定，整首继续并循环；循环保留标签，重新开始按钮才重新展示标签动画。
 
 MIDI 音符的 `release` / `releaseTick` 是按键释放时间，供音条长度和琴键高亮使用；`end` / `endTick` 包含 CC64 踏板延音，只供发声调度使用。不能将踏板时长画进音条。
 
-About 只展示 88 键介绍与版权页脚。夜曲与每首主题曲各有独立的实时循环时钟（`src/lib/live-timeline.ts`），在当前标签页的 `sessionStorage` 中保留：离开、暂停或刷新不会重置计时，重新接入按已流逝时间定位；只有「重新开始」会显式重置夜曲。返回时已过触发时间的个性标签直接呈现。隐藏页面时停止 MIDI 发声，恢复可见时接入实时位置。
+About 只展示 88 键介绍与版权页脚。夜曲与每首主题曲各有独立的实时循环时钟（`src/lib/live-timeline.ts`），在当前标签页的 `sessionStorage` 中保留：离开、暂停或刷新不会重置计时，重新接入按已流逝时间定位；只有「重新开始」会显式重置夜曲。返回时已过触发时间的个性标签直接呈现。隐藏页面时停止 MIDI 发声，恢复可见时接入实时位置。切语言的例外：那是「同一页换种说法」，十个标签保持原样躺在原处，不重新抛一遍（`src/scripts/lang.ts` 的 `takeLanguageSwap()`）。
 
 数据与规格：
 
 - 标签数据在 `src/lib/identity.ts`：`{ id, zh, en }`，中英各一份。`ANALYTICAL` 指的是拆解问题、找规律，不是「小心谨慎」，翻中文时别写成「细心」。
+- 第十个标签（`intro`）比别的大 0.2 倍，点一下进 `/about/intro/`；拖动抛出不会误触发（按下后位移 < 8px、0.7 秒内抬手才算点击）。放大只能改 font-size / padding，`transform: scale()` 会被物理引擎每帧覆盖。
+- 自我介绍页：`src/views/IntroPage.astro` + `src/content/pages/intro.zh.md` / `intro.en.md`（15 个小节，`##` = 加大加粗的标题）。这一页跟 About 共用同一首夜曲的实时位置，两边互相「接着放」；左上角有返回按钮（中文只写`返回`）。
 - 动画规格在 `IDENTITY_MOTION`：弹出 → 飞行 → 落地 → 回弹的时长、弧线高度、旋转上限。测试给这组数字兜底 —— 调过头就变成小游戏了。
 - MIDI 映射在 `src/lib/identity-midi.ts`，`tests/identity-midi.test.mjs` 会挡住不合法的值。
 - DOM 钩子是 `data-identity` / `data-identity-state` / `data-identity-tag` / `--i`，改名之前先看 `DEVELOPMENT.md` §7 的 DOM 钩子总表。

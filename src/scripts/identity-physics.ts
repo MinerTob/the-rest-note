@@ -190,6 +190,22 @@ export function createIdentityPhysics(
     paint();
     return bodies.size;
   }
+  /**
+   * 还没上场的标签直接摆进静止队形（不抛、不滚）。
+   * 切语言保留落点时用：落点记录里缺几条就补几条，绝不重排已经躺好的那些。
+   */
+  function placeMissing() {
+    tags.forEach((_, index) => {
+      if (bodies.has(index)) return;
+      reveal(index);
+      const body = bodies.get(index);
+      if (!body) return;
+      // 补位就位即睡：别让它在队形里再抖一下。
+      Sleeping.set(body, true);
+      frozen.add(index);
+    });
+    paint();
+  }
   // Keep the static, readable list when scripts are unavailable.
   root.dataset.physics = 'true';
   document.body.append(layer);
@@ -198,7 +214,7 @@ export function createIdentityPhysics(
   observer.observe(document.querySelector('main')!);
   window.addEventListener('resize', bounds, { signal: abort.signal });
   document.addEventListener('visibilitychange', wake, { signal: abort.signal });
-  return { reveal, restore, snapshot,
+  return { reveal, restore, placeMissing, snapshot,
     reset() { release(); bodies.forEach(b => Composite.remove(engine.world, b)); bodies.clear(); frozen.clear(); dropped.clear(); tags.forEach(el => { delete el.dataset.revealed; el.style.transform = ''; }); },
     dispose() { release(); window.clearTimeout(settleTimer); cancelAnimationFrame(frame); abort.abort(); observer.disconnect(); Engine.clear(engine); layer.remove(); }
   };

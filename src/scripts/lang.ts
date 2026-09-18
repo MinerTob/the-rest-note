@@ -28,6 +28,24 @@ const SKIP_ZONES = '.ambient, .entry-gate, svg';
 let switching = false;
 let scrollRestoreReady = false;
 
+/**
+ * 这一趟导航是不是"切语言"的一次性记号（身份标签据此保留落点，见 §5.8）。
+ *
+ * 为什么不用模块变量：`navigate()` 在 View Transition 更新完 DOM 时就返回了，
+ * 新页面的脚本是随后才加载执行的 —— 点击处理器里的收尾早就跑完，
+ * 模块变量必然已经清空（实测新页面读到的永远是 false）。
+ * sessionStorage 跨页保留，新页面 boot 时取走一次，正好对上"这一趟是换语言"。
+ */
+const SWAP_KEY = 'space.lang-swap';
+
+function markLanguageSwap(pathname: string): void {
+  try {
+    window.sessionStorage.setItem(SWAP_KEY, pathname);
+  } catch {
+    /* 隐私模式：退化成"重新落一次"，页面照常可用。 */
+  }
+}
+
 function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
@@ -151,34 +169,77 @@ function rememberScrollPosition(): void {
  * moveToLocation），所以这里挂在 `astro:after-swap` 上 —— 它就在那次滚动之后、
  * View Transition 拍"新页面"快照之前跑，位置能稳稳接上，动画也不会跳。
  */
-function restoreScrollPosition(): void {
-  let saved: { y?: number; hash?: string } | undefined;
+let pendingScroll: { y: number; hash: string } | undefined;
+
+function readSavedScroll(): { y: number; hash: string } | undefined {
   try {
     const raw = window.sessionStorage.getItem(SCROLL_KEY);
-    if (!raw) return;
+    if (!raw) return undefined;
     window.sessionStorage.removeItem(SCROLL_KEY);
-    saved = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as { y?: unknown; hash?: unknown };
+    if (typeof parsed?.y !== 'number') return undefined;
+    return { y: parsed.y, hash: typeof parsed.hash === 'string' ? parsed.hash : '' };
   } catch {
-    return;
+    return undefined;
   }
-  if (!saved || typeof saved.y !== 'number') return;
+}
 
-  const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-  window.scrollTo({ top: Math.min(saved.y, max), left: 0, behavior: 'instant' });
+/** 按当前文档高度把位置对齐（高度变了就按新上限收敛）。 */
+function applySavedScroll(): void {
+  if (!pendingScroll) return;
+  const limit = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  window.scrollTo({ top: Math.min(pendingScroll.y, limit), left: 0, behavior: 'instant' });
 
   // 顺手把锚点接回去：router 只按 to.href 写地址，`#about` 这种锚点会被丢掉。
-  if (saved.hash && !window.location.hash) {
+  if (pendingScroll.hash && !window.location.hash) {
     try {
-      if (document.querySelector(saved.hash)) {
+      if (document.querySelector(pendingScroll.hash)) {
         window.history.replaceState(
           window.history.state,
           '',
-          `${window.location.pathname}${window.location.search}${saved.hash}`,
+          `${window.location.pathname}${window.location.search}${pendingScroll.hash}`,
         );
       }
     } catch {
       /* 忽略非法选择器 */
     }
+  }
+}
+
+/** 第一段：换页刚完成（router 已经 scrollTo(0,0)）——先对齐，View Transition 的快照才是对的。 */
+function restoreScrollAfterSwap(): void {
+  pendingScroll = readSavedScroll();
+  applySavedScroll();
+}
+
+/**
+ * 第二段：`astro:page-load`（boot 之后）再对齐一次。
+ * About 页的标签列表会在 initIdentity() 里从 section 搬进 body 并改成绝对定位，
+ * 文档高度跟着变，只对齐一次会被浏览器按旧高度截断 —— 那就是"切语言之后发生位移"。
+ */
+function restoreScrollAfterLoad(): void {
+  if (!pendingScroll) return;
+  applySavedScroll();
+  pendingScroll = undefined;
+}
+
+/** 导航失败时别把位置留给下一次换页。 */
+function forgetSavedScroll(): void {
+  pendingScroll = undefined;
+}
+
+/**
+ * 取走换语言记号：只生效一次（拿不到就清掉，不留残余）。
+ * 只有落点正好是这一趟要去的页面才算数 —— 在首页切语言不会影响很久以后再进关于页。
+ */
+export function takeLanguageSwap(): boolean {
+  try {
+    const target = window.sessionStorage.getItem(SWAP_KEY);
+    if (!target) return false;
+    window.sessionStorage.removeItem(SWAP_KEY);
+    return target === window.location.pathname;
+  } catch {
+    return false;
   }
 }
 
@@ -249,7 +310,8 @@ function playIncomingTransition(): void {
 export function initLangSwitch(): void {
   if (!scrollRestoreReady) {
     scrollRestoreReady = true;
-    document.addEventListener('astro:after-swap', restoreScrollPosition);
+    document.addEventListener('astro:after-swap', restoreScrollAfterSwap);
+    document.addEventListener('astro:page-load', restoreScrollAfterLoad);
   }
   playIncomingTransition();
   const pageLang = getDocumentLang();
@@ -301,9 +363,12 @@ export function initLangSwitch(): void {
 
         // 换语言 = 换页，但人还站在同一个位置：把滚动位置交给下一页。
         rememberScrollPosition();
+        // 这一趟是"切语言"：目标页面据此保留标签落点，不重新抛一遍。
+        markLanguageSwap(new URL(href).pathname);
         await navigate(href);
       } finally {
         // 导航成功时旧文字已随页面移除；失败时让它们重新显形。
+        forgetSavedScroll();
         document.querySelectorAll<HTMLElement>(`.${OUT_CLASS}`).forEach((element) => {
           element.classList.remove(OUT_CLASS);
           forgetOpacity(element);
