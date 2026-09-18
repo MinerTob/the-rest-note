@@ -255,6 +255,8 @@ function markIncomingLanguageText(doc: Document): void;  // 换页前给新文�
 collectTextElements(root)      // TreeWalker 收集"承载文字的元素"，祖先命中则跳过后代
 playOut(elements) / playIn(elements)
 switchChromeInPlace(target)    // 两种语言共用同一地址时（如 404）的兜底
+rememberScrollPosition()       // 换页前存 scrollY + #hash（sessionStorage 'space.lang-scroll'）
+restoreScrollPosition()        // astro:after-swap 里把位置放回去（见下面那条坑）
 ```
 
 **点击一条语言链接的完整链路**：
@@ -279,6 +281,7 @@ click [data-lang-switch]
 - 元素原本的透明度（少数弱化文字不是 1）会记在 `--lang-opacity` 里，动画结束回到原值。
 - 系统开启 *减少动态效果*（`prefers-reduced-motion: reduce`）时：完全跳过动画和等待，直接切换。
 - 语言偏好存 localStorage `space.lang`；进站时若偏好与页面语言不同，只换 UI 文案（正文语言仍由 URL 决定）。
+- **切语言不弹回顶部**：ClientRouter 每次换页都会 `scrollTo(0, 0)`（`astro/dist/transitions/router.js` 的 `moveToLocation`），所以 `lang.ts` 在 `navigate()` 之前把 `scrollY` 和 `#hash` 存进 sessionStorage `space.lang-scroll`，再挂 `astro:after-swap` 恢复 —— 那个时机在那次滚动之后、View Transition 拍"新页面"快照之前，位置接得上又不会和动画打架（用 `behavior: 'instant'`，否则会被全局 `scroll-behavior: smooth` 变成慢悠悠的滚动）。锚点用 `history.replaceState` 接回 URL：router 只按 `to.href` 写地址，`#about` 会被它丢掉。
 
 ### 5.5 背景音乐
 
@@ -634,12 +637,22 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 验证：npm test / npm run check / 浏览器实测结果
 ```
 
+### 2026-09-19 · 切语言不再弹回页面顶部（保留原来的位置）
+
+- 需求：本人要求点击语言切换之后，网站不要自己滚回顶部，而是停在原来的位置。
+- 根因：ClientRouter 每次换页都在 `moveToLocation()` 里 `scrollTo({ left: 0, top: 0 })`；语言切换是一次真实的换页（`/` ↔ `/en/`），所以旧位置被丢掉，连 `#about` 这类锚点也会从地址栏消失（router 按 `to.href` 写地址）。
+- 文件：`src/scripts/lang.ts`。
+- 函数：新增内部函数 `rememberScrollPosition()`（换页前把 `{ y: scrollY, hash }` 写进 sessionStorage `space.lang-scroll`）、`restoreScrollPosition()`（在 `astro:after-swap` 里恢复）；常量 `SCROLL_KEY`；`initLangSwitch()` 里注册一次 `astro:after-swap` 监听（`scrollRestoreReady` 守卫，避免重复绑定）。
+- 钩子/数据：新增 sessionStorage key `space.lang-scroll`（一次性：读完就删）。
+- 要点：必须用 `behavior: 'instant'` —— 站点全局有 `scroll-behavior: smooth`，`auto` 会变成慢悠悠地滚回去。时机选 `astro:after-swap`（router 滚动之后、View Transition 拍新页面快照之前），位置接得上且不与动画打架。
+- 验证：无头 Chrome 实测 —— 普通位置：切语言前 `y=1500` → 切到 `/en/` 后仍是 `y=1500`；带锚点：`/#about`（`y=2716`）→ `/en/#about`（`y=2716`，锚点也接回地址栏）；控制台 0 报错。`npm test` 69/69、`npm run check` 0 错误 0 警告、`npm run build` 17 页。
+
 ### 2026-09-19 · 自我介绍页大标题「关于」→「关于我」
 
-- 需求：本人要求把自我介绍页顶部的大标题从`关于`改成`关于我`。
+- 需求：本人要求把自我介绍页顶部的大标题从`关于`改成`关于我`，随后要求英文版一起改（"英文的你没改"）。
 - 文件：`src/content/pages/intro.zh.md`（frontmatter 的 `title`，只动中文）。
 - 函数：无 —— 纯内容改动。`IntroPage.astro` 用 `entry.data.title` 同时渲染 `<h1>` 和浏览器标签页标题，所以改一处两处都跟着变。
-- 钩子/数据：无。英文版标题保持 `About`（英文里 `About` 就是这页的正常说法，和中文"关于我"对应）。
+- 钩子/数据：无。英文版标题跟着改成 `About me`；同时把英文那行小标签从 `ABOUT ME` 换成 `SELF-INTRODUCTION`（中文那行本来就是`自我介绍`），免得标签和标题重复。
 - 验证：`npm test` 69/69、`npm run check` 0 错误 0 警告、`npm run build` 17 页；线上复核 `/about/intro/` 的 `<h1>`。
 
 ### 2026-09-19 · 修掉"返回后方块像死了一样"和"拖动自我介绍会强制进页面"

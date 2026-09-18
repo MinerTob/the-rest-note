@@ -1,5 +1,5 @@
 ---
-title: "About"
+title: "About me"
 description: "MinerTob in his own words: where the name came from, the two keyboards, music, The Rest Note, and a few things that have not happened yet."
 lang: en
 ---

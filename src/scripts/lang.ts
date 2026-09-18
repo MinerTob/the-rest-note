@@ -4,6 +4,7 @@ import { navigate } from 'astro:transitions/client';
 
 const KEY = 'space.lang';
 const TRANSITION_KEY = 'space.lang-transition';
+const SCROLL_KEY = 'space.lang-scroll';
 
 /* 时长与 global.css 里 .lang-slide-out / .lang-slide-in 的 var(--dur-2) 对齐。 */
 const SLIDE_MS = 240;
@@ -25,6 +26,7 @@ const SKIP_TAGS = new Set([
 const SKIP_ZONES = '.ambient, .entry-gate, svg';
 
 let switching = false;
+let scrollRestoreReady = false;
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -130,6 +132,56 @@ function clearPendingTransition(): void {
   }
 }
 
+/** 换语言前记下当前位置：换页之后要放回去。 */
+function rememberScrollPosition(): void {
+  try {
+    window.sessionStorage.setItem(
+      SCROLL_KEY,
+      JSON.stringify({ y: Math.round(window.scrollY), hash: window.location.hash }),
+    );
+  } catch {
+    /* 隐私模式：跳过，退回浏览器默认行为 */
+  }
+}
+
+/**
+ * 换语言之后把滚动位置放回去（本人要求：切语言不要弹回页面顶部）。
+ *
+ * ClientRouter 每次换页都会 `scrollTo(0, 0)`（见 astro/dist/transitions/router.js 的
+ * moveToLocation），所以这里挂在 `astro:after-swap` 上 —— 它就在那次滚动之后、
+ * View Transition 拍"新页面"快照之前跑，位置能稳稳接上，动画也不会跳。
+ */
+function restoreScrollPosition(): void {
+  let saved: { y?: number; hash?: string } | undefined;
+  try {
+    const raw = window.sessionStorage.getItem(SCROLL_KEY);
+    if (!raw) return;
+    window.sessionStorage.removeItem(SCROLL_KEY);
+    saved = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (!saved || typeof saved.y !== 'number') return;
+
+  const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  window.scrollTo({ top: Math.min(saved.y, max), left: 0, behavior: 'instant' });
+
+  // 顺手把锚点接回去：router 只按 to.href 写地址，`#about` 这种锚点会被丢掉。
+  if (saved.hash && !window.location.hash) {
+    try {
+      if (document.querySelector(saved.hash)) {
+        window.history.replaceState(
+          window.history.state,
+          '',
+          `${window.location.pathname}${window.location.search}${saved.hash}`,
+        );
+      }
+    } catch {
+      /* 忽略非法选择器 */
+    }
+  }
+}
+
 export function getDocumentLang(): Lang {
   const value = document.documentElement.dataset.lang;
   return value && value in languages ? (value as Lang) : defaultLang;
@@ -195,6 +247,10 @@ function playIncomingTransition(): void {
 }
 
 export function initLangSwitch(): void {
+  if (!scrollRestoreReady) {
+    scrollRestoreReady = true;
+    document.addEventListener('astro:after-swap', restoreScrollPosition);
+  }
   playIncomingTransition();
   const pageLang = getDocumentLang();
   const preferred = getPreferredLang();
@@ -243,6 +299,8 @@ export function initLangSwitch(): void {
           }
         }
 
+        // 换语言 = 换页，但人还站在同一个位置：把滚动位置交给下一页。
+        rememberScrollPosition();
         await navigate(href);
       } finally {
         // 导航成功时旧文字已随页面移除；失败时让它们重新显形。
