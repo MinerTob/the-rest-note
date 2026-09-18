@@ -25,6 +25,9 @@ export function createIdentityPhysics(
     fromX: number; fromY: number; moved: number; startedAt: number;
   } | undefined;
   const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+  const dropped = new Set<number>();
+  /** 抬手之后短暂屏蔽浏览器自带的链接点击：拖过了就不该算"点了一下"。 */
+  let swallowClickUntil = 0;
   function bounds() {
     width = document.documentElement.clientWidth;
     const content = root.getBoundingClientRect();
@@ -84,6 +87,7 @@ export function createIdentityPhysics(
     const el = tags[drag.index], pointer = drag.pointer;
     // 只有"按下去几乎没动就抬手"才算点按：拖动过、或按住超过 0.7s，都不算。
     const tap = event?.type === 'pointerup' && drag.moved < 8 && performance.now() - drag.startedAt < 700;
+    if (!tap) swallowClickUntil = performance.now() + 300;
     drag = undefined;
     el.dataset.dragging = 'false';
     if (el.hasPointerCapture(pointer)) el.releasePointerCapture(pointer);
@@ -129,8 +133,16 @@ export function createIdentityPhysics(
       wake();
     }, { signal: abort.signal });
   });
+  // 拖过之后的单击不算点按：在捕获阶段吃掉它，别让 <a> 自己跳页。
+  document.addEventListener('click', (event) => {
+    if (performance.now() > swallowClickUntil) return;
+    const target = event.target;
+    if (!(target instanceof Element) || !target.closest('[data-identity-arena] [data-identity-link]')) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, { capture: true, signal: abort.signal });
   function reveal(index: number, source?: { x: number; y: number }) {
-    if (bodies.has(index)) return;
+    if (dropped.has(index)) return;
     const el = tags[index], w = el.offsetWidth, h = el.offsetHeight;
     // 备用队形只看普通标签：可点击的那个本来就宽得多，用它算间距会把整排挤成单列。
     const plain = tags.filter(tag => !tag.dataset.identityLink);
@@ -139,9 +151,16 @@ export function createIdentityPhysics(
     const resting = !source || reduced.matches;
     const x = resting ? left + 8 + w / 2 + (index % columns) * spacing : source.x;
     const y = resting ? floor - h / 2 - 3 - Math.floor(index / columns) * (h + 5) : source.y;
-    const b = Bodies.rectangle(clamp(x, left + w / 2 + 4, right - w / 2 - 4), y, w, h,
-      { chamfer: { radius: h / 3 }, restitution: .36, friction: .65, frictionAir: .008, sleepThreshold: 65 });
-    bodies.set(index, b); Composite.add(engine.world, b);
+    const px = clamp(x, left + w / 2 + 4, right - w / 2 - 4);
+    let b = bodies.get(index);
+    if (b) {
+      // 记忆里的落点只是"先摆出来让你看得见"：音乐一响就重新抛回场上，再落一次。
+      frozen.delete(index); Sleeping.set(b, false); Body.setAngle(b, 0); Body.setPosition(b, { x: px, y });
+    } else {
+      b = Bodies.rectangle(px, y, w, h, { chamfer: { radius: h / 3 }, restitution: .36, friction: .65, frictionAir: .008, sleepThreshold: 65 });
+      bodies.set(index, b); Composite.add(engine.world, b);
+    }
+    dropped.add(index);
     // 可点击的那个标签又长又大：让它重一点、别自转 —— 一转起来就变成一根竖着的横幅。
     const linked = Boolean(el.dataset.identityLink);
     if (linked) Body.setInertia(b, b.inertia * 4);
@@ -180,7 +199,7 @@ export function createIdentityPhysics(
   window.addEventListener('resize', bounds, { signal: abort.signal });
   document.addEventListener('visibilitychange', wake, { signal: abort.signal });
   return { reveal, restore, snapshot,
-    reset() { release(); bodies.forEach(b => Composite.remove(engine.world, b)); bodies.clear(); frozen.clear(); tags.forEach(el => { delete el.dataset.revealed; el.style.transform = ''; }); },
+    reset() { release(); bodies.forEach(b => Composite.remove(engine.world, b)); bodies.clear(); frozen.clear(); dropped.clear(); tags.forEach(el => { delete el.dataset.revealed; el.style.transform = ''; }); },
     dispose() { release(); window.clearTimeout(settleTimer); cancelAnimationFrame(frame); abort.abort(); observer.disconnect(); Engine.clear(engine); layer.remove(); }
   };
 }

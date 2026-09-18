@@ -418,9 +418,10 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
 ```
 
 - 标签的入场不是 `scale(0)→scale(1)`，而是被"弹出来"的物理动画：ejection → flight（浅抛物线 + 轻微旋转）→ landing → settle。动画参数在 `IDENTITY_MOTION`。
-- 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数）。
+- 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数）。这份记忆**只当"先摆出来"的兜底**（万一声音还没解锁，页面也不会是一片空地）：`physics.restore()` 之后 `needsAnimation` 仍然是 `true`，音乐一响 `reveal()` 就把已有的身体重新抛回场上再落一次 —— 每次回到这一页，方块都是活的（本人报过"返回之后方块的物理效果就没了"）。`reset()` 会连内部的 `dropped` 一起清空。
 - **第十个标签（`intro`）是唯一的例外**：它比别的标签大 0.2 倍，点一下进整页自我介绍（§5.14）。放大用的是 font-size / padding 同比例放大（`calc(基准 * 1.2)`），**不能用 `transform: scale()`** —— 物理引擎每帧都会重写 inline `transform`。
 - 点按判定在 `identity-physics.ts`：按下后位移 < 8px、且 0.7s 内抬手才算"点击"；拖动过就不算（"抛掷"不能被误认成"点开"）。命中 + 元素带 `data-identity-link` 才回调 `onActivate`，由 `identity-player.ts` 走 `astro:transitions/client` 的 `navigate()`（失败退回 `location.assign`）；键盘上按回车同样打开。
+- **拖动不能触发链接**：第十个标签是 `<a href>`，浏览器在 `pointerup` 之后还会自己补一发 `click`（`setPointerCapture` 让目标仍是它），光靠点按判定拦不住。所以只要这一次抬手不算点按，就把 `swallowClickUntil` 设成"现在 + 300ms"，由文档级捕获阶段的 `click` 监听把这一发 `click.preventDefault()` 掉 —— 拖完标签不会跟着跳页（本人报过的 bug），点一下照常进自我介绍页。
 - `reveal()` 算"备用队形"（没接住音符时靠地面排队）的间距时只统计普通标签：可点击的那个宽得多，算进去会把整排挤成单列。
 - 首页 Journey 模式里，`initJourney()` 用 IntersectionObserver 在滚到 About 区时调用 `initIdentity()` / `setIdentityActive(true)`（见 `src/scripts/app.ts`）。
 - 音乐靠现有 `PianoEngine.scheduleNote()` 播 MIDI，不另做一套音频链路。
@@ -503,7 +504,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - **本人标了分段的地方 = Markdown 的 `##`**：`.letter :global(h2)` 只负责"加大加粗"（`clamp(1.55rem … 2.05rem)` + `font-weight: 700`）。本人后来要求把标题上方那道"⸻ 短线"删掉，**不要再加回任何装饰线**。改标题层级时别把 `.prose h2` 的默认样式当回事，这里是有意覆盖的。
 - 头图来自 `src/images/Gensokyo.png`，用 `astro:assets` 的 `<Image>`（自动出 webp + srcset，2.6MB → 33/70/142/273kB 四档）。`src/images/` 的图不要手写 `<img>`，也不要拷进 `public/`。
 - 阅读栏宽度与文章页一致：`max-width: calc(var(--measure) + var(--gutter) * 2)`；正文用 `.prose` 纸面，页脚一个"回到关于"链接。
-- **左上角有一个返回按钮**（`返回关于` / `Back to About`，`.letter-page__back`，用 `.glass--pill` 材质）：这一页是从 About 的标签点进来的，得能原路回去；它和页脚那个链接都指向 `aboutRoutes[lang]`。
+- **左上角有一个返回按钮**（中文只写`返回`，英文写 `Back to About`；中文里"关于"两个字是多余的，英文语法需要宾语，所以只改中文）：这一页是从 About 的标签点进来的，得能原路回去；`a.letter-page__back` 和页脚那个链接都指向 `aboutRoutes[lang]`。
 - **背景音乐：这一页接着放 About 页的夜曲**（不放主题曲）。`src/scripts/nocturne.ts` 用 `PianoEngine` + `parseMidi()` 复刻 About 的演奏，和 `identity-player.ts` 共用 `live-timeline` 的同一个 id（`identity:nocturne`），两边互相"接着放"，不是各弹各的；音量用 `IDENTITY_INTRO_VOLUME`（0.7，比演奏模式的 0.85 克制），淡入用 `AUDIO.fadeInMs`。
   - `initNocturne()` 在 boot 里调用，`disposeNocturne()` 在 `astro:before-swap` 里调用；缺采样或缺用户手势时只把状态标成 `waiting`，等下一次点击再开始。
   - 切到后台会暂停、切回来接着弹（与 About 页一致）；主题曲的让位由 `app.ts` 的 `setAboutActive(true)` 负责（见 §5.5）。
@@ -633,6 +634,15 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 验证：npm test / npm run check / 浏览器实测结果
 ```
 
+### 2026-09-19 · 修掉"返回后方块像死了一样"和"拖动自我介绍会强制进页面"
+
+- 需求：本人报了两个 bug —— 1) 从自我介绍页返回 About 之后，方块的物理效果像是没了；2) 拖动第十个标签（自我介绍）会被强制带进新页面，要求"拖动不触发、点击才触发"。顺带：中文返回按钮只留`返回`。
+- 根因：1) 落点 cookie 命中时 `needsAnimation = restoredCount < tags.length` 为 `false`，十个方块被"存档"直接摆好并全部 sleeping —— 引擎其实活着（拖得动），但没有任何掉落与碰撞，看起来就是"物理没了"；2) 标签是 `<a href>`，浏览器在 `pointerup` 之后还会自己补一发 `click`（`setPointerCapture` 让目标仍是它），所以拖动结束照样跳页 —— 点按判定只拦住了 `onActivate`，没拦住浏览器自带的链接点击。
+- 文件：`src/scripts/identity-physics.ts`、`src/scripts/identity-player.ts`、`src/views/IntroPage.astro`。
+- 函数：`createIdentityPhysics()` 内部新增 `dropped` 集合与 `swallowClickUntil`；`reveal(index, source)` 改成**已有身体时"重新抛回场上"**（`frozen.delete` + `Sleeping.set(false)` + `Body.setAngle(0)` + `Body.setPosition` + 速度），不再直接 return；`reset()` 连 `dropped` 一起清空；`initIdentity()` 里 `needsAnimation` 恒为 `true`（落点记忆只做"先摆出来"的兜底）。
+- 钩子/数据：无新增；落点 cookie 仍在写，`restore()` 的职责收窄成"先摆出来"（见 §5.8）。
+- 验证：无头 Chrome（CDP，1280×900）跑完整流程实测 —— 修前：`返回后 1.5s 内 transforms 完全不变（静止）`、`拖动自我介绍 → URL 变成 /about/intro/`；修后：`返回后方块仍在动（重新落位）`、`拖动自我介绍位移约 170px 且 URL 仍是 /about/`、`拖完再点一下 → /about/intro/（点击照常）`、`普通方块拖动正常`、`硬刷新后 10 个方块立刻可见（兜底生效、不是空地）`、控制台 0 报错。`npm test` 69/69、`npm run check` 0 错误 0 警告、`npm run build` 17 页。
+
 ### 2026-09-19 · About 第十个标签「自我介绍」+ 整页长文（中英）+ 这一页续播夜曲
 
 - 需求：1) About 的身份标签从九个加到十个 —— 第十个要在"弱起 + 前四小节"里放出来，尺寸比别的标签大一点（本人先要 0.5 倍，看到实物后改成 0.2 倍），文案"自我介绍（听了这么久，点一点我吧，求求了(｡>﹏<｡)）"，点开进一个全新的页面；2) 新页面是一整页自我介绍长文（本人原文 + 英文翻译），本人标了分段的地方标题要加大加粗，并插入 `src/images/` 里的图；3) 标签文案太长 → 排成两行；标题上方的"⸻ 短线"要删掉；4) 这一页要接着放 About 的夜曲（不是按主题播背景音乐），左上角加一个返回按钮。
@@ -640,6 +650,8 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 函数：`tagLines(tag, lang)`（把"自我介绍（…）"拆成标题行 + 括号行）、`createIdentityPhysics(root, tags, onSettled, onActivate)`（新增第四个参数：点按回调）、`initNocturne()` / `disposeNocturne()`、`getPage('intro', lang)`、`render(entry)`、`introRoutes`、`IDENTITY_INTRO_VOLUME`。
 - 钩子/数据：新增 `[data-identity-link]`（第十个标签的 href：放大 + 可点开，参与点按判定）、`[data-nocturne]`（自我介绍页根节点）、`[data-nocturne-ready]` / `[data-nocturne-state]` / `[data-nocturne-at]`；没有新 storage key（夜曲与 About 共用时间线 `space.position.v1.identity:nocturne`）；旧落点 cookie 长度对不上会自动重播一次，属预期。
 - 验证：`npm test` 69/69（新增"十个标签""十个揭示时刻都落在弱起+前四小节内""文案拆两行""夜曲音量"四条断言）；`npm run check` 0 错误 0 警告；`npm run build` 17 页、头图出 4 档 webp（2.6MB → 33/70/142/273kB）。浏览器实测（本地 preview，639px 视口）：`/about/` 10 个标签、第十个 18px/353×76（其余 15px/106×46 = 1.2×）、两行文案、"点一下"跳 `/about/intro/`、拖动 90px 不误跳（URL 仍是 `/about/`）；自我介绍页 h1 34.5px、15 个 `##` 标题 28.1px/700 且 `::before` 为 none（短线已删）、头图 588×331 webp、左上角"← 返回关于"指向 `/about/`；夜曲 `data-nocturne-state=playing`，`data-nocturne-at` 从 About 页的进度接着走（点击时约 2:1x，进入新页后继续累加，没有从 0 重来）。
+
+> ⚠️ 更正：上面这条里"拖动 90px 不误跳"是**当时的错误结论** —— 浏览器自带的链接点击仍会在拖动后跳页，已在 §10 最上面那条修复（中文返回按钮也改成只写`返回`）。
 
 ### 2026-09-19 · 修复"液态玻璃"在线上失效（构建把 backdrop-filter 合并成只剩 -webkit-）
 
@@ -720,7 +732,8 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 8. **`dist/` 是构建产物**：不要手改；改完源码跑 `npm run build`。
 9. **双语键漏了一半**：`ui.ts` 里 zh / en 两个字典都要加，否则取不到会回退成 key 本身。
 10. **手写的 `-webkit-` 前缀会被构建吞掉**：`backdrop-filter` 与 `-webkit-backdrop-filter` 成对书写时，lightningcss 合并后只留前缀那份，Chromium 不认 → 玻璃效果全没（见 §10 的修复记录）。只写标准属性，前缀交给构建工具。
-11. **第十个标签（自我介绍）**：它比别的标签大 0.2 倍 —— 放大只能改 font-size / padding（写成 `calc(基准 * 1.2)`），写 `transform: scale()` 会被物理引擎每帧覆盖；"点开"的判定在 `identity-physics.ts`（位移 < 8px 且 0.7s 内抬手），拖动抛掷不会误触发跳转。要改尺寸就改 `IdentityStage.astro` 里 `[data-identity-link]` 那组规则；要改文案就改 `src/lib/identity.ts` 的最后一个条目。
+11. **第十个标签（自我介绍）**：它比别的标签大 0.2 倍 —— 放大只能改 font-size / padding（写成 `calc(基准 * 1.2)`），写 `transform: scale()` 会被物理引擎每帧覆盖；"点开"的判定在 `identity-physics.ts`（位移 < 8px 且 0.7s 内抬手），拖动抛掷时这次抬手不算点按，`swallowClickUntil` 还会在捕获阶段吃掉浏览器自带的 `click`（300ms 窗口），所以**拖完不会跳页，点一下照常进自我介绍页**。要改尺寸就改 `IdentityStage.astro` 里 `[data-identity-link]` 那组规则；要改文案就改 `src/lib/identity.ts` 的最后一个条目。
+12. **回到 About 后方块一动不动**：别去找引擎 —— 十有八九是落点 cookie 命中、`restore()` 把方块"存档摆好"了。`needsAnimation` 现在恒为 `true`，音乐一响就会把方块重新抛回场上再落一次（见 §5.8）。
 
 ---
 

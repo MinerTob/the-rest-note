@@ -118,8 +118,10 @@ export function initIdentity(): void {
     // 万一 router 还没就绪，退回一次普通跳转。
     void navigate(href).catch(() => window.location.assign(href));
   });
-  const restoredCount = physics.restore(readLayout() ?? []);
-  needsAnimation = restoredCount < tags.length;
+  // 落点记忆只当"先摆出来"的兜底：万一声音还没解锁，也不会是一片空地。
+  // 真正的开场永远是"方块再落一次"，所以每次回到这一页都还能玩。
+  physics.restore(readLayout() ?? []);
+  needsAnimation = true;
   piano.addEventListener(
     "piano:context",
     () => {
