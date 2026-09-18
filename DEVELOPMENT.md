@@ -610,6 +610,15 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 验证：npm test / npm run check / 浏览器实测结果
 ```
 
+### 2026-09-19 · 修掉正文焦点框造成的"边缘蓝线"
+
+- 需求：进入网站后，页面上下边缘各多出一条横贯屏幕的蓝线（用户反馈）。
+- 根因：入场动画结束后 `entry-gate.ts` 把键盘焦点交给 `main`（无障碍需要），全局 `:focus-visible` 规则给 `main` 画了 2px 的 accent 焦点框；`main` 占满整页宽，焦点框的上下两条边就成了横贯屏幕的蓝线。1.5× 屏幕缩放下 2px 渲染为 3 物理像素，与用户截图逐像素吻合（#4A6EE0、3px）。
+- 文件：`src/styles/global.css`（新增 `main:focus, main:focus-visible { outline: none }`）、`DEVELOPMENT.md`（本条）。
+- 函数：无 —— 纯样式修复。`entry-gate.ts` 里的 `main.focus()` 保持不变（焦点转移是无障碍需要），只是不再画可见的焦点框。
+- 钩子/数据：无。
+- 验证：修复前线上实测 —— `main` 命中 `:focus-visible`，计算样式 `outline: solid 2px rgb(74, 110, 224)`、offset 2px，截图在导航栏下方能清楚看到蓝线；修复后 `npm test` / `npm run check` / `npm run build` 全绿，推送后由 Render 重新部署并复查。
+
 ### 2026-09-19 · 部署到 Render（Static Site）
 
 - 需求：把仓库部署到 Render，线上可访问。

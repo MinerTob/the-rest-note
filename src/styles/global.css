@@ -97,6 +97,14 @@ a:hover {
   border-radius: var(--radius-xs);
 }
 
+/* main 是"跳到主要内容"和入场动画结束后的焦点落点，不是可交互控件。
+   它占满整页宽，焦点框会变成两条横贯屏幕的蓝线，所以这里明确不画；
+   其他元素的 :focus-visible 焦点框保持不变。 */
+main:focus,
+main:focus-visible {
+  outline: none;
+}
+
 hr {
   border: 0;
   border-top: 1px solid var(--line);
