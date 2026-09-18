@@ -674,6 +674,15 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 
 ## 10. 功能日志（规定动作）
 
+### 2026-09-19 · 修复自我介绍页底部切语言位移 + 顶栏统一回 Journey 长页
+
+- 需求：1) 自我介绍长文拉到底部后切换语言，仍然会因中英文正文高度不同而位移；2) 从 About / 自我介绍等独立页面点击顶栏项目时，应进入首页拼接成长页的对应区块，而不是打开分开的列表页。
+- 根因：1) 滚动恢复只保存像素和正文地标，目标语言更长时会对齐同一段、却不再贴住页面底部；2) `Header.astro` 只在当前已经是 Journey 首页时生成 `#blog` / `#lab` / `#about`，其他页面仍生成 `/blog/` / `/lab/` / `/about/`。
+- 文件：`src/scripts/lang.ts`、`src/components/Header.astro`、`DEVELOPMENT.md`。
+- 函数：`rememberScrollPosition()` 新增底部判定；`readSavedScroll()` / `applySavedScroll()` 恢复该状态；`Header.astro` 的 `navHref()` 统一把站内顶栏项目指向本语言 Journey 长页锚点。
+- 钩子/数据：sessionStorage `space.lang-scroll` 的临时记录新增可选 `atBottom` 布尔字段；无新增 key 或 DOM 钩子。
+- 验证：`npm test` 69/69；`npm run check` 0 错误、0 警告；`npm run build` 成功生成 17 页。Edge 本地预览实测：中文自我介绍页在底部（页面高约 11185px、底部差约 0px）切到英文后，英文页增高到约 12824px 仍贴底（底部差约 0px）；独立页顶栏生成 `/en/#home`、`/en/#blog`、`/en/#lab`、`/en/#about`，点击 Lab 实际进入 `/en/#lab` 且对应长页区块可见。
+
 > 每加一个新功能、或改掉一个已有行为，都在**最上面**追加一条（新的在上）。
 > 复制下面这个模板；"验证"一栏要写实际做过的事（测试 / 截图 / 手动步骤），不写"应该没问题"。
 

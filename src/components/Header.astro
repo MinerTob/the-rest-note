@@ -22,7 +22,9 @@ const sectionByHref: Record<string, string> = {
 const navHref = (href: string, external?: boolean): string => {
   if (external) return href;
   const section = sectionByHref[href];
-  return journey && section ? `#${section}` : localizePath(href, lang);
+  if (!section) return localizePath(href, lang);
+  // 顶栏始终回到 Journey 长页的对应区块；独立列表页仍可通过正文链接访问。
+  return journey ? `#${section}` : `${homeHref}#${section}`;
 };
 
 const isActive = (href: string): boolean => {

@@ -163,7 +163,7 @@ function clearPendingTransition(): void {
  */
 type ScrollAnchor = { path: number[]; offset: number };
 
-type ScrollRecord = { y: number; hash: string; anchor?: ScrollAnchor };
+type ScrollRecord = { y: number; hash: string; atBottom?: boolean; anchor?: ScrollAnchor };
 
 /**
  * 取"眼睛正在看的那一行"的高度：默认视口 45% 处（人读书时视线大概在这）。
@@ -278,6 +278,10 @@ function rememberScrollPosition(): void {
       JSON.stringify({
         y: Math.round(window.scrollY),
         hash: window.location.hash,
+        // 页面底部是一个明确的阅读位置。中英文正文总高度不同时，继续按段落
+        // 对齐会把更长的目标语言留在下面，看起来像整页向上位移。
+        atBottom:
+          document.documentElement.scrollHeight - window.innerHeight - window.scrollY <= 4,
         anchor: findAnchor(),
       } satisfies ScrollRecord),
     );
@@ -302,11 +306,17 @@ function readSavedScroll(): ScrollRecord | undefined {
     const raw = window.sessionStorage.getItem(SCROLL_KEY);
     if (!raw) return undefined;
     window.sessionStorage.removeItem(SCROLL_KEY);
-    const parsed = JSON.parse(raw) as { y?: unknown; hash?: unknown; anchor?: unknown };
+    const parsed = JSON.parse(raw) as {
+      y?: unknown;
+      hash?: unknown;
+      atBottom?: unknown;
+      anchor?: unknown;
+    };
     if (typeof parsed?.y !== 'number') return undefined;
     return {
       y: parsed.y,
       hash: typeof parsed.hash === 'string' ? parsed.hash : '',
+      atBottom: parsed.atBottom === true,
       anchor: readAnchor(parsed.anchor),
     };
   } catch {
@@ -332,8 +342,8 @@ function readAnchor(value: unknown): ScrollAnchor | undefined {
 function applySavedScroll(): void {
   if (!pendingScroll) return;
   const limit = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-  let target = pendingScroll.y;
-  if (pendingScroll.anchor) {
+  let target = pendingScroll.atBottom ? limit : pendingScroll.y;
+  if (!pendingScroll.atBottom && pendingScroll.anchor) {
     const element = resolveAnchor(pendingScroll.anchor);
     if (element) {
       target = element.getBoundingClientRect().top + window.scrollY - pendingScroll.anchor.offset;
