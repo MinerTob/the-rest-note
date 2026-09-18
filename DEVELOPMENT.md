@@ -132,6 +132,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 真实 MIDI 键盘 | `src/scripts/midi.ts` | `MidiBridge`、`getMidiBridge()` | 事件 `midi:noteon` / `midi:noteoff` / `midi:change` |
 | 彩蛋（隐藏曲目） | `src/lib/easter-eggs.ts`、`src/lib/sequences.ts`、`src/scripts/easter-eggs.ts` | `EASTER_EGGS`、`createSequenceDetector()`、`createSequenceSession()`、`EasterEggManager` | `[data-note]`（琴键）、事件 `minilab:note` / `egg:hint` / `egg:accept` / `egg:miss` |
 | About 身份实验场 | `src/components/IdentityStage.astro`、`src/scripts/identity-player.ts`、`identity-physics.ts`、`src/lib/identity.ts`、`identity-midi.ts` | `createIdentityPhysics()`、`initIdentity()`、`disposeIdentity()`、`setIdentityActive()`、`identityRevealPlan()` | `[data-identity*]` |
+| 自我介绍页（第十个标签的去处） | `src/views/IntroPage.astro`、`src/pages/about/intro/index.astro`、`src/content/pages/intro.zh.md` / `intro.en.md`、`src/lib/pages.ts` | `getPage('intro', lang)`、`render(entry)`、`introRoutes` | `[data-identity-link]`（写在 About 页的标签上） |
 | 联系方式 / 复制 | `src/components/ContactTiles.astro`、`ContactPanel*.astro`、`src/scripts/contact.ts`、`src/lib/contact.ts` | `initContact()`、`CONTACT`、`isInteractive()` | `[data-contact]`、`[data-contact-row]`、`[data-contact-copy]` |
 | 系统提示 LCD | `src/components/SystemMessage.astro`、`src/scripts/system-message.ts` | `initSystemMessages()` | `[data-system-message]`、window 事件 `space:message` |
 | 入场页 | `src/components/EntryGate.astro`、`src/scripts/entry-gate.ts` | `initEntryGate()` | `[data-entry-gate]`、`[data-entry-button]`、`[data-entry-copy]` |
@@ -156,6 +157,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | `/blog/<slug>/`、`/en/blog/<slug>/` | `src/pages/blog/[...slug].astro` | `views/PostPage.astro` | `postStaticPaths()` |
 | `/lab/`、`/en/lab/` | `src/pages/lab/index.astro` | `views/LabPage.astro` | `content/lab/*` |
 | `/about/`、`/en/about/` | `src/pages/about/index.astro` | `views/AboutPage.astro` | `content/pages/about.*` |
+| `/about/intro/`、`/en/about/intro/` | `src/pages/about/intro/index.astro`、`src/pages/en/about/intro/index.astro` | `views/IntroPage.astro` | `content/pages/intro.*`（`getPage('intro', lang)`） |
 | `/404.html` | `src/pages/404.astro` | `views/NotFoundPage.astro` | — |
 | `/rss.xml`、`/en/rss.xml` | `src/pages/rss.xml.ts`、`src/pages/en/rss.xml.ts` | — | `getPosts()` |
 
@@ -304,6 +306,7 @@ function initMusicUI(music: MusicManager): void;
 - 曲目定义在 `src/lib/music.ts`：`TRACKS`、`DEFAULT_TRACK_ID`、`AUDIO`（音量常量）、`getTrack()`；纯函数 `clamp01()` / `easeOutQuad()` / `volumeAt()`（有单测 `tests/audio.test.mjs`）。
 - 进度记忆在 `src/lib/live-timeline.ts`：`savedPosition(id, duration)` / `savePosition(id, position)` / `restartPosition(id)`，存 sessionStorage `space.position.v1.<id>`，只记"真正播放过"的位置。
 - 切主题会触发 `crossfadeTo()`（主题 ↔ 曲目绑定见 `src/lib/themes.ts` 的 `THEME_TRACK`）。
+- **"关于"这一族页面会让位**：`app.ts` 的 boot 里，只要页面上有 `[data-identity]`（About）或 `[data-nocturne]`（自我介绍页），就调用 `music.setAboutActive(true)` —— 主题音乐被暂停、音量归零，`play()` / `init()` 也会直接返回；这两页放的是同一首夜曲的钢琴演奏（§5.8 / §5.14）。回首页（Journey）时仍由 `initJourney()` 的观察器控制。
 - UI 文案（READY / PLAYING / 播放 / 暂停）从组件上的 `data-word-*` / `data-label-*-zh|-en` 读，脚本不再维护字典。
 
 ### 5.6 键盘乐器：MiniLab / 钢琴 / MIDI
@@ -402,7 +405,7 @@ disposeIdentity(): void;       // 注销（换页 / 离开 About 区时）
 setIdentityActive(active: boolean): void;  // 进入/离开视口时激活
 
 // identity-physics.ts（matter-js）
-createIdentityPhysics(root: HTMLElement, tags: HTMLElement[], onSettled?): { dispose? }
+createIdentityPhysics(root: HTMLElement, tags: HTMLElement[], onSettled?, onActivate?): { dispose? }
 
 // lib/identity.ts
 IDENTITY_TAGS / IDENTITY_TAG_IDS / tagLabel(tag, lang) / tagById(id)
@@ -416,6 +419,9 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
 
 - 标签的入场不是 `scale(0)→scale(1)`，而是被"弹出来"的物理动画：ejection → flight（浅抛物线 + 轻微旋转）→ landing → settle。动画参数在 `IDENTITY_MOTION`。
 - 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数）。
+- **第十个标签（`intro`）是唯一的例外**：它比别的标签大 0.2 倍，点一下进整页自我介绍（§5.14）。放大用的是 font-size / padding 同比例放大（`calc(基准 * 1.2)`），**不能用 `transform: scale()`** —— 物理引擎每帧都会重写 inline `transform`。
+- 点按判定在 `identity-physics.ts`：按下后位移 < 8px、且 0.7s 内抬手才算"点击"；拖动过就不算（"抛掷"不能被误认成"点开"）。命中 + 元素带 `data-identity-link` 才回调 `onActivate`，由 `identity-player.ts` 走 `astro:transitions/client` 的 `navigate()`（失败退回 `location.assign`）；键盘上按回车同样打开。
+- `reveal()` 算"备用队形"（没接住音符时靠地面排队）的间距时只统计普通标签：可点击的那个宽得多，算进去会把整排挤成单列。
 - 首页 Journey 模式里，`initJourney()` 用 IntersectionObserver 在滚到 About 区时调用 `initIdentity()` / `setIdentityActive(true)`（见 `src/scripts/app.ts`）。
 - 音乐靠现有 `PianoEngine.scheduleNote()` 播 MIDI，不另做一套音频链路。
 - 单测：`tests/identity.test.mjs`、`tests/identity-midi.test.mjs`（真实 MIDI 文件解析）。
@@ -487,6 +493,22 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 玻璃卡片用 `.glass` + `.glass--N`；LCD 面用 `.lcd`。
 - 页面入场动画是 `.rise` / `.rise--2/3/4`（一次性 CSS animation）。**语言切换进新页面时会被有意去掉**（见 §5.4），因为那一次只该动文字。
 - 所有动画都要在 `@media (prefers-reduced-motion: no-preference)` 里，或自己判断 reduced motion。
+
+### 5.14 自我介绍页（About 第十个标签的去处）
+
+**文件**：`src/views/IntroPage.astro`、`src/pages/about/intro/index.astro`、`src/pages/en/about/intro/index.astro`、`src/content/pages/intro.zh.md`、`src/content/pages/intro.en.md`、`src/scripts/nocturne.ts`
+
+- 路由常量：`src/lib/pages.ts` 的 `introRoutes = { zh: '/about/intro/', en: '/en/about/intro/' }`；About 页第十个标签的 `href` 就是它。
+- 正文是内容集合 `pages` 里的 Markdown，视图里 `getPage('intro', lang)` + `render(entry)`；文案只有本人原文（中文）和对应英文翻译，**不要在这里补写没确认过的自我介绍**。
+- **本人标了分段的地方 = Markdown 的 `##`**：`.letter :global(h2)` 只负责"加大加粗"（`clamp(1.55rem … 2.05rem)` + `font-weight: 700`）。本人后来要求把标题上方那道"⸻ 短线"删掉，**不要再加回任何装饰线**。改标题层级时别把 `.prose h2` 的默认样式当回事，这里是有意覆盖的。
+- 头图来自 `src/images/Gensokyo.png`，用 `astro:assets` 的 `<Image>`（自动出 webp + srcset，2.6MB → 33/70/142/273kB 四档）。`src/images/` 的图不要手写 `<img>`，也不要拷进 `public/`。
+- 阅读栏宽度与文章页一致：`max-width: calc(var(--measure) + var(--gutter) * 2)`；正文用 `.prose` 纸面，页脚一个"回到关于"链接。
+- **左上角有一个返回按钮**（`返回关于` / `Back to About`，`.letter-page__back`，用 `.glass--pill` 材质）：这一页是从 About 的标签点进来的，得能原路回去；它和页脚那个链接都指向 `aboutRoutes[lang]`。
+- **背景音乐：这一页接着放 About 页的夜曲**（不放主题曲）。`src/scripts/nocturne.ts` 用 `PianoEngine` + `parseMidi()` 复刻 About 的演奏，和 `identity-player.ts` 共用 `live-timeline` 的同一个 id（`identity:nocturne`），两边互相"接着放"，不是各弹各的；音量用 `IDENTITY_INTRO_VOLUME`（0.7，比演奏模式的 0.85 克制），淡入用 `AUDIO.fadeInMs`。
+  - `initNocturne()` 在 boot 里调用，`disposeNocturne()` 在 `astro:before-swap` 里调用；缺采样或缺用户手势时只把状态标成 `waiting`，等下一次点击再开始。
+  - 切到后台会暂停、切回来接着弹（与 About 页一致）；主题曲的让位由 `app.ts` 的 `setAboutActive(true)` 负责（见 §5.5）。
+- 状态钩子：`[data-nocturne-ready]`（乐谱解析完成）、`[data-nocturne-state="waiting|playing|paused"]` —— 排查"这一页怎么没声音"先看这两个。
+- 单测：这一页是排版 + 内容 + 浏览器行为，只有常量层面的单测（`tests/identity.test.mjs` 里的音量断言）；改动后在浏览器里核对分节标题、图片、返回按钮与夜曲即可（`npm run build` 会校验内容集合字段）。
 
 ---
 
@@ -561,6 +583,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 | --- | --- | --- | --- |
 | `[data-identity]` 根 + `-arena` / `-canvas` / `-play` / `-restart` / `-progress` / `-status` / `-time` / `-volume` / `-tag` | `IdentityStage.astro` | `initIdentity()`、`identity-physics.ts` | About 身份实验场 |
 | `[data-revealed]` / `[data-dragging="true"]` | `identity-player.ts` | 组件 CSS | 标签出现前隐藏 / 拖拽光标 |
+| `[data-identity-link]` | `IdentityStage.astro`（第十个标签的 href） | `identity-physics.ts`（点按判定 + 回车）、`identity-player.ts`（`navigate()`） | 可点击标签：放大 1.2× + 点开自我介绍页；有它就参与"点击"逻辑 |
 | `[data-contact]` / `[data-contact-row]` / `[data-contact-copy]` / `[data-contact-done]` | 联系组件 | `initContact()` | 复制交互与反馈 |
 | `[data-copied="true"]` | `contact.ts` 写在 `[data-contact-row]` 上 | 组件 CSS | 行内 COPY → COPIED（1.2s 后自动删掉） |
 | `[data-system-message]` + `-text` / `-detail` + `[data-visible]` | `SystemMessage.astro` | `initSystemMessages()` | 左下角 LCD 提示 |
@@ -609,6 +632,14 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 钩子/数据：新的 data-* / storage key / 自定义事件（没有就写"无"）
 - 验证：npm test / npm run check / 浏览器实测结果
 ```
+
+### 2026-09-19 · About 第十个标签「自我介绍」+ 整页长文（中英）+ 这一页续播夜曲
+
+- 需求：1) About 的身份标签从九个加到十个 —— 第十个要在"弱起 + 前四小节"里放出来，尺寸比别的标签大一点（本人先要 0.5 倍，看到实物后改成 0.2 倍），文案"自我介绍（听了这么久，点一点我吧，求求了(｡>﹏<｡)）"，点开进一个全新的页面；2) 新页面是一整页自我介绍长文（本人原文 + 英文翻译），本人标了分段的地方标题要加大加粗，并插入 `src/images/` 里的图；3) 标签文案太长 → 排成两行；标题上方的"⸻ 短线"要删掉；4) 这一页要接着放 About 的夜曲（不是按主题播背景音乐），左上角加一个返回按钮。
+- 文件：`src/lib/identity.ts`（第十个标签、`tagLines()`、`IDENTITY_INTRO_VOLUME`）、`src/lib/pages.ts`（`introRoutes`）、`src/components/IdentityStage.astro`（渲染成 `<a>` + 两行文案 + 1.2× 样式 + 专属 glyph/颜色）、`src/scripts/identity-physics.ts`（点按判定、大标签不自转、队形间距）、`src/scripts/identity-player.ts`（`navigate()`）、`src/scripts/nocturne.ts`（**新增**：这一页的背景演奏）、`src/scripts/app.ts`（boot / before-swap / `setAboutActive`）、`src/styles/tokens.css`（`--identity-intro` 两套主题）、**新增** `src/views/IntroPage.astro`、`src/pages/about/intro/index.astro`、`src/pages/en/about/intro/index.astro`、`src/content/pages/intro.zh.md`、`src/content/pages/intro.en.md`、`tests/identity.test.mjs`、`tests/identity-midi.test.mjs`。
+- 函数：`tagLines(tag, lang)`（把"自我介绍（…）"拆成标题行 + 括号行）、`createIdentityPhysics(root, tags, onSettled, onActivate)`（新增第四个参数：点按回调）、`initNocturne()` / `disposeNocturne()`、`getPage('intro', lang)`、`render(entry)`、`introRoutes`、`IDENTITY_INTRO_VOLUME`。
+- 钩子/数据：新增 `[data-identity-link]`（第十个标签的 href：放大 + 可点开，参与点按判定）、`[data-nocturne]`（自我介绍页根节点）、`[data-nocturne-ready]` / `[data-nocturne-state]` / `[data-nocturne-at]`；没有新 storage key（夜曲与 About 共用时间线 `space.position.v1.identity:nocturne`）；旧落点 cookie 长度对不上会自动重播一次，属预期。
+- 验证：`npm test` 69/69（新增"十个标签""十个揭示时刻都落在弱起+前四小节内""文案拆两行""夜曲音量"四条断言）；`npm run check` 0 错误 0 警告；`npm run build` 17 页、头图出 4 档 webp（2.6MB → 33/70/142/273kB）。浏览器实测（本地 preview，639px 视口）：`/about/` 10 个标签、第十个 18px/353×76（其余 15px/106×46 = 1.2×）、两行文案、"点一下"跳 `/about/intro/`、拖动 90px 不误跳（URL 仍是 `/about/`）；自我介绍页 h1 34.5px、15 个 `##` 标题 28.1px/700 且 `::before` 为 none（短线已删）、头图 588×331 webp、左上角"← 返回关于"指向 `/about/`；夜曲 `data-nocturne-state=playing`，`data-nocturne-at` 从 About 页的进度接着走（点击时约 2:1x，进入新页后继续累加，没有从 0 重来）。
 
 ### 2026-09-19 · 修复"液态玻璃"在线上失效（构建把 backdrop-filter 合并成只剩 -webkit-）
 
@@ -689,6 +720,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 8. **`dist/` 是构建产物**：不要手改；改完源码跑 `npm run build`。
 9. **双语键漏了一半**：`ui.ts` 里 zh / en 两个字典都要加，否则取不到会回退成 key 本身。
 10. **手写的 `-webkit-` 前缀会被构建吞掉**：`backdrop-filter` 与 `-webkit-backdrop-filter` 成对书写时，lightningcss 合并后只留前缀那份，Chromium 不认 → 玻璃效果全没（见 §10 的修复记录）。只写标准属性，前缀交给构建工具。
+11. **第十个标签（自我介绍）**：它比别的标签大 0.2 倍 —— 放大只能改 font-size / padding（写成 `calc(基准 * 1.2)`），写 `transform: scale()` 会被物理引擎每帧覆盖；"点开"的判定在 `identity-physics.ts`（位移 < 8px 且 0.7s 内抬手），拖动抛掷不会误触发跳转。要改尺寸就改 `IdentityStage.astro` 里 `[data-identity-link]` 那组规则；要改文案就改 `src/lib/identity.ts` 的最后一个条目。
 
 ---
 

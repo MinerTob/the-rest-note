@@ -7,6 +7,7 @@ import { initMiniLab } from './minilab';
 import { initMusicUI } from './music-ui';
 import { initContact } from './contact';
 import { initIdentity, disposeIdentity, setIdentityActive } from './identity-player';
+import { initNocturne, disposeNocturne } from './nocturne';
 import { initSystemMessages } from './system-message';
 import { initTheme } from './theme';
 import { initThemeSwitcher } from './theme-switch';
@@ -88,12 +89,16 @@ function boot(): void {
   global.music ??= new MusicManager(global.store);
   theme.attachMusic(global.music);
   const journey = document.querySelector<HTMLElement>('[data-journey]');
-  global.music.setAboutActive(Boolean(document.querySelector('[data-identity]')) && !journey);
+  // "关于"这一族页面（About、自我介绍）都让主题背景音乐让位：
+  // 它们放的是同一首夜曲的钢琴演奏，不是 MusicManager 里的 MP3。
+  const aboutFamily = Boolean(document.querySelector('[data-identity], [data-nocturne]'));
+  global.music.setAboutActive(aboutFamily && !journey);
   initMusicUI(global.music);
 
   // 4) 交互组件
   initContact();
   if (!journey) initIdentity();
+  initNocturne();
   initMiniLab();
   initEasterEggs(global.store, theme);
   initThemeSwitcher(global.store, theme);
@@ -107,6 +112,7 @@ function boot(): void {
 document.addEventListener('astro:before-swap', (event) => {
   disposeJourney?.();
   disposeIdentity();
+  disposeNocturne();
   getGlobal().minilab?.dispose();
   getGlobal().minilab = undefined;
 

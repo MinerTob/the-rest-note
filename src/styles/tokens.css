@@ -487,6 +487,7 @@ html[data-theme='baroque'] {
   --identity-direct: #f0d0cb;
   --identity-persistent: #eee2b7;
   --identity-analytical: #cedde7;
+  --identity-intro: #f6d5d8;
 }
 html[data-theme="baroque"] {
   --identity-music: #654c26;
@@ -498,4 +499,5 @@ html[data-theme="baroque"] {
   --identity-direct: #723e35;
   --identity-persistent: #69602f;
   --identity-analytical: #3e505e;
+  --identity-intro: #7a4048;
 }

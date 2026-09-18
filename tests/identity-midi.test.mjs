@@ -23,6 +23,17 @@ test("provided Chopin score uses a 1/8 pickup and completes four 12/8 bars at ti
     s.notes.every((n) => n.end >= n.start && n.midi >= 21 && n.midi <= 108),
   );
 });
+test("ten identity tags still land inside the pickup and the first four bars", () => {
+  // About 页现在有十个标签（第十个是"自我介绍"）。揭示计划必须仍然把
+  // 全部十个塞进"弱起 + 前四小节"这段里，否则重头戏会掉到第五小节。
+  const s = parseMidi(fs.readFileSync(path)),
+    p = identityRevealPlan(s, 10);
+  assert.equal(p.endTick, 11760);
+  assert.equal(p.triggers.length, 10);
+  assert.equal(new Set(p.triggers).size, 10);
+  assert.ok(p.triggers.every((n) => n.tick < p.endTick));
+  assert.ok(p.triggers.every((n) => n.start + 1.14 <= p.deadline));
+});
 const file = (events) =>
   new Uint8Array([
     77,

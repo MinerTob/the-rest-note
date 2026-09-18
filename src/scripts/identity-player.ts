@@ -1,3 +1,4 @@
+import { navigate } from 'astro:transitions/client';
 import { createIdentityPhysics, type IdentityLayout } from './identity-physics';
 import {
   parseMidi,
@@ -110,7 +111,13 @@ export function initIdentity(): void {
     ink = "#243244",
     darkInk = "#bcd9ef";
   let notes: MidiNote[] = [];
-  const physics = createIdentityPhysics(root, tags, writeLayout);
+  const physics = createIdentityPhysics(root, tags, writeLayout, (el) => {
+    const href = el.dataset.identityLink;
+    if (!href) return;
+    // 走 ClientRouter 的 navigate()，换页跟站内其它链接一样是平滑过渡；
+    // 万一 router 还没就绪，退回一次普通跳转。
+    void navigate(href).catch(() => window.location.assign(href));
+  });
   const restoredCount = physics.restore(readLayout() ?? []);
   needsAnimation = restoredCount < tags.length;
   piano.addEventListener(

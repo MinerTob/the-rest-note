@@ -8,6 +8,8 @@ export const homeRoutes: RoutePair = { zh: '/', en: '/en/' };
 export const blogRoutes: RoutePair = { zh: '/blog/', en: '/en/blog/' };
 export const labRoutes: RoutePair = { zh: '/lab/', en: '/en/lab/' };
 export const aboutRoutes: RoutePair = { zh: '/about/', en: '/en/about/' };
+/** 第十个身份标签（自我介绍）打开的整页长文。 */
+export const introRoutes: RoutePair = { zh: '/about/intro/', en: '/en/about/intro/' };
 
 export type PostProps = {
   post: Post;

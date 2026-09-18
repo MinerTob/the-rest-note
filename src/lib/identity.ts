@@ -1,9 +1,13 @@
 import type { Lang } from '@/i18n/ui';
 
 /**
- * About 页 88 键音乐介绍的九个双语标签。
+ * About 页 88 键音乐介绍的十个双语标签。
  * MIDI 旋律起音触发标签动画；identity-midi.ts 根据弱起和四小节计算截止时间。
  * ANALYTICAL 表示拆解问题、找规律，不是“细心”。
+ *
+ * 最后一个 intro 是刻意排在队尾的“重头戏”：它比其他标签大 0.2 倍，
+ * 点一下会跳到整页自我介绍（/about/intro/）。揭示顺序 = 数组顺序，
+ * 所以它永远是最后一个落地的标签，别把它挪到前面。
  */
 export const IDENTITY_TAG_IDS = [
   'music',
@@ -15,6 +19,7 @@ export const IDENTITY_TAG_IDS = [
   'direct',
   'persistent',
   'analytical',
+  'intro',
 ] as const;
 
 export type IdentityTagId = (typeof IDENTITY_TAG_IDS)[number];
@@ -41,10 +46,27 @@ export const IDENTITY_TAGS: readonly IdentityTag[] = [
   { id: 'direct', zh: '直白', en: 'DIRECT' },
   { id: 'persistent', zh: '坚持', en: 'PERSISTENT' },
   { id: 'analytical', zh: '善于分析', en: 'ANALYTICAL' },
+  {
+    id: 'intro',
+    zh: '自我介绍（听了这么久，点一点我吧，求求了(｡>﹏<｡)）',
+    en: 'ABOUT ME (you have listened this far — click me, please, I beg you (｡>﹏<｡))',
+  },
 ];
 
 export function tagLabel(tag: IdentityTag, lang: Lang): string {
   return lang === 'zh' ? tag.zh : tag.en;
+}
+
+/**
+ * 第十个标签的文案太长，排版时拆成两行：
+ * 第一行是主标题（"自我介绍" / "ABOUT ME"），第二行是括号里那句请求。
+ * 其它标签只有一行，`note` 为 undefined。
+ */
+export function tagLines(tag: IdentityTag, lang: Lang): { title: string; note?: string } {
+  const label = tagLabel(tag, lang);
+  const at = label.search(/[（(]/);
+  if (at < 0) return { title: label };
+  return { title: label.slice(0, at).trim(), note: label.slice(at).trim() };
 }
 
 export function tagById(id: string): IdentityTag | undefined {
@@ -86,3 +108,10 @@ export const IDENTITY_MOTION = {
  * 把曲子放进来、或者改这一行就好。
  */
 export const IDENTITY_TRACK_SRC = '/music/secret/f-chopin-nocturne-op9-no2-in-e-flat-major.mid';
+
+/**
+ * 自我介绍页接着放这首夜曲时的音量。
+ * 比 About 页的演奏（滑块默认 0.85）低一点：那一页是"在演奏"，
+ * 这一页是读长文，音乐应该退回到背景的位置。
+ */
+export const IDENTITY_INTRO_VOLUME = 0.7;

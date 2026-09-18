@@ -1,5 +1,6 @@
 ---
-import { IDENTITY_TAGS, tagLabel } from '@/lib/identity';
+import { IDENTITY_TAGS, tagLabel, tagLines } from '@/lib/identity';
+import { introRoutes } from '@/lib/pages';
 import type { Lang } from '@/i18n/ui';
 interface Props { lang: Lang }
 const { lang } = Astro.props;
@@ -11,7 +12,14 @@ const zh = lang === 'zh';
     <span class="identity__piece">CHOPIN<br />NOCTURNE · OP. 9 № 2</span>
   </header>
   <ul class="identity__tags" data-identity-arena>
-    {IDENTITY_TAGS.map(tag => <li class="identity__tag" data-identity-tag={tag.id} tabindex="0" role="button" aria-label={tagLabel(tag, lang) + (zh ? '：拖动抛掷，或用方向键移动' : ': drag to throw, or use arrow keys')}>{tagLabel(tag, lang)}</li>)}
+    {IDENTITY_TAGS.map((tag) => {
+      if (tag.id === 'intro') {
+        /* 这个标签的文案最长，排成两行：主标题一行，括号里的那句请求一行 */
+        const { title, note } = tagLines(tag, lang);
+        return <li class="identity__tag-slot"><a class="identity__tag identity__tag--intro" data-identity-tag={tag.id} data-identity-link={introRoutes[lang]} href={introRoutes[lang]} aria-label={tagLabel(tag, lang) + (zh ? '：点一下打开整页自我介绍，也可以拖动抛掷' : ': click to open the whole page about me, or drag to throw it')}><span class="identity__tag-title">{title}</span>{note && <span class="identity__tag-note">{note}</span>}</a></li>;
+      }
+      return <li class="identity__tag" data-identity-tag={tag.id} tabindex="0" role="button" aria-label={tagLabel(tag, lang) + (zh ? '：拖动抛掷，或用方向键移动' : ': drag to throw, or use arrow keys')}>{tagLabel(tag, lang)}</li>;
+    })}
   </ul>
   <div class="identity__scroll" tabindex="0" aria-label={zh ? '88 键瀑布流，窄屏可横向滚动' : '88-key piano roll; scroll horizontally on narrow screens'}>
     <canvas class="identity__canvas" data-identity-canvas role="img" aria-label={zh ? 'A0 至 C8：音符落下并点亮对应琴键' : 'A0 to C8: falling notes light the corresponding keys'}></canvas>
@@ -79,6 +87,7 @@ const zh = lang === 'zh';
   :global([data-identity-tag="direct"]) { --identity-color:var(--identity-direct); }
   :global([data-identity-tag="persistent"]) { --identity-color:var(--identity-persistent); }
   :global([data-identity-tag="analytical"]) { --identity-color:var(--identity-analytical); }
+  :global([data-identity-tag="intro"]) { --identity-color:var(--identity-intro); }
   /* Small tactile stickers; their physical dimensions stay at half the previous size. */
   :global(body > [data-identity-arena] .identity__tag) {
     border-radius: 16px 16px 16px 6px;
@@ -108,4 +117,41 @@ const zh = lang === 'zh';
   :global([data-identity-tag='direct']) { --identity-glyph: '→'; }
   :global([data-identity-tag='persistent']) { --identity-glyph: '∞'; }
   :global([data-identity-tag='analytical']) { --identity-glyph: '∴'; }
+  :global([data-identity-tag='intro']) { --identity-glyph: '✎'; }
+
+  /* 第十个标签：比别的标签大 0.2 倍（font/padding 同比例放大），
+     而且是唯一能点开的标签 —— 点它 = 进整页自我介绍。
+     放大不能用 transform:scale()，因为物理引擎每帧会覆盖 inline transform。 */
+  .identity__tag--intro {
+    padding: 6px 14px;
+    font-size: calc(var(--fs-xs) * 1.2);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .identity__tag-title { display: block; font-weight: 700; }
+  .identity__tag-note { display: block; margin-top: 4px; font-size: .76em; font-weight: 500; opacity: .86; }
+  :global(body > [data-identity-arena] .identity__tag[data-identity-link]) {
+    /* 尺寸 = 普通标签 × 1.2（"再大 0.2 倍"）：写成 calc 乘法，
+       以后调基准字号/内边距时它自动跟着走，不会掉队。 */
+    padding: calc(11px * 1.2) calc(22px * 1.2);
+    min-height: calc(46px * 1.2);
+    max-width: min(88vw, 26rem);
+    font-size: calc(clamp(15px, 1.2vw, 17px) * 1.2);
+    font-weight: 600;
+    line-height: 1.45;
+    white-space: normal;
+    text-align: center;
+    text-wrap: balance;
+    border-radius: 19px 19px 19px 7px;
+    cursor: pointer;
+    box-shadow: inset 0 1px 0 var(--glass-line-2), inset 0 -3px 0 color-mix(in srgb, var(--identity-color), var(--ink) 12%), 0 10px 22px color-mix(in srgb, var(--identity-color), transparent 45%);
+  }
+  :global(body > [data-identity-arena] .identity__tag[data-identity-link]::before) {
+    left: 11px;
+    font-size: 12px;
+  }
+  :global(body > [data-identity-arena] .identity__tag[data-identity-link]:focus-visible) {
+    outline: 3px solid var(--accent);
+    outline-offset: 4px;
+  }
 </style>

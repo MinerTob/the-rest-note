@@ -7,6 +7,8 @@ export function createIdentityPhysics(
   root: HTMLElement,
   tags: HTMLElement[],
   onSettled?: (layout: IdentityLayout) => void,
+  /** 点按（不是拖拽）到带 [data-identity-link] 的标签时回调；由调用方决定去哪儿。 */
+  onActivate?: (el: HTMLElement) => void,
 ) {
   const engine = Engine.create({ enableSleeping: true });
   engine.gravity.y = 1.4;
@@ -18,7 +20,10 @@ export function createIdentityPhysics(
   let walls: Body[] = [], width = 0, floor = 0, frame = 0, last = 0, accumulator = 0;
   let left = 0, right = 0;
   let settleTimer = 0;
-  let drag: { index: number; pointer: number; joint: Constraint } | undefined;
+  let drag: {
+    index: number; pointer: number; joint: Constraint;
+    fromX: number; fromY: number; moved: number; startedAt: number;
+  } | undefined;
   const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
   function bounds() {
     width = document.documentElement.clientWidth;
@@ -73,15 +78,18 @@ export function createIdentityPhysics(
     else { last = 0; saveWhenSettled(); }
   }
   function wake() { if (!frame) { last = 0; frame = requestAnimationFrame(step); } }
-  function release() {
+  function release(event?: Event) {
     if (!drag) return;
     Composite.remove(engine.world, drag.joint);
     const el = tags[drag.index], pointer = drag.pointer;
+    // 只有"按下去几乎没动就抬手"才算点按：拖动过、或按住超过 0.7s，都不算。
+    const tap = event?.type === 'pointerup' && drag.moved < 8 && performance.now() - drag.startedAt < 700;
     drag = undefined;
     el.dataset.dragging = 'false';
     if (el.hasPointerCapture(pointer)) el.releasePointerCapture(pointer);
     window.setTimeout(saveWhenSettled, 260);
     wake();
+    if (tap && el.dataset.identityLink) onActivate?.(el);
   }
   tags.forEach((el, index) => {
     el.addEventListener('pointerdown', e => {
@@ -95,20 +103,24 @@ export function createIdentityPhysics(
       const joint = Constraint.create({ pointA: { x: e.clientX, y: e.clientY + scrollY }, bodyB: b,
         pointB: { x: e.clientX - b.position.x, y: e.clientY + scrollY - b.position.y }, stiffness: .18, damping: .12, length: 0 });
       Composite.add(engine.world, joint);
-      drag = { index, pointer: e.pointerId, joint };
+      drag = { index, pointer: e.pointerId, joint, fromX: e.clientX, fromY: e.clientY, moved: 0, startedAt: performance.now() };
       el.dataset.dragging = 'true';
       wake();
     }, { signal: abort.signal });
     el.addEventListener('pointermove', e => {
       if (drag?.pointer !== e.pointerId || drag.index !== index) return;
       drag.joint.pointA = { x: clamp(e.clientX, left + 12, right - 12), y: clamp(e.clientY + scrollY, 20, floor - 20) };
+      drag.moved = Math.max(drag.moved, Math.hypot(e.clientX - drag.fromX, e.clientY - drag.fromY));
       wake();
     }, { signal: abort.signal });
     for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(event, release, { signal: abort.signal });
     el.addEventListener('keydown', e => {
       const b = bodies.get(index);
       if (!b || !['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Enter',' '].includes(e.key)) return;
-      e.preventDefault(); Sleeping.set(b, false);
+      e.preventDefault();
+      // 链接标签：回车 = 打开它指向的页面；方向键、空格仍然是"抛掷"。
+      if (e.key === 'Enter' && el.dataset.identityLink) { onActivate?.(el); return; }
+      Sleeping.set(b, false);
       if (reduced.matches) {
         Body.setPosition(b, { x: clamp(b.position.x + (e.key === 'ArrowLeft' ? -24 : e.key === 'ArrowRight' ? 24 : 0), left + el.offsetWidth / 2 + 2, right - el.offsetWidth / 2 - 2), y: clamp(b.position.y + (e.key === 'ArrowDown' ? 24 : -24), 20, floor - el.offsetHeight / 2 - 2) });
         Sleeping.set(b, true); paint(); return;
@@ -120,7 +132,9 @@ export function createIdentityPhysics(
   function reveal(index: number, source?: { x: number; y: number }) {
     if (bodies.has(index)) return;
     const el = tags[index], w = el.offsetWidth, h = el.offsetHeight;
-    const spacing = Math.max(...tags.map(tag => tag.offsetWidth)) + 16;
+    // 备用队形只看普通标签：可点击的那个本来就宽得多，用它算间距会把整排挤成单列。
+    const plain = tags.filter(tag => !tag.dataset.identityLink);
+    const spacing = Math.max(...(plain.length ? plain : tags).map(tag => tag.offsetWidth)) + 16;
     const columns = Math.max(1, Math.floor((right - left - 16) / spacing));
     const resting = !source || reduced.matches;
     const x = resting ? left + 8 + w / 2 + (index % columns) * spacing : source.x;
@@ -128,9 +142,12 @@ export function createIdentityPhysics(
     const b = Bodies.rectangle(clamp(x, left + w / 2 + 4, right - w / 2 - 4), y, w, h,
       { chamfer: { radius: h / 3 }, restitution: .36, friction: .65, frictionAir: .008, sleepThreshold: 65 });
     bodies.set(index, b); Composite.add(engine.world, b);
+    // 可点击的那个标签又长又大：让它重一点、别自转 —— 一转起来就变成一根竖着的横幅。
+    const linked = Boolean(el.dataset.identityLink);
+    if (linked) Body.setInertia(b, b.inertia * 4);
     if (!resting) {
       Body.setVelocity(b, { x: (index % 2 ? -1 : 1) * (2.5 + index % 3), y: -9 - index % 3 });
-      Body.setAngularVelocity(b, (index % 2 ? -1 : 1) * .035);
+      if (!linked) Body.setAngularVelocity(b, (index % 2 ? -1 : 1) * .035);
     }
     el.dataset.revealed = 'true';
     if (reduced.matches) Sleeping.set(b, true);
