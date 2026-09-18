@@ -165,11 +165,19 @@ type ScrollAnchor = { path: number[]; offset: number };
 
 type ScrollRecord = { y: number; hash: string; anchor?: ScrollAnchor };
 
-/** 从导航栏下面 2px 处取点，免得把固定的头部本身当成"正在看的正文"。 */
-function topProbeY(): number {
+/**
+ * 取"眼睛正在看的那一行"的高度：默认视口 45% 处（人读书时视线大概在这）。
+ *
+ * 一开始这里取的是视口最上沿，实测长文页（自我介绍）切语言时：
+ * 对齐点固定在顶端，屏幕中间那段文字却漂了 90-180px —— 正好是人在看的地方。
+ * 改成对齐视线高度之后，漂移被摊到上下两边，中间那段基本不动。
+ * 取点还要避开固定的头部（它在 <main> 之外，但会盖住顶端那一条）。
+ */
+function probeY(fraction = 0.45): number {
   const header = document.querySelector<HTMLElement>('.site-header');
   const bottom = header ? header.getBoundingClientRect().bottom : 0;
-  return Math.round(Math.max(2, Math.min(bottom + 2, window.innerHeight - 2)));
+  const target = window.innerHeight * fraction;
+  return Math.round(Math.max(bottom + 2, Math.min(target, window.innerHeight - 2)));
 }
 
 /** 只认块级元素：`<span>` 这类行内元素不算地标，它所在的段落才是。 */
@@ -190,12 +198,12 @@ function blockChildren(node: HTMLElement): HTMLElement[] {
   );
 }
 
-/** 从 main 逐层往下，找到"刚好包住这点"的最深块级元素，并记下子节点路径。 */
-function blockAtTop(): { path: number[]; node: HTMLElement } | undefined {
+/** 从 main 逐层往下，找到"刚好包住视线上那一点"的最深块级元素，并记下子节点路径。 */
+function blockAtEye(): { path: number[]; node: HTMLElement } | undefined {
   const main = document.querySelector<HTMLElement>('main');
   if (!main) return undefined;
   const x = Math.round(window.innerWidth / 2);
-  const y = topProbeY();
+  const y = probeY();
   const path: number[] = [];
   let node: HTMLElement = main;
   for (;;) {
@@ -239,13 +247,13 @@ function dominantBlock(): { path: number[]; node: HTMLElement } | undefined {
  * 取"换页后要按回原处的那一块"。
  *
  * 占住视口的那块优先 —— 它才是人正在看的东西；不过长文页（自我介绍）
- * 从 main 一路下来每一层都是整屏高，钻不到具体的段落，这时改用视口顶端那一块。
+ * 从 main 一路下来每一层都是整屏高，钻不到具体的段落，这时改用视线高度那一块。
  */
 function findAnchor(): ScrollAnchor | undefined {
   const dominant = dominantBlock();
   const picked =
     !dominant || visibleHeight(dominant.node) >= window.innerHeight * 0.9
-      ? blockAtTop() ?? dominant
+      ? blockAtEye() ?? dominant
       : dominant;
   if (!picked) return undefined;
   return { path: picked.path, offset: Math.round(picked.node.getBoundingClientRect().top) };

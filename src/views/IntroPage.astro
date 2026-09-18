@@ -4,7 +4,7 @@ import { Image } from 'astro:assets';
 import BaseLayout from '@/layouts/BaseLayout.astro';
 import gensokyo from '@/images/Gensokyo.png';
 import { getPage } from '@/lib/content';
-import { aboutRoutes } from '@/lib/pages';
+import { localizePath } from '@/i18n/utils';
 import type { Lang } from '@/i18n/ui';
 import type { RoutePair } from '@/lib/routes';
 
@@ -21,6 +21,11 @@ const zh = lang === 'zh';
 const entry = await getPage('intro', lang);
 if (!entry) throw new Error(`Missing content: src/content/pages/intro.${lang}.md`);
 const { Content } = await render(entry);
+/**
+ * 返回的目标是首页那串拼接页里的"关于"区（`/#about`），不是独立的 `/about/` 页。
+ * 本人要求：从这一页回去要落在那个"整串页面"里的关于区上。
+ */
+const backHref = `${localizePath('/', lang)}#about`;
 ---
 
 <BaseLayout
@@ -31,7 +36,7 @@ const { Content } = await render(entry);
 >
   {/* data-nocturne：这一页接着放 About 页的那首夜曲（见 src/scripts/nocturne.ts） */}
   <article class="letter-page wrap" data-nocturne>
-    <a class="letter-page__back glass glass--thin glass--pill glass--live" href={aboutRoutes[lang]}>
+    <a class="letter-page__back glass glass--thin glass--pill glass--live" href={backHref}>
       <span class="letter-page__back-arrow" aria-hidden="true">←</span>
       {zh ? '返回' : 'Back to About'}
     </a>
@@ -58,7 +63,7 @@ const { Content } = await render(entry);
     </div>
 
     <p class="letter-page__back">
-      <a class="more-link" href={aboutRoutes[lang]}>{zh ? '回到关于' : 'Back to About'}</a>
+      <a class="more-link" href={backHref}>{zh ? '回到关于' : 'Back to About'}</a>
     </p>
   </article>
 </BaseLayout>

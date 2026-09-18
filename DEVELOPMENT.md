@@ -264,8 +264,8 @@ restoreScrollAfterLoad()       // 第二段：astro:page-load 里再对齐（关
 forgetSavedScroll()            // 只在导航失败时丢弃（成功时必须留给第二段）
 applySavedScroll()             // 两段共用的收尾：地标对齐 → 收敛到文档高度 → 接回 #锚点
 // 内部：地标（换页后要按回原处的那一块）
-topProbeY() / isBlock() / visibleHeight() / blockChildren()
-blockAtTop()                   // 视口顶端那一块：从 main 逐层钻进"刚好包住这点"的块级元素
+probeY() / isBlock() / visibleHeight() / blockChildren()
+blockAtEye()                   // 视线高度（视口 45%）那一块：从 main 逐层钻进"刚好包住这点"的块级元素
 dominantBlock()                // 占住视口的那一块：每层挑露出最多的孩子，低于四成就停
 findAnchor() / resolveAnchor() // 记下子节点路径 + 视口高度；新页面按同一路径找回来
 readAnchor()                   // 从 sessionStorage 读出来的东西先验形状
@@ -301,7 +301,8 @@ click [data-lang-switch]
   1. `restoreScrollAfterSwap()`（`astro:after-swap`）—— 时机在那次滚动之后、View Transition 拍"新页面"快照之前，位置接得上又不会和动画打架；
   2. `restoreScrollAfterLoad()`（`astro:page-load`）—— 关于页此时才由 `initIdentity()` 把标签搬进 `body` 改成绝对定位，文档高度会变，只对齐一次会被浏览器按旧高度截断（那就是本人看到的"切完语言发生位移"）；`document.fonts.ready` + 一帧之后还会再对一次（字体就位布局才会定），但若这中间用户自己滚过（和上次落点差 ≥4px）就不抢他的位置。
   两个函数共用 `applySavedScroll()`：**先按地标对齐**——把换页前视口里那一块按回原来的高度（`offset` 是它当时的视口 top）；地标找不回来才退回老像素。另外用 `behavior: 'instant'`（站点全局有 `scroll-behavior: smooth`，`auto` 会变成慢悠悠地滚回去）、把 y 夹到当前文档高度上限，并在 URL 丢了 `#hash` 时用 `history.replaceState` 接回去（router 只按 `to.href` 写地址，`#about` 会被它丢掉）。
-- **为什么不能只按像素恢复**：英文普遍比中文长，换页后上面那些内容的高度会变 —— 实测首页（那串拼接页）切语言时整块"关于"区在文档里下沉 **115px**，自我介绍页整篇高 **1639px**。只把老 `scrollY` 滚回去，人正在看的那一块就被挤走（本人报的"位移"）。所以地标优先：选"占住视口的那一块"（不是视口最上面那一行——那可能只是上一段滚出去的尾巴），长文页（每层都是整屏高、钻不到段落）改成视口顶端那一块。实测：首页滚到关于区切语言，`[data-identity]` 的屏幕位置 98 → 98（**0px**），滚动位置 2714 → 2829 正好抵消那 115px；自我介绍页滚到 4000 处切语言，`<article>` 里视口顶端那块 −25 → −25（**0px**）。
+- **为什么不能只按像素恢复**：英文普遍比中文长，换页后上面那些内容的高度会变 —— 实测首页（那串拼接页）切语言时整块"关于"区在文档里下沉 **115px**，自我介绍页整篇高 **1639px**。只把老 `scrollY` 滚回去，人正在看的那一块就被挤走（本人报的"位移"）。所以地标优先：选"占住视口的那一块"（不是视口最上面那一行——那可能只是上一段滚出去的尾巴），长文页（每层都是整屏高、钻不到段落）改成**视线高度那一块**（视口 45% 处，`probeY()`）。实测：首页滚到关于区切语言，`[data-identity]` 的屏幕位置 98 → 98（**0px**），滚动位置 2714 → 2829 正好抵消那 115px；自我介绍页滚到 4000 处切语言，`<article>` 里视口顶端那块 −25 → −25（**0px**）。
+- **长文页为什么要按视线高度对齐**（本人第二次复报"关于我那一页还是有问题"之后改的）：一开始对齐点取的是视口**最上沿**，实测自我介绍页切语言时，屏幕**中间**那段文字漂了 90–180px —— 正好是人正在读的地方（EN ↔ ZH 的段落高度不同，漂移从对齐点往远处累积）。改成 45% 高度之后，同一组测试里中间那段只动 0 到 −30px，剩下的漂移被摊到屏幕上下两边（±90 左右），而且页面该滚多少还是精确算出来的。
 - **切语言是"同一页换种说法"，不是"换了一趟路"**：`markLanguageSwap(pathname)` 在换页前把目标 pathname 写进 sessionStorage `space.lang-swap`，目标页 `takeLanguageSwap()` 取走一次（对不上就丢掉，不留残余）。身份标签靠它区分"重新落一次"和"原样留着"（见 §5.8）。
 - **一个曾经的坑**：收尾的 `finally` 里原本无条件 `forgetSavedScroll()`，而 `navigate()` 在 View Transition 更新完 DOM 时（`astro:page-load` 之前）就返回了 —— 于是第二段对齐永远读不到位置，等于只有一段。现在只有 `navigate()` 真抛错时才丢弃。改这条链路时留意调用顺序。
 
@@ -552,7 +553,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - **本人标了分段的地方 = Markdown 的 `##`**：`.letter :global(h2)` 只负责"加大加粗"（`clamp(1.55rem … 2.05rem)` + `font-weight: 700`）。本人后来要求把标题上方那道"⸻ 短线"删掉，**不要再加回任何装饰线**。改标题层级时别把 `.prose h2` 的默认样式当回事，这里是有意覆盖的。
 - 头图来自 `src/images/Gensokyo.png`，用 `astro:assets` 的 `<Image>`（自动出 webp + srcset，2.6MB → 33/70/142/273kB 四档）。`src/images/` 的图不要手写 `<img>`，也不要拷进 `public/`。
 - 阅读栏宽度与文章页一致：`max-width: calc(var(--measure) + var(--gutter) * 2)`；正文用 `.prose` 纸面，页脚一个"回到关于"链接。
-- **左上角有一个返回按钮**（中文只写`返回`，英文写 `Back to About`；中文里"关于"两个字是多余的，英文语法需要宾语，所以只改中文）：这一页是从 About 的标签点进来的，得能原路回去；`a.letter-page__back` 和页脚那个链接都指向 `aboutRoutes[lang]`。
+- **左上角有一个返回按钮**（中文只写`返回`，英文写 `Back to About`；中文里"关于"两个字是多余的，英文语法需要宾语，所以只改中文）：`a.letter-page__back` 和页脚那个"回到关于"都指向 **`localizePath('/', lang) + '#about'`**，也就是首页那串拼接页里的关于区，**不是独立的 `/about/` 页**。本人要求：从这一页回去要落回"整串页面"里的关于区（他进这一页多半是从那里点的第十个标签）。实测点返回后：URL `/#about`（英文 `/en/#about`）、关于区停在屏幕上 78、`body > [data-identity-arena]` 存在、十个标签都在且能拖。
 - **背景音乐：这一页接着放 About 页的夜曲**（不放主题曲）。`src/scripts/nocturne.ts` 用 `PianoEngine` + `parseMidi()` 复刻 About 的演奏，和 `identity-player.ts` 共用 `live-timeline` 的同一个 id（`identity:nocturne`），两边互相"接着放"，不是各弹各的；音量用 `IDENTITY_INTRO_VOLUME`（0.7，比演奏模式的 0.85 克制），淡入用 `AUDIO.fadeInMs`。
   - `initNocturne()` 在 boot 里调用，`disposeNocturne()` 在 `astro:before-swap` 里调用；缺采样或缺用户手势时只把状态标成 `waiting`，等下一次点击再开始。
   - 切到后台会暂停、切回来接着弹（与 About 页一致）；主题曲的让位由 `app.ts` 的 `setAboutActive(true)` 负责（见 §5.5）。
@@ -684,6 +685,20 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 钩子/数据：新的 data-* / storage key / 自定义事件（没有就写"无"）
 - 验证：npm test / npm run check / 浏览器实测结果
 ```
+
+### 2026-09-19 · 自我介绍页：切语言改按"视线高度"对齐 + 返回改回首页的关于区（#about）
+
+- 需求：本人复报"关于我里面的中英翻译切换还是有问题，其他好像没了"；同时要求自我介绍页的返回按钮回到 `/#about`，而不是独立的 `/about/`（他那句"不在被拼接成一整串的那个网页里"）。
+- 复现与量测（无头 Chrome 1280×800，本地构建产物；只比"同一块内容"的前后位置）：
+  - 自我介绍页 `/about/intro/`、`/en/about/intro/` 各 6 个滚动位置、上下两个方向：滚动位置和"视口顶端那一块"都已经稳住了，但**屏幕中间那段文字**漂 90–180px（en@1500 中间块 −122px，en@3000 −91px）—— 对齐点取在视口**最上沿**，漂移往远处累积，而人看的正是中间。
+  - 返回按钮：`href` 当时是 `aboutRoutes[lang]`（`/about/`）。
+- 改动：
+  1. `src/scripts/lang.ts`：`topProbeY()` → `probeY(fraction = 0.45)`、`blockAtTop()` → `blockAtEye()`（长文页的对齐点从视口顶端改到视线高度 45%）。"占住视口的那一块"规则不变，所以关于页/首页的行为不受影响。
+  2. `src/views/IntroPage.astro`：左上角返回与页脚"回到关于"都指向 `localizePath('/', lang) + '#about'`。
+- 实测：自我介绍页中间块位移 **0 / −30px**（改前 −91 / −122），上下两边的漂移摊到 ±90 左右；点返回后 URL `/#about`（英文 `/en/#about`）、关于区停在屏幕 78、`body > [data-identity-arena]` 在、十个标签都在且拖动跟手（−161/−74）；首页关于区仍是 78 → 78、标签继续贴住区块。
+- 文件：`src/scripts/lang.ts`、`src/views/IntroPage.astro`、`DEVELOPMENT.md`（§5.4 / §5.14 / 本条）。
+- 钩子/数据：没有新增 data-* 钩子或 storage key；`space.lang-scroll` 里的 `anchor` 字段含义不变，只是记录的点从"视口顶端"变成"视线高度"。
+- 验证：`npm test` 69 项全过、`npm run check` 0 错误、`npm run build` 通过；上面两组浏览器实测 + 首页/关于页回归各一次。
 
 ### 2026-09-19 · 切语言的三件事：标签不再提前弹出 / 正在看的那一块不再被挤走 / 拖拽不会卡死
 
