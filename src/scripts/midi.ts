@@ -31,6 +31,8 @@ export class MidiBridge extends EventTarget {
   private status: MidiStatus = 'ready';
   private inputs: MidiInputInfo[] = [];
   private started = false;
+  private pending = false;
+  private retryTimer = 0;
   private handlers = new Map<string, (event: MIDIMessageEvent) => void>();
 
   static get supported(): boolean {
@@ -47,21 +49,34 @@ export class MidiBridge extends EventTarget {
 
   /** 在用户手势里调用。失败只会让状态停在 unsupported，不会抛出去。 */
   async start(): Promise<void> {
-    if (this.started) return;
-    this.started = true;
+    if (this.started || this.pending) return;
 
     if (!MidiBridge.supported) {
       this.setStatus('unsupported');
       return;
     }
 
+    this.pending = true;
     try {
       const access = await navigator.requestMIDIAccess({ sysex: false });
       this.access = access;
+      // 申请成功之后才算"已经接上"——见下面的 catch
+      this.started = true;
       access.addEventListener('statechange', () => this.sync());
       this.sync();
     } catch {
-      this.setStatus('unsupported');
+      /*
+       * 申请失败**不等于**浏览器不支持。iOS 上拔掉 USB MIDI 设备再插回来时，
+       * 旧会话会失效、requestMIDIAccess 会 reject —— 原来这里直接标成 NOT SUPPORTED
+       * 并且因为 started 已经置位而锁死，于是"再插回去必须刷新页面"（本人实测）。
+       * 现在：说准确一点（no-device），并且允许重试 —— 下一次交互会再调 start()，
+       * 另外这里也自己补一次，省得用户还得动一下页面。
+       */
+      this.setStatus('no-device');
+      window.clearTimeout(this.retryTimer);
+      this.retryTimer = window.setTimeout(() => void this.start(), 1500);
+    } finally {
+      this.pending = false;
     }
   }
 
@@ -72,6 +87,8 @@ export class MidiBridge extends EventTarget {
     this.handlers.clear();
     this.access = null;
     this.started = false;
+    window.clearTimeout(this.retryTimer);
+    this.retryTimer = 0;
   }
 
   /** 重新枚举输入设备，并把 midimessage 接上 */
