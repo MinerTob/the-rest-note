@@ -165,7 +165,13 @@ export class PianoEngine extends EventTarget {
       this.master.connect(this.ctx.destination);
     }
 
-    if (this.ctx.state === "suspended") void this.ctx.resume();
+    /*
+     * 注意：iOS 上 AudioContext 有**第三种状态 `interrupted`**（系统权限框、切后台、
+     * 别的 App 抢音频会话都会让它进这个状态）。只认 `suspended` 的话它就永远醒不过来 ——
+     * 表现就是"关于区一直显示『点击或按键，即可接入钢琴演奏』、点播放没反应、刷新几次才好"
+     * （本人实测）。所以这里只判断"没在跑就叫它 resume"。
+     */
+    if (this.ctx.state !== "running") void this.ctx.resume();
     void this.preload();
   }
 

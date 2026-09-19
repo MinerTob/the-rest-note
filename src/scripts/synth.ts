@@ -37,14 +37,15 @@ export class KeysSynth {
   /** 必须在用户手势里调用一次，浏览器才允许出声 */
   unlock(): void {
     const ctx = this.ensure();
-    if (ctx && ctx.state === 'suspended') void ctx.resume();
+    // 同 piano.ts：iOS 的第三种状态 interrupted 也要唤醒，不能只认 suspended
+    if (ctx && ctx.state !== 'running') void ctx.resume();
   }
 
   noteOn(midi: number, velocity = 0.85): void {
     const ctx = this.ensure();
     const master = this.master;
     if (!ctx || !master) return;
-    if (ctx.state === 'suspended') void ctx.resume();
+    if (ctx.state !== 'running') void ctx.resume();
     if (this.voices.has(midi)) return;
 
     const now = ctx.currentTime;
