@@ -108,9 +108,17 @@ html[data-input='pointer'] :focus-visible:not(input, textarea, select, [contente
 
 /* main 是"跳到主要内容"和入场动画结束后的焦点落点，不是可交互控件。
    它占满整页宽，焦点框会变成两条横贯屏幕的蓝线，所以这里明确不画；
-   其他元素的 :focus-visible 焦点框保持不变。 */
+   其他元素的 :focus-visible 焦点框保持不变。
+
+   必须把 `html[data-input='keyboard']` 那一层也写出来：键盘焦点框规则是
+   `html[data-input='keyboard'] :focus-visible`（0,2,1），比 `main:focus-visible`
+   （0,1,1）优先级高 —— 只写后者的话，用户随便按一下键（哪怕是笔记本上的音量键）
+   `html[data-input]` 就翻成 keyboard，蓝线立刻又回来；而且它整页宽，上边那条正好
+   被固定导航挡住，看起来就是"页面底部多了一根线"（本人实测）。 */
 main:focus,
-main:focus-visible {
+main:focus-visible,
+html[data-input='keyboard'] main:focus-visible,
+html[data-input='pointer'] main:focus-visible {
   outline: none;
 }
 

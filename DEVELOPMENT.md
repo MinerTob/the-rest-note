@@ -719,6 +719,15 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 
 ## 10. 功能日志（规定动作）
 
+### 2026-09-19 · 按一下音量键，页面底部又冒出那根蓝线（main 的焦点框优先级）
+
+- 需求：本人反馈"一按键盘（天选4 上的音量键），页面底部那根线又出现了"。
+- 根因：入场页收尾时会把焦点落到 `<main id="main">`（无障碍需要），而 `main` 顶满整页宽，它的焦点框就是**两条横贯屏幕的蓝线**（上边那条正好被固定导航挡住，所以只看得到底部那一根）。之前为了修掉这个，写过 `main:focus, main:focus-visible { outline: none }`，但键盘焦点框那条规则是 `html[data-input='keyboard'] :focus-visible`，优先级 **(0,2,1)** 高于 `main:focus-visible` 的 **(0,1,1)** —— 于是"鼠标操作时没有框、一按键就冒框"。当年那条修复其实**在键盘模式下从没生效过**；这次按音量键（笔记本媒体键，同样会被记成键盘输入）才暴露出来。
+- 文件：`src/styles/global.css`、`DEVELOPMENT.md`。
+- 修复：把排除写成同优先级并放在后面：`main:focus, main:focus-visible, html[data-input='keyboard'] main:focus-visible, html[data-input='pointer'] main:focus-visible { outline: none }`。其它元素的键盘焦点框一律不动 —— 真正靠 Tab 操作的人还是要能看到焦点。
+- 钩子/数据：无新增 data-* / storage key / 事件。
+- 验证：Playwright 走完整入场流程后量 `main` 的 computed outline —— 入场后 `none`；**按 `AudioVolumeDown` 之后仍是 `none`**（修前是 `solid 2px rgb(74,110,224)`）；随后按 Tab，焦点落到 `A.system__name` 并显示 `solid 2px`，键盘可达性没被削弱。`npm test` 88/88；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。
+
 ### 2026-09-19 · iPhone 上"手动滑到关于区，夜曲不会自己开始"：把手势里解锁提前到入场页
 
 - 需求：本人反馈"除了我自己手动滑到底部音乐没自动开始播放以外，其他都没问题了"（首页关于区；电脑端会自己开始）。
