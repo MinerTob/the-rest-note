@@ -134,7 +134,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 真实 MIDI 键盘 | `src/scripts/midi.ts` | `MidiBridge`、`getMidiBridge()` | 事件 `midi:noteon` / `midi:noteoff` / `midi:change` |
 | 彩蛋（隐藏曲目） | `src/lib/easter-eggs.ts`、`src/lib/sequences.ts`、`src/scripts/easter-eggs.ts` | `EASTER_EGGS`、`HOLD_TO_ARM` / `isArmChord()`（入口和弦）、`createSequenceDetector()`、`createSequenceSession()`、`EasterEggManager`（`toggleHint()` / `holdNote()` / `releaseNote()`） | `[data-note]`（琴键）、事件 `minilab:note` / `minilab:release` / `egg:hint` / `egg:accept` / `egg:miss` |
 | About 身份实验场 | `src/components/IdentityStage.astro`、`src/scripts/identity-player.ts`、`identity-physics.ts`、`src/lib/identity.ts`、`identity-midi.ts` | `createIdentityPhysics()`（`reveal()` / `restore()` / `placeMissing()` / `snapshot()`，内部 `makeBody()` 管尺寸自愈）、`initIdentity()`、`disposeIdentity()`、`setIdentityActive()`、`identityRevealPlan()` | `[data-identity*]`、`[data-identity-tag][data-revealed]`、cookie `rest-note-identity-v2-<visit>` |
-| 手机摇晃彩蛋（标签跟着晃） | `src/scripts/identity-motion.ts`、`src/lib/shake.ts`、`src/scripts/identity-physics.ts`（`shove()`） | `attachIdentityMotion()`、`createShakeDetector()` | `[data-identity]`、`[data-identity-arena]`（申请 iOS 运动权限的手势落点）；传感器事件 `devicemotion` |
+| 手机摇晃彩蛋（标签跟着晃） | `src/scripts/identity-motion.ts`、`src/lib/shake.ts`、`src/scripts/identity-physics.ts`（`shove()`）、`src/scripts/entry-gate.ts`（入场时申请权限） | `requestMotionAccess()`、`attachIdentityMotion()`、`createShakeDetector()` | `[data-identity]`、`[data-entry-button]`（申请运动权限的那次手势）；传感器事件 `devicemotion`；`getGlobal().motionAccess` |
 | 夜曲跨页不断音（关于 ⇄ 关于我） | `src/scripts/identity-audio.ts`、`src/scripts/identity-player.ts`、`src/scripts/nocturne.ts`、`src/scripts/app.ts` | `identityPiano()`、`handOverIdentityPiano()` / `takeIdentityHandover()`、`releaseIdentityPiano()`、`rampIdentityVolume()`、`HANDOVER_AHEAD` | `getGlobal().identityPiano` / `.identityHandover`；无 DOM 钩子 |
 | 自我介绍页（第十个标签的去处） | `src/views/IntroPage.astro`、`src/pages/about/intro/index.astro`、`src/content/pages/intro.zh.md` / `intro.en.md`、`src/lib/pages.ts` | `getPage('intro', lang)`、`render(entry)`、`introRoutes` | `[data-identity-link]`（写在 About 页的标签上） |
 | 联系方式 / 复制 | `src/components/ContactTiles.astro`、`ContactPanel*.astro`、`src/scripts/contact.ts`、`src/lib/contact.ts` | `initContact()`、`CONTACT`、`isInteractive()` | `[data-contact]`、`[data-contact-row]`、`[data-contact-copy]` |
@@ -475,7 +475,8 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
 ```
 
 - 标签的入场不是 `scale(0)→scale(1)`，而是被"弹出来"的物理动画：ejection → flight（浅抛物线 + 轻微旋转）→ landing → settle。动画参数在 `IDENTITY_MOTION`。
-- **手机端独有的彩蛋：摇晃手机，场上的标签跟着一块晃。** `identity-motion.ts` 把 `devicemotion` 接到 `lib/shake.ts` 的摇晃识别上，识别成功后打开一段 4.2 秒的"跟着晃"时间窗（窗内继续晃会一直续上）：窗里每次采样都把设备加速度换算成一场推力交给 `physics.shove(x, y)`（力施加在中心偏一点的位置上，方块会自己翻滚）。三条边界写在文件头：**只有手机端**（`(pointer: coarse)` + 有 `DeviceMotionEvent`）、**只有 About 这一块在屏幕上时才听传感器**（IntersectionObserver，否则会在看不见的地方把标签甩乱、还费电）、**开了 reduced-motion 就完全不挂**。iOS 只有用户手势里才能申请运动权限，所以不主动弹窗：等用户第一次碰"关于"这一块（标签容器或身份区）时才 `requestPermission()`，拒绝就当作没有这个彩蛋。阈值与推力都在 `identity-motion.ts` 顶部（`GAIN` / `MAX_ACCEL` / `MIN_ACCEL`）与 `lib/shake.ts` 的默认值里。
+- **手机端独有的彩蛋：摇晃手机，场上的标签跟着一块晃。** `identity-motion.ts` 把 `devicemotion` 接到 `lib/shake.ts` 的摇晃识别上（默认：1.1 秒窗口里攒够 **3** 次 ≥ **11** m/s² 的强脉冲），识别成功后打开一段 4.2 秒的"跟着晃"时间窗（窗内继续晃会一直续上）：窗里每次采样都把设备加速度换算成一场推力交给 `physics.shove(x, y)`（力施加在中心偏一点的位置上，方块会自己翻滚）。三条边界写在文件头：**只有手机端**（`(pointer: coarse)` + 有 `DeviceMotionEvent`）、**只有 About 这一块在屏幕上时才听传感器**（IntersectionObserver，否则会在看不见的地方把标签甩乱、还费电）、**开了 reduced-motion 就完全不挂**。阈值与推力在 `identity-motion.ts` 顶部（`GAIN` / `MAX_ACCEL` / `MIN_ACCEL`）与 `lib/shake.ts` 的默认值里。
+- **iOS 的运动与方向权限在入场页那次点击里申请**（`requestMotionAccess()`，被 `entry-gate.ts` 的"进入空间"处理器调用）：iOS 只允许在用户手势里调 `DeviceMotionEvent.requestPermission()`，而"进入"是全站人人都要做的那一次点击 —— 同意之后这一趟里摇晃彩蛋随手就能用。桌面 / 不支持 / 已经批过的场合静默返回（`getGlobal().motionAccess` 记住结果），不影响入场。**只把权限挂在"碰标签"上是不够的**：本人 iPhone 实测只是摇了手机、没先碰标签，权限从没被申请过，传感器一个事件都收不到，看起来就是"摇了没反应"。入场那次之外，还留了一条兜底：这一块在屏幕上时用户点 / 滑页面任何地方也会问一次（`document` 捕获阶段的 `pointerdown`，只触发一次）。
 - 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数，cookie 名 `rest-note-identity-v3-<visit>`，visit id 每次会话一个；`v3` 是落点格式版本，见下）。这份记忆**只当"先摆出来"的兜底**（万一声音还没解锁，页面也不会是一片空地）：`physics.restore()` 之后 `needsAnimation` 仍然是 `true`，音乐一响 `reveal()` 就把已有的身体重新抛回场上再落一次 —— 每次回到这一页，方块都是活的（本人报过"返回之后方块的物理效果就没了"）。`reset()`（重新演奏按钮）会连内部的 `dropped` 一起清空、并 `clearLayout()`，所以下一轮整排重抛。
 - **落点存的是文档像素坐标 + 地板位置**（`{ floor, items: [{ x, y, angle }] }`，`x/y/angle` = 本体中心 + 角度），不是归一化比例。曾经存过比例（`(x-left)/(right-left)`、`(floor-y)/floor`），但两种语言的页面高度差几像素，比例还原时会被整体缩放，实测偏 20-80px —— 本人看到的就是"切语言之后标签位移"。`floor` 是写下落点时 `.identity__landing` 下沿的文档位置：换语言/换宽度会让整块区域上下移动（实测首页那串拼接页切到英文时下沉 **115px**），`restore()` 会先算 `shift = floor_now - layout.floor` 再整体平移，标签才不会漂出自己那一块。改格式记得同时改 `LAYOUT_VERSION`（cookie 名字里那个 `v3`），否则新代码会把旧格式的值当新格式读。
 - `bounds()` 与 `restore()` 的夹取只做"别出视口、别陷进地板"（`x ∈ [8, width-8]`、`y ∈ [8, floor-4]`），**不按方块自己的尺寸算**。按尺寸算会出事：脚本刚接手时量到的元素尺寸常常是错的（样式还没应用，实测 46px 的标签量成 134px），一夹就把方块顶歪 44px；按舞台宽度夹也会把更宽的英文标签整排推走（实测偏 75px）。另外 `bounds()` 里有**尺寸自愈**：元素尺寸和造本体时记下的不一样，就用同一个中心重造本体（位置不动，只补尺寸），`document.fonts.ready` 之后还会再量一次。
@@ -542,6 +543,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 
 - 只在"地址栏输入 / 书签 / 外链"（navigation type = `navigate`）时要求重新入场；`reload` / `back_forward` 沿用 sessionStorage `rest-note.entry-passed`。
 - 进入方式：点击 `[data-entry-button]`。这个 click 处理器里**必须直接调用** `music.play()`（浏览器自动播放策略要求音频解锁发生在可信手势里，见代码注释）。
+- 同一个 click 处理器里还调 `requestMotionAccess()`（`identity-motion.ts`）：iOS 只允许在用户手势里申请"运动与方向"权限，而这是全站人人都要做的一次点击 —— 同意之后，About 页的摇晃彩蛋这一趟就能直接用。桌面 / 不支持 / 已经批过时静默返回，不影响入场。
 - 锁定期间 body 加 `.entry-locked`，除 gate 和 `.ambient` 外的直接子元素设为 `inert`。
 - 文案跟随浏览器语言（`navigator.language` 是否 `zh` 开头），不是站点语言。
 - `app.ts` 里：`if (!initEntryGate(music)) music.init();` —— 有入场页时由入场页负责解锁音频。
@@ -582,8 +584,8 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - **左上角有一个返回按钮**（中文只写`返回`，英文写 `Back to About`；中文里"关于"两个字是多余的，英文语法需要宾语，所以只改中文）：`a.letter-page__back` 和页脚那个"回到关于"都指向 **`localizePath('/', lang) + '#about'`**，也就是首页那串拼接页里的关于区，**不是独立的 `/about/` 页**。本人要求：从这一页回去要落回"整串页面"里的关于区（他进这一页多半是从那里点的第十个标签）。实测点返回后：URL `/#about`（英文 `/en/#about`）、关于区停在屏幕上 78、`body > [data-identity-arena]` 存在、十个标签都在且能拖。
 - **背景音乐：这一页接着放 About 页的夜曲，而且是"不断音"的接法**（不放主题曲）。`src/scripts/nocturne.ts` 用 `PianoEngine` + `parseMidi()` 复刻 About 的演奏，和 `identity-player.ts` 共用 `live-timeline` 的同一个 id（`identity:nocturne`）；音量用 `IDENTITY_INTRO_VOLUME`（0.7，比演奏模式的 0.85 克制）。
 - **跨页共用同一架琴（`src/scripts/identity-audio.ts`）—— "关于 ⇄ 关于我"听起来是一口气弹下来的。** 以前两页各自 `new PianoEngine()`：换页时旧页面 `dispose()`（`allNotesOff` + 关掉 AudioContext）、新页面重新解码采样、再从 0 淡入，听感上就是"停一下再从头接上"。现在引擎挂在 `getGlobal().identityPiano` 上（About / 自我介绍 / 首页关于区共用同一个实例）：
-  1. **离开时交棒**：先把接下来 `HANDOVER_AHEAD`（0.45 秒）的音排进音频时钟，再 `pause(keepRinging = true)`（**不** `allNotesOff`），并 `handOverIdentityPiano(offset + HANDOVER_AHEAD)` —— 换页那几百毫秒里声音照常在走；
-  2. **接手方** `takeIdentityHandover()` 拿到"声音已经排到第几秒"，从那里继续排（`cursor` 取 `start >= offset` 的第一个音，跳过上一页已经排过的那段，不会重复触发）；拿不到交棒（直接打开这一页）就按原来的 `live-timeline` 记忆继续；
+  1. **离开时交棒**：先把接下来 `HANDOVER_AHEAD`（0.45 秒）的音排进音频时钟，再 `pause(keepRinging = true)`（**不** `allNotesOff`），并 `handOverIdentityPiano(听到的位置, 听到的位置 + HANDOVER_AHEAD)` —— 换页那几百毫秒里声音照常在走；
+  2. **接手方** `takeIdentityHandover()` 拿到两个数：`position`（现在应该在哪 = 交棒位置 + 已经过去的时间）与 `from`（从这个位置之后的音才要自己排）。演奏位置用 `position`、`cursor` 从 `from` 开始 —— **这两个位置必须分开**，把"已经排到哪"当成"现在在哪"，时间轴就会往前跳 0.45 秒（本人实测的"音乐会向前位移一段"，见 §10）。换算本身是纯函数：`lib/handover.ts` 的 `resumeFromHandover()`，有单测。拿不到交棒（直接打开这一页）就按原来的 `live-timeline` 记忆继续；
   3. **音量不归零**：`rampIdentityVolume()` 从当前音量滑到这一页的目标音量（About 用滑杆值、自我介绍用 `IDENTITY_INTRO_VOLUME`，滑 600 / 700ms）；手动拖滑杆会取消滑行；
   4. **只在真的离开这一族时才收**：下一张页面里没有 `[data-identity]` / `[data-nocturne]` 时，`app.ts` 在 `astro:before-swap` 里调 `releaseIdentityPiano()` 停声并关掉 AudioContext。
   实测（Playwright + 真实 AudioContext，见 §10 那条）：`/about/` → `/about/intro/` → 返回 `/#about`，`AudioContext` 始终是同一个实例（新建计数全程 0）、采样不重新解码、音量在 0.85 ↔ 0.7 之间滑行（从不归零）、演奏位置接着走（About 的 3.5 秒进到自我介绍的 5.5 秒），去 `/blog/` 时这架琴被释放。
@@ -706,6 +708,19 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-19 · 修两处真机反馈：换页音乐向前跳 0.45 秒 + iPhone 摇了没反应
+
+- 需求：本人 iPhone 实测两条 —— 1) 从"关于"点进"关于我"，音乐会**向前**位移约零点几秒（不是他要的无缝）；2) 摇手机没反应。
+- 根因：
+  1. **交棒只记了一个位置**。我原先记的是"已经排进音频时钟的末尾"（= 听到的位置 + 0.45 秒预排），接手页把它当成"现在在哪"，于是整条时间轴比真实听到的位置早了约 0.2–0.45 秒 —— 听感就是往前窜一截。"听到的位置"和"已经排到的位置"本来就是两个数，必须分开。
+  2. **iOS 的运动权限从没被申请过**。`DeviceMotionEvent.requestPermission()` 只在用户手势里有效，我把它挂在"第一次碰标签"上；本人只是摇了手机、没先碰标签，于是权限没批、传感器一个事件都收不到。另外阈值也偏高（4 次 ×13 m/s²）。
+- 文件：`src/lib/handover.ts`（**新增**，纯换算 + 单测）、`src/scripts/identity-audio.ts`（交棒记录改为 `{ position, scheduledUntil, at }`）、`src/scripts/identity-player.ts` / `nocturne.ts`（用 `position` 记时间轴、用 `from` 排音符）、`src/scripts/identity-motion.ts`（**新增 `requestMotionAccess()`** + 兜底申请改成"这一块在屏幕上时点/滑页面任何地方"）、`src/scripts/entry-gate.ts`（在"进入空间"的点击里申请）、`src/scripts/global.ts`（`motionAccess`）、`src/lib/shake.ts`（阈值 4×13 → 3×11）、`tests/handover.test.mjs`（**新增** 4 条）、`tests/shake.test.mjs`（跟着新阈值改两处期望）、`DEVELOPMENT.md`。
+- 钩子/数据：新增全局字段 `getGlobal().motionAccess`；无新增 DOM 钩子 / storage key / 自定义事件。
+- 验证：`npm test` **83/83**（接棒换算 4 条：按听到的位置续上而不是预排末端、位置随时间推进且不倒退、跳得太慢时跳过中间那段、过期/异常交棒忽略）；`npm run check` 0 错误 0 警告；`npm run build` 17 页。Playwright 实测：
+  · 入场页点击 → `requestPermission` 被调用（`motionAccess` 变 `true`）；
+  · `/about/` → `/about/intro/`：交棒时写入的位置 1.34 秒、自我介绍页首报 **1.30 秒**（差 −0.04 秒，旧逻辑是 +0.45 秒的向前跳），整段跳转耗时 0.11 秒（小于 0.45 秒预排，声音不断）；
+  · 摇晃彩蛋回归：手机模拟轻晃 0.0px / 猛晃 26.1px，桌面猛晃 0.0px，0 console error。
 
 ### 2026-09-19 · 夜曲跨页不断音：关于 ⇄ 关于我 用同一架琴接棒
 

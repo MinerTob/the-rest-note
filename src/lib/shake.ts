@@ -28,8 +28,11 @@ export type ShakeDetector = {
 };
 
 export function createShakeDetector(options: ShakeDetectorOptions = {}): ShakeDetector {
-  const threshold = options.threshold ?? 13;
-  const needed = options.peaks ?? 4;
+  // 默认值按"手机握在手里来回晃两三下"标定：真机上晃一次大约能冲到 15-30m/s²，
+  // 但轻轻晃可能只有十几。4 次 ×13 一度太高（本人 iPhone 实测摇了没反应），
+  // 放宽到 3 次 ×11：仍然挡住走路、单次颠簸（那是一两次脉冲、且方向不成对）。
+  const threshold = options.threshold ?? 11;
+  const needed = options.peaks ?? 3;
   const windowMs = options.windowMs ?? 1100;
   const quietMs = options.quietMs ?? 350;
 

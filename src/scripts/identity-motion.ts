@@ -1,4 +1,5 @@
 import { createShakeDetector } from '@/lib/shake';
+import { getGlobal } from './global';
 
 /**
  * 手机端独有彩蛋：摇晃手机 → About 页那些标签跟着一块晃。
@@ -16,8 +17,9 @@ import { createShakeDetector } from '@/lib/shake';
  *   3. **尊重 reduced-motion**：开了"减少动态效果"就完全不挂，一行都不跑。
  *
  * iOS Safari 只有用户手势里才能申请运动权限（DeviceMotionEvent.requestPermission），
- * 所以这里不主动弹窗：等用户第一次碰那些标签（pointerdown）时再问一次。
- * Android / 其它浏览器不需要权限，直接听。
+ * 所以不主动弹窗：**只要这一块在屏幕上，用户第一次点 / 滑这页的任何地方就申请一次**。
+ * 只挂在标签上是不够的 —— 实测本人（iPhone）只是摇了手机、没先碰标签，于是权限从没被
+ * 申请过，传感器一个事件都收不到，看起来就是"摇了没反应"。Android / 其它浏览器不需要权限。
  */
 
 /** 一次摇晃之后，"跟着晃"维持多久（毫秒）。窗内继续晃会一直续上 */
@@ -36,6 +38,34 @@ type MotionReading = { x: number; y: number; z: number };
 type PermissionCapableMotionEvent = typeof DeviceMotionEvent & {
   requestPermission?: () => Promise<'granted' | 'denied'>;
 };
+
+/**
+ * 在**入场页**点"进入空间"时申请一次运动与方向权限。
+ *
+ * iOS 只允许在用户手势里调 `DeviceMotionEvent.requestPermission()`，而"进入"是全站
+ * 唯一一次人人都要做的点击 —— 放在这里，用户同意之后这一趟里 About 页的摇晃彩蛋
+ * 直接可用，不用先猜着去碰标签。桌面 / 不支持时静默返回，不影响入场。
+ * 同意过就记在 getGlobal().motionAccess 上，后面不会反复问。
+ */
+export function requestMotionAccess(): void {
+  const MotionEvent = window.DeviceMotionEvent as PermissionCapableMotionEvent | undefined;
+  if (!MotionEvent || typeof MotionEvent.requestPermission !== 'function') return;
+  // 只问触摸设备：桌面浏览器就算实现了这个方法，也不该为了一个手机彩蛋弹系统框
+  if (!matchMedia('(pointer: coarse)').matches) return;
+  if (getGlobal().motionAccess) return;
+
+  try {
+    void MotionEvent.requestPermission()
+      .then((state) => {
+        if (state === 'granted') getGlobal().motionAccess = true;
+      })
+      .catch(() => {
+        /* 没有传感器 / 不在手势里：当作没这回事 */
+      });
+  } catch {
+    /* 老浏览器上 requestPermission 可能直接抛：同样忽略 */
+  }
+}
 
 export function attachIdentityMotion(
   root: HTMLElement,
@@ -92,43 +122,46 @@ export function attachIdentityMotion(
     else window.removeEventListener('devicemotion', onMotion);
   };
 
+  // iOS：必须在一个用户手势里申请权限。挂到 document 上（捕获阶段、只触发一次），
+  // 且只在这一块真的在屏幕上时挂着 —— 这样"看着标签点/滑一下"就把权限要到手了，
+  // 又不会在读别的区块时白弹一个系统框。
+  const MotionEvent = window.DeviceMotionEvent as PermissionCapableMotionEvent;
+  // 入场页点"进入"时通常已经问过了（见 requestMotionAccess）；批准过就不再问
+  const needsPermission =
+    typeof MotionEvent.requestPermission === 'function' && !getGlobal().motionAccess;
+  let permissionAsked = false;
+  const askPermission = () => {
+    if (permissionAsked) return;
+    permissionAsked = true;
+    document.removeEventListener('pointerdown', askPermission, { capture: true });
+    void MotionEvent.requestPermission?.()
+      .then((state) => {
+        if (state === 'granted') listen(visible);
+      })
+      .catch(() => {
+        /* 拒绝或调用时机不对：当作没有这个彩蛋，什么都不做 */
+      });
+  };
+
   const observer = new IntersectionObserver(
     ([entry]) => {
       visible = Boolean(entry) && entry.isIntersecting && entry.intersectionRatio > 0.12;
       listen(visible);
+      // 只有这一块在屏幕上时才张着耳朵等那次手势
+      if (needsPermission && !permissionAsked) {
+        if (visible) document.addEventListener('pointerdown', askPermission, { capture: true, signal });
+        else document.removeEventListener('pointerdown', askPermission, { capture: true });
+      }
     },
     { threshold: [0, 0.12, 0.5] },
   );
   observer.observe(root);
 
-  // iOS：第一次碰"关于"这一块时申请一次权限（必须在用户手势里调）。
-  // 标签的容器在 body 上（物理层），所以这块和身份区各挂一个，谁先被碰都算。
-  const MotionEvent = window.DeviceMotionEvent as PermissionCapableMotionEvent;
-  if (typeof MotionEvent.requestPermission === 'function') {
-    const targets = [root, document.querySelector('[data-identity-arena]')].filter(
-      (el): el is HTMLElement => Boolean(el),
-    );
-    for (const target of targets) {
-      target.addEventListener(
-        'pointerdown',
-        () => {
-          void MotionEvent.requestPermission?.()
-            .then((state) => {
-              if (state === 'granted' && visible) listen(true);
-            })
-            .catch(() => {
-              /* 拒绝或调用时机不对：当作没有这个彩蛋，什么都不做 */
-            });
-        },
-        { once: true, capture: true, signal },
-      );
-    }
-  }
-
   return () => {
     abort.abort();
     listen(false);
     observer.disconnect();
+    document.removeEventListener('pointerdown', askPermission, { capture: true });
     detector.reset();
   };
 }

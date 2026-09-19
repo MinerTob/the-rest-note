@@ -46,8 +46,8 @@ export function initNocturne(): void {
 
   // 与 About 页、首页关于区共用同一架琴：从那边点进来时，声音一秒都不会停
   const piano = identityPiano();
-  let handoverAt = takeIdentityHandover();
-  const adopted = handoverAt !== null;
+  let handover = takeIdentityHandover();
+  const adopted = handover !== null;
   const abort = new AbortController();
   const signal = abort.signal;
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -148,11 +148,12 @@ export function initNocturne(): void {
         setState('waiting');
         return;
       }
-      if (adopted && handoverAt !== null) {
-        // 接手上一页：那一段已经排好、正在响，所以只排往后的音
-        offset = handoverAt;
-        handoverAt = null;
-        cursor = Math.max(0, notes.findIndex((note) => note.start >= offset));
+      if (adopted && handover !== null) {
+        // 接手上一页：位置照交棒时刻算，音只排"还没排过"的那一段
+        const from = handover.from;
+        offset = handover.position;
+        handover = null;
+        cursor = Math.max(0, notes.findIndex((note) => note.start >= from));
       } else {
         offset = savedPosition(TIMELINE, duration());
         cursor = Math.max(0, notes.findIndex((note) => note.end > offset));
@@ -199,10 +200,10 @@ export function initNocturne(): void {
     disposed = true;
     // 交棒：先排好接下来这一小段再停（不掐音），声音在换页期间不断
     if (playing) {
-      schedule(HANDOVER_AHEAD);
       const at = time();
+      schedule(HANDOVER_AHEAD);
       pause(true);
-      handOverIdentityPiano(at + HANDOVER_AHEAD);
+      handOverIdentityPiano(at, at + HANDOVER_AHEAD);
     }
     abort.abort();
     cancelVolumeRamp();

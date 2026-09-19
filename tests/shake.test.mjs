@@ -28,20 +28,20 @@ test('calm readings never fire', () => {
 
 test('repeated strong peaks inside the window fire', () => {
   const detector = createShakeDetector();
-  // 第四次强脉冲落在 360ms（每次采样间隔 60ms）
-  assert.equal(feed(detector, [20, 2, 22, 2, 19, 2, 21]), 360);
+  // 默认要 3 次强脉冲，第三次落在 240ms（每次采样间隔 60ms）
+  assert.equal(feed(detector, [20, 2, 22, 2, 19, 2, 21]), 240);
 });
 
 test('peaks spread wider than the window never accumulate', () => {
   const detector = createShakeDetector();
-  // 每 500ms 才颠一下：窗口是 1100ms，攒不满 4 次
-  assert.equal(feed(detector, [20, 20, 20, 20, 20, 20], 500), null);
+  // 每 700ms 才颠一下：窗口是 1100ms，任何时刻都攒不满 3 次
+  assert.equal(feed(detector, [20, 20, 20, 20, 20, 20, 20, 20], 700), null);
 });
 
 test('once fired, quietMs blocks an immediate second shot', () => {
   const detector = createShakeDetector();
   const first = feed(detector, [20, 20, 20, 20]);
-  assert.equal(first, 180);
+  assert.equal(first, 120);
 
   // 紧接着继续猛晃：安静期没过完不该再触发
   let at = first + 20;

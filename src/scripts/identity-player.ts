@@ -101,8 +101,8 @@ export function initIdentity(): void {
   const tags = [...root.querySelectorAll<HTMLElement>("[data-identity-tag]")];
   // 这架琴是 About / 自我介绍 / 首页关于区共用的：从别处接手时，声音已经在响了
   const piano = identityPiano();
-  let handoverAt = takeIdentityHandover();
-  const adopted = handoverAt !== null;
+  let handover = takeIdentityHandover();
+  const adopted = handover !== null;
   let cancelVolumeRamp: () => void = () => {};
   if (adopted) cancelVolumeRamp = rampIdentityVolume(piano, Number(volume.value), 600);
   else piano.setVolume(Number(volume.value));
@@ -345,11 +345,13 @@ export function initIdentity(): void {
         return;
       }
       // 接手上一页的交棒点（换页不断音）；没有就按 live-timeline 的记忆继续
-      if (adopted && handoverAt !== null) {
-        offset = handoverAt;
-        handoverAt = null;
-        // 交棒时那一段已经由上一个页面排好并正在响，所以这里跳过它们、只排往后的音
-        cursor = notes.findIndex((n) => n.start >= offset);
+      if (adopted && handover !== null) {
+        // 交棒时那一段（position → scheduledUntil）已经由上一页排好、正在响，
+        // 所以这里只排它之后的音：既不重复，也不会把时间轴往前推。
+        const from = handover.from;
+        offset = handover.position;
+        handover = null;
+        cursor = notes.findIndex((n) => n.start >= from);
       } else {
         offset = savedPosition(TIMELINE, duration());
         cursor = notes.findIndex((n) => n.end > offset);
@@ -513,9 +515,10 @@ export function initIdentity(): void {
     // 于是换页过程中声音是连续的；下一个页面从交棒位置接着往下排。
     // 真的离开"关于"这一族页面时，app.ts 会调 releaseIdentityPiano() 收掉这架琴。
     if (playing) {
+      const at = time();
       schedule(HANDOVER_AHEAD);
       pause(true);
-      handOverIdentityPiano(offset + HANDOVER_AHEAD);
+      handOverIdentityPiano(at, at + HANDOVER_AHEAD);
     }
     cancelVolumeRamp();
     // 离开这一页之前把"此刻"的落点写下来（不是上一次静止时的旧快照）：

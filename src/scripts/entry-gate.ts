@@ -1,4 +1,5 @@
 import type { MusicManager } from './music-manager';
+import { requestMotionAccess } from './identity-motion';
 
 let entered = false;
 const ENTRY_KEY = 'rest-note.entry-passed';
@@ -84,6 +85,11 @@ export function initEntryGate(music: MusicManager): boolean {
     // This call must stay directly inside the trusted click handler: it is what
     // unlocks audible playback under browser autoplay policies.
     void music.play();
+
+    // 运动与方向权限也只能在用户手势里申请。这里是全站人人都要做的那一次点击，
+    // 同意之后 About 页的摇晃彩蛋当趟就能用（iOS 上不在这里问，用户到了那一页
+    // 还得先碰标签才可能拿到权限，实测就是"摇了没反应"）。
+    requestMotionAccess();
 
 	    gate.classList.add('is-leaving');
 	    button.disabled = true;

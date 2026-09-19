@@ -1,5 +1,6 @@
 import { PianoEngine } from './piano';
 import { getGlobal } from './global';
+import { resumeFromHandover, type Handover } from '@/lib/handover';
 
 /**
  * "关于"这一族的钢琴引擎：About 页 / 自我介绍页 / 首页的关于区共用同一架琴
@@ -27,7 +28,8 @@ export const HANDOVER_AHEAD = 0.45;
 /** 交棒记录多久之内算"接着上一页"（毫秒） */
 const HANDOVER_TTL = 4000;
 
-type Handover = { position: number; at: number };
+/** 交棒记录的形状与换算规则见 lib/handover.ts（那里是纯逻辑，有单测） */
+export type IdentityHandover = Handover;
 
 /** 取这架琴（没有就造一个）。三个"关于"页面拿到的永远是同一个实例 */
 export function identityPiano(): PianoEngine {
@@ -39,26 +41,21 @@ export function identityPiano(): PianoEngine {
   ));
 }
 
-/** 离开时交棒：`position` 是"已经排进音频时钟的末尾位置"，接手方从那里继续 */
-export function handOverIdentityPiano(position: number): void {
-  getGlobal().identityHandover = { position, at: performance.now() };
+/** 离开时交棒：`position` 是此刻听到的位置，`scheduledUntil` 是已经排到的位置 */
+export function handOverIdentityPiano(position: number, scheduledUntil: number): void {
+  getGlobal().identityHandover = { position, scheduledUntil, at: performance.now() };
 }
 
 /**
- * 接手上一页的交棒点，返回"从第几秒开始往下排"。
- * 正常情况下就是交棒位置；万一这一跳慢得超过了预排余量，超出的那一段直接跳过 ——
- * 不然会把好几秒前就该响的音一起补回来，听上去是一堆音挤在一起。
+ * 接手上一页的交棒点：返回"现在应该在哪"和"从哪之后的音才要自己排"。
  * 没有交棒（或太久远）返回 null，调用方就按原来的 live-timeline 记忆继续。
  */
-export function takeIdentityHandover(): number | null {
+export function takeIdentityHandover(): { position: number; from: number } | null {
   const global = getGlobal();
-  const handover: Handover | undefined = global.identityHandover;
+  const handover = global.identityHandover;
   global.identityHandover = undefined;
   if (!handover) return null;
-
-  const elapsed = (performance.now() - handover.at) / 1000;
-  if (elapsed > HANDOVER_TTL / 1000) return null;
-  return handover.position + Math.max(0, elapsed - HANDOVER_AHEAD);
+  return resumeFromHandover(handover, performance.now(), HANDOVER_TTL);
 }
 
 /** 下一张页面不再需要这架琴：停声、断开节点、关掉 AudioContext */
