@@ -45,7 +45,7 @@ test('labels match the list that was actually provided', () => {
     'DIRECT',
     'PERSISTENT',
     'ANALYTICAL',
-    'ABOUT ME (you have listened this far — click me, please, I beg you (｡>﹏<｡))',
+    'ABOUT ME\nyou have listened this far\nclick me, please\nI beg you (｡>﹏<｡)',
   ]);
   const chinese = IDENTITY_TAGS.map((tag) => tag.zh);
   assert.deepEqual(chinese, [
@@ -58,7 +58,7 @@ test('labels match the list that was actually provided', () => {
     '直白',
     '坚持',
     '善于分析',
-    '自我介绍（听了这么久，点一点我吧，求求了(｡>﹏<｡)）',
+    '自我介绍\n听了这么久\n点一点我吧\n求求了(｡>﹏<｡)',
   ]);
 });
 
@@ -71,22 +71,33 @@ test('the tenth tag is the self-introduction, and it stays last', () => {
   assert.ok(intro.zh.startsWith('自我介绍'));
   assert.ok(intro.zh.includes('求求了'));
   assert.ok(intro.en.startsWith('ABOUT ME'));
-  assert.equal(tagLabel(intro, 'zh'), intro.zh);
-  assert.equal(tagLabel(intro, 'en'), intro.en);
+  // tagLabel 是给 aria-label 用的：换行折成空格，读出来是一句话
+  assert.equal(tagLabel(intro, 'zh'), intro.zh.replace(/\n/g, ' '));
+  assert.equal(tagLabel(intro, 'en'), intro.en.replace(/\n/g, ' '));
 });
 
-test('the tenth tag splits into a title line and the note in brackets', () => {
+test('the tenth tag splits into four lines (title + three request lines)', () => {
   assert.deepEqual(tagLines(tagById('intro'), 'zh'), {
     title: '自我介绍',
-    note: '（听了这么久，点一点我吧，求求了(｡>﹏<｡)）',
+    notes: ['听了这么久', '点一点我吧', '求求了(｡>﹏<｡)'],
   });
   assert.deepEqual(tagLines(tagById('intro'), 'en'), {
     title: 'ABOUT ME',
-    note: '(you have listened this far — click me, please, I beg you (｡>﹏<｡))',
+    notes: ['you have listened this far', 'click me, please', 'I beg you (｡>﹏<｡)'],
   });
   // 其它标签只有一行，不该被拆
-  assert.deepEqual(tagLines(tagById('music'), 'zh'), { title: '音乐' });
-  assert.deepEqual(tagLines(tagById('music'), 'en'), { title: 'MUSIC' });
+  assert.deepEqual(tagLines(tagById('music'), 'zh'), { title: '音乐', notes: [] });
+  assert.deepEqual(tagLines(tagById('music'), 'en'), { title: 'MUSIC', notes: [] });
+});
+
+test('the tenth tag has no brackets around the request any more', () => {
+  const lines = tagLines(tagById('intro'), 'zh');
+  assert.ok(!lines.notes.join('').includes('（'));
+  assert.ok(!lines.notes.join('').includes('）'));
+  // 情绪脸自己的括号留着，它是表情的一部分
+  assert.ok(lines.notes.at(-1).includes('(｡>﹏<｡)'));
+  // aria-label 里换行折成空格，读出来是一句话
+  assert.equal(tagLabel(tagById('intro'), 'zh').includes('\n'), false);
 });
 
 test('ANALYTICAL is about analysis, not being careful', () => {

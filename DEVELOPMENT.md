@@ -502,7 +502,7 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
   4. **别用"刚接手时量到的元素尺寸"去夹位置**。新页面的脚本可能在样式应用之前就跑起来了，这时候 `offsetWidth/offsetHeight` 全是错的（实测 46px 量成 134px），拿它算边界会把方块顶歪 44px。所以夹取只跟视口和地板有关；`bounds()` 会在尺寸对不上时用同一个中心重造本体（见上面那条）。判断"是否零位移"要看**中心点**，别拿 `getBoundingClientRect()` 的 top/left 比 —— 旋转过的方块，盒子一变宽它的外接矩形就会整体移动，那是量法的问题不是 bug。
   5. **`restore()` 会把快照身体设为 frozen + sleeping，切语言后必须由 `markPlaced()` 解除两者。** 快照可能是在标签飞行中途写下的；只标记 dropped 而不唤醒，会把标签永久钉在半空，看起来像物理引擎失效。`prefers-reduced-motion` 模式仍保持 sleeping，符合无动画偏好。
 - **"拖不动"的三个来源**（本人在独立页面/切语言后都遇到过）：① `pointerup` 丢事件（指针在窗口外松开、被系统弹窗抢走）→ `drag` 卡在"正在拖"，之后谁按都拖不动；② 拖到一半 `bounds()` 因窗口/尺寸变化重造了本体 → 拖拽关节还挂在被移出世界的旧本体上，标签跟着指针却一动不动；③ 标签还没被音乐放出来（场上没有本体，按住无效，这是设计如此）。前两个已经在 `identity-physics.ts` 里堵死：`window` 上兜底监听 `pointerup` / `pointercancel` / `blur`，`pointerdown` 时若发现上一次拖拽超过 2.5s 就先替它收尾，`bounds()` 重造本体时把 `drag.joint.bodyB` 接到新本体上。
-- **第十个标签（`intro`）是唯一的例外**：它比别的标签大 0.2 倍，点一下进整页自我介绍（§5.14）。放大用的是 font-size / padding 同比例放大（`calc(基准 * 1.2)`），**不能用 `transform: scale()`** —— 物理引擎每帧都会重写 inline `transform`。
+- **第十个标签（`intro`）是唯一的例外**：它是唯一能点开的标签（点一下进整页自我介绍，见 §5.14）。文案四行（标题 + 三行请求，`lib/identity.ts` 里用 `\n` 分行、`tagLines()` 拆开渲染成四个 `span`，**不再用括号**），样式上它**不比别的标签大**：标题与其它标签同号或略小，下面三行再小一号、淡一点（`.identity__tag-title` / `.identity__tag-note`）。尺寸**不能用 `transform: scale()`** —— 物理引擎每帧都会重写 inline `transform`。想调它的大小只改 `.identity__tag[data-identity-link]` 的 `font-size` 一行。
 - 点按判定在 `identity-physics.ts`：按下后位移 < 8px、且 0.7s 内抬手才算"点击"；拖动过就不算（"抛掷"不能被误认成"点开"）。命中 + 元素带 `data-identity-link` 才回调 `onActivate`，由 `identity-player.ts` 走 `astro:transitions/client` 的 `navigate()`（失败退回 `location.assign`）；键盘上按回车同样打开。
 - **拖动不能触发链接**：第十个标签是 `<a href>`，浏览器在 `pointerup` 之后还会自己补一发 `click`（`setPointerCapture` 让目标仍是它），光靠点按判定拦不住。所以只要这一次抬手不算点按，就把 `swallowClickUntil` 设成"现在 + 300ms"，由文档级捕获阶段的 `click` 监听把这一发 `click.preventDefault()` 掉 —— 拖完标签不会跟着跳页（本人报过的 bug），点一下照常进自我介绍页。
 - `reveal()` 算"备用队形"（没接住音符时靠地面排队）的间距时只统计普通标签：可点击的那个宽得多，算进去会把整排挤成单列。
@@ -681,7 +681,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 | `[data-identity]` 根 + `-arena` / `-canvas` / `-play` / `-restart` / `-progress` / `-status` / `-time` / `-volume` / `-tag` | `IdentityStage.astro` | `initIdentity()`、`identity-physics.ts` | About 身份实验场 |
 | `[data-revealed]` / `[data-dragging="true"]` | `identity-player.ts` | 组件 CSS | 标签出现前隐藏 / 拖拽光标 |
 | `[data-motion]` / `[data-motion-shakes]` / `[data-motion-pushes]` | `identity-motion.ts` 写在 `[data-identity]` 上 | 只有排查时人读（脚本不读） | 摇晃彩蛋的三个读数：`off` / `idle` / `listening` / `shaking`、识别到几次摇晃、真的推了几次 |
-| `[data-identity-link]` | `IdentityStage.astro`（第十个标签的 href） | `identity-physics.ts`（点按判定 + 回车）、`identity-player.ts`（`navigate()`） | 可点击标签：放大 1.2× + 点开自我介绍页；有它就参与"点击"逻辑 |
+| `[data-identity-link]` | `IdentityStage.astro`（第十个标签的 href） | `identity-physics.ts`（点按判定 + 回车）、`identity-player.ts`（`navigate()`） | 可点击标签：四行小字（标题 + 三行请求）+ 点开自我介绍页；有它就参与"点击"逻辑 |
 | `[data-contact]` / `[data-contact-row]` / `[data-contact-copy]` / `[data-contact-done]` | 联系组件 | `initContact()` | 复制交互与反馈 |
 | `[data-copied="true"]` | `contact.ts` 写在 `[data-contact-row]` 上 | 组件 CSS | 行内 COPY → COPIED（1.2s 后自动删掉） |
 | `[data-system-message]` + `-text` / `-detail` + `[data-visible]` | `SystemMessage.astro` | `initSystemMessages()` | 左下角 LCD 提示 |
@@ -718,6 +718,16 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-19 · 第十个标签（自我介绍）改小、拆成四行、去掉括号
+
+- 需求：本人要求"把自我介绍标签再改小一点，分成四行、去掉括号"。
+- 文件：`src/lib/identity.ts`（`intro` 文案改成 `\n` 分行；`tagLines()` 返回 `{ title, notes[] }`；`tagLabel()` 把换行折成空格给 aria-label 用）、`src/components/IdentityStage.astro`（渲染四行 + 收小尺寸）、`tests/identity.test.mjs`（4 条断言跟着更新）、`DEVELOPMENT.md`。
+- 文案：中文 `自我介绍 / 听了这么久 / 点一点我吧 / 求求了(｡>﹏<｡)`；英文 `ABOUT ME / you have listened this far / click me, please / I beg you (｡>﹏<｡)`。去掉的是那句请求外面的括号；情绪脸自己的括号是表情的一部分，留着。
+- 尺寸：不再"比别的标签大 0.2 倍" —— 原来那套 `calc(基准 * 1.2)` 的 padding / min-height / max-width 全部收回普通档，字号还略小一档（`clamp(13px, 1.05vw, 15px)`）；标题 700，下面三行 `.8em` / `opacity .82` / `line-height 1.4`。想再调大小只改 `.identity__tag[data-identity-link]` 的 `font-size` 一行。
+- 函数：`tagLines(tag, lang): { title: string; notes: string[] }`（原来是 `{ title, note? }` 并按左括号拆）；`tagLabel()` 现在会把 `\n` 换成空格。
+- 钩子/数据：无新增 data-* / storage key / 事件；`[data-identity-link]` 用法不变。
+- 验证：`npm test` 88/88（含"四行拆分"、"请求里不再有括号且情绪脸括号保留"、"aria-label 里没有换行"三条）；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。浏览器实测（移动 393×852 / 桌面 1280×900，先把十个标签都放出来再量）：标签 **139×140px（移动）/ 101×118px（桌面）**，四行实际字号 13 / 10.4px（桌面 13.44 / 10.75px）；同页其它标签仍是 15px、75×47px —— 也就是说它**不再比别的标签大**，而是一块窄高的四行小贴纸。
 
 ### 2026-09-19 · 标签抓取与落地手感优化
 

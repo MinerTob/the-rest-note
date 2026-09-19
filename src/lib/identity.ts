@@ -8,6 +8,8 @@ import type { Lang } from '@/i18n/ui';
  * 最后一个 intro 是刻意排在队尾的“重头戏”：它比其他标签大 0.2 倍，
  * 点一下会跳到整页自我介绍（/about/intro/）。揭示顺序 = 数组顺序，
  * 所以它永远是最后一个落地的标签，别把它挪到前面。
+ * 它的文案用 `\n` 分行（四行：标题一行 + 请求三行），渲染时一行一个 span，
+ * 不再用括号把请求括起来 —— 见 tagLines()。
  */
 export const IDENTITY_TAG_IDS = [
   'music',
@@ -48,25 +50,28 @@ export const IDENTITY_TAGS: readonly IdentityTag[] = [
   { id: 'analytical', zh: '善于分析', en: 'ANALYTICAL' },
   {
     id: 'intro',
-    zh: '自我介绍（听了这么久，点一点我吧，求求了(｡>﹏<｡)）',
-    en: 'ABOUT ME (you have listened this far — click me, please, I beg you (｡>﹏<｡))',
+    zh: '自我介绍\n听了这么久\n点一点我吧\n求求了(｡>﹏<｡)',
+    en: 'ABOUT ME\nyou have listened this far\nclick me, please\nI beg you (｡>﹏<｡)',
   },
 ];
 
+/** 无障碍标签 / aria-label 用：换行折成空格，读出来是一句话 */
 export function tagLabel(tag: IdentityTag, lang: Lang): string {
-  return lang === 'zh' ? tag.zh : tag.en;
+  return (lang === 'zh' ? tag.zh : tag.en).replace(/\n/g, ' ');
 }
 
 /**
- * 第十个标签的文案太长，排版时拆成两行：
- * 第一行是主标题（"自我介绍" / "ABOUT ME"），第二行是括号里那句请求。
- * 其它标签只有一行，`note` 为 undefined。
+ * 第十个标签的文案按 `\n` 拆行：第一行是主标题（"自我介绍" / "ABOUT ME"），
+ * 后面几行是那句请求（现在是三行，合起来四行）。
+ * 不用括号是本人要求的：括号一去掉，四行短句排起来更像"贴纸上的手写小字"。
+ * 其它标签只有一行，`notes` 是空数组。
  */
-export function tagLines(tag: IdentityTag, lang: Lang): { title: string; note?: string } {
-  const label = tagLabel(tag, lang);
-  const at = label.search(/[（(]/);
-  if (at < 0) return { title: label };
-  return { title: label.slice(0, at).trim(), note: label.slice(at).trim() };
+export function tagLines(tag: IdentityTag, lang: Lang): { title: string; notes: string[] } {
+  const [title = '', ...notes] = (lang === 'zh' ? tag.zh : tag.en)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return { title, notes };
 }
 
 export function tagById(id: string): IdentityTag | undefined {

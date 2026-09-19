@@ -15,8 +15,8 @@ const zh = lang === 'zh';
     {IDENTITY_TAGS.map((tag) => {
       if (tag.id === 'intro') {
         /* 这个标签的文案最长，排成两行：主标题一行，括号里的那句请求一行 */
-        const { title, note } = tagLines(tag, lang);
-        return <li class="identity__tag-slot"><a class="identity__tag identity__tag--intro" data-identity-tag={tag.id} data-identity-link={introRoutes[lang]} href={introRoutes[lang]} aria-label={tagLabel(tag, lang) + (zh ? '：点一下打开整页自我介绍，也可以拖动抛掷' : ': click to open the whole page about me, or drag to throw it')}><span class="identity__tag-title">{title}</span>{note && <span class="identity__tag-note">{note}</span>}</a></li>;
+        const { title, notes } = tagLines(tag, lang);
+        return <li class="identity__tag-slot"><a class="identity__tag identity__tag--intro" data-identity-tag={tag.id} data-identity-link={introRoutes[lang]} href={introRoutes[lang]} aria-label={tagLabel(tag, lang) + (zh ? '：点一下打开整页自我介绍，也可以拖动抛掷' : ': click to open the whole page about me, or drag to throw it')}><span class="identity__tag-title">{title}</span>{notes.map((line) => <span class="identity__tag-note">{line}</span>)}</a></li>;
       }
       return <li class="identity__tag" data-identity-tag={tag.id} tabindex="0" role="button" aria-label={tagLabel(tag, lang) + (zh ? '：拖动抛掷，或用方向键移动' : ': drag to throw, or use arrow keys')}>{tagLabel(tag, lang)}</li>;
     })}
@@ -121,24 +121,26 @@ const zh = lang === 'zh';
   :global([data-identity-tag='analytical']) { --identity-glyph: '∴'; }
   :global([data-identity-tag='intro']) { --identity-glyph: '✎'; }
 
-  /* 第十个标签：比别的标签大 0.2 倍（font/padding 同比例放大），
-     而且是唯一能点开的标签 —— 点它 = 进整页自我介绍。
-     放大不能用 transform:scale()，因为物理引擎每帧会覆盖 inline transform。 */
+  /* 第十个标签：唯一能点开的标签（点它 = 进整页自我介绍）。
+     文案是四行（标题 + 三行请求，见 lib/identity.ts 的 tagLines），
+     所以不再"比别的标签大 0.2 倍"，而是收成一块小一点的贴纸：
+     标题跟其它标签同号，下面三行小一号、淡一点。
+     尺寸不能用 transform:scale()，物理引擎每帧会覆盖 inline transform。 */
   .identity__tag--intro {
-    padding: 6px 14px;
-    font-size: calc(var(--fs-xs) * 1.2);
+    padding: 6px 12px;
+    font-size: var(--fs-xs);
     font-weight: 600;
-    line-height: 1.5;
+    line-height: 1.45;
   }
   .identity__tag-title { display: block; font-weight: 700; }
-  .identity__tag-note { display: block; margin-top: 4px; font-size: .76em; font-weight: 500; opacity: .86; }
+  .identity__tag-note { display: block; margin-top: 2px; font-size: .8em; font-weight: 500; line-height: 1.4; opacity: .82; }
   :global(body > [data-identity-arena] .identity__tag[data-identity-link]) {
-    /* 尺寸 = 普通标签 × 1.2（"再大 0.2 倍"）：写成 calc 乘法，
-       以后调基准字号/内边距时它自动跟着走，不会掉队。 */
-    padding: calc(11px * 1.2) calc(22px * 1.2);
-    min-height: calc(46px * 1.2);
-    max-width: min(88vw, 26rem);
-    font-size: calc(clamp(15px, 1.2vw, 17px) * 1.2);
+    /* 尺寸 = 普通标签（不再是 1.2 倍）：四行短句本身就够显眼，
+       再放大就变成一块横幅了。想再调大小只改这一行 font-size。 */
+    padding: 10px 15px 11px;
+    min-height: 46px;
+    max-width: min(74vw, 15rem);
+    font-size: clamp(13px, 1.05vw, 15px);
     font-weight: 600;
     line-height: 1.45;
     white-space: normal;
