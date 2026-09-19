@@ -474,7 +474,7 @@ parseMidi(bytes: Uint8Array): MidiScore;
 identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子的弱起结构）
 ```
 
-- 标签的入场不是 `scale(0)→scale(1)`，而是被"弹出来"的物理动画：ejection → flight（浅抛物线 + 轻微旋转）→ landing → settle。动画参数在 `IDENTITY_MOTION`。
+- 标签的入场不是 `scale(0)→scale(1)`，而是被"弹出来"的物理动画：ejection → flight（浅抛物线 + 轻微旋转）→ landing → settle。运行时碰撞材质在 `identity-physics.ts` 的 `makeBody()`，抓取手感由 pointerdown 的关节刚度/阻尼控制；`IDENTITY_MOTION` 是入场时序规格，不是 Matter 运行时材质参数。长标签惯量在创建时统一设定，无变化的 `bounds()` 通知保留休眠状态。
 - **手机端独有的彩蛋：摇晃手机，场上的标签跟着一块晃。** `identity-motion.ts` 把 `devicemotion` 接到 `lib/shake.ts` 的摇晃识别上（默认：1.1 秒窗口里攒够 **3** 次 ≥ **11** m/s² 的强脉冲），识别成功后打开一段 4.2 秒的"跟着晃"时间窗（窗内继续晃会一直续上）：窗里每次采样都把设备加速度换算成一阵**冲量**交给 `physics.shove(x, y)`。三条边界写在文件头：**只有手机端**（`(pointer: coarse)` + 有 `DeviceMotionEvent`）、**只有 About 这一块在屏幕上时才听传感器**（IntersectionObserver，否则会在看不见的地方把标签甩乱、还费电）、**开了 reduced-motion 就完全不挂**。阈值与推力在 `identity-motion.ts` 顶部（`GAIN` / `MAX_ACCEL` / `MIN_ACCEL`）与 `lib/shake.ts` 的默认值里。
   - `shove()` 给的是**冲量（直接改速度）**，不是力：标签躺在地板上（`friction .65`），按重力那一档施力走一步就被摩擦吃掉 —— 实测只推动 **1px**，看起来就是"摇了没反应"。冲量是立刻见效的（gain 6 ≈ 晃一下跳几厘米），再叠一点向上抬升与自转，方块才会真的跳起来翻滚（和 `reveal()` 把标签抛出来是同一种量级）。
   - `shove()` 会**解除 `frozen`**：从落点记忆恢复出来的方块是 `frozen` 且不在 `dropped` 里（"先摆出来"的兜底，见 `restore()`）。当初把这两种一起跳过，结果是**凡是这一趟进过 About（有落点记忆）的人摇起来毫无反应** —— 本人 iPhone 上就是"弹窗有了但摇不动"。现在场上所有方块都参与，还没上场的（没有本体）自然不会被摇出来。
@@ -718,6 +718,15 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-19 · 标签抓取与落地手感优化
+
+- 需求：先检查历次开发记录，改善标签物理运动的真实感与交互反馈。
+- 文件：`src/scripts/identity-physics.ts`、`tests/identity-physics.test.mjs`、`DEVELOPMENT.md`。
+- 行为：抓取关节刚度从 .18 调为 .35、阻尼从 .12 调为 .3；落地恢复系数 .36 → .22，摩擦 .65 → .48、空气阻尼 .008 → .012，减少反复弹跳和拖动余振。碰撞圆角限制为 12px，更接近标签外形。
+- 修复：长标签转动惯量统一在 `makeBody()` 设置为基础值两倍，恢复和重新测量保持一致，不再每次揭示累乘四倍；重新抛出先清除旧速度和自转；键盘操作解除冻结；没有边界或尺寸变化的布局通知保留休眠，不再无故唤醒整堆标签。
+- 钩子/数据：无新增导出、DOM 钩子、存储 key 或事件。
+- 验证：`npm test` 87/87，包含 4 项真实 Matter 引擎回归测试：切语言恢复后继续下落并停稳、无变化布局通知不唤醒、恢复/再揭示的转动惯量一致、抓取移动后跟手停稳且松开后自然下落。浏览器布局与输入边界采用模拟，未把这些测试当作真机手感验证。`npm run check` 0 错误、0 警告；`npm run build` 17 页成功。
 
 ### 2026-09-19 · iPhone 上切主题时主标题直接跳色（Safari 不给"继承来的颜色"补间）
 

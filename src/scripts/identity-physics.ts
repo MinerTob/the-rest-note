@@ -42,7 +42,9 @@ export function createIdentityPhysics(
   const dropped = new Set<number>();
   /** 造一个本体，并记下造它时用的尺寸。 */
   function makeBody(index: number, x: number, y: number, w: number, h: number, angle = 0): Body {
-    const body = Bodies.rectangle(x, y, w, h, { chamfer: { radius: h / 3 }, restitution: .36, friction: .65, frictionAir: .008, sleepThreshold: 65 });
+    const body = Bodies.rectangle(x, y, w, h, { chamfer: { radius: Math.min(12, h / 4) }, restitution: .22, friction: .48, frictionStatic: .7, frictionAir: .012, sleepThreshold: 65 });
+    // 所有创建路径（首次、恢复、尺寸更新）使用同一惯量，不能每次 reveal 再乘一次。
+    if (tags[index].dataset.identityLink) Body.setInertia(body, body.inertia * 2);
     if (angle) Body.setAngle(body, angle);
     sizes.set(index, { w, h });
     return body;
@@ -51,6 +53,7 @@ export function createIdentityPhysics(
   let swallowClickUntil = 0;
   function bounds() {
     if (disposed) return;
+    const previousBounds = { width, left, right, floor };
     width = document.documentElement.clientWidth;
     const content = root.getBoundingClientRect();
     left = content.left;
@@ -58,11 +61,16 @@ export function createIdentityPhysics(
     // Leave room below the playground for copyright and browser/system bottom bars.
     floor = root.querySelector<HTMLElement>('.identity__landing')!.getBoundingClientRect().bottom + scrollY - 8;
     layer.style.height = `${floor}px`;
-    Composite.remove(engine.world, walls);
-    walls = [Bodies.rectangle(width / 2, floor + 50, width + 200, 100, { isStatic: true }),
-      Bodies.rectangle(left - 50, floor / 2, 100, floor * 2, { isStatic: true }),
-      Bodies.rectangle(right + 50, floor / 2, 100, floor * 2, { isStatic: true })];
-    Composite.add(engine.world, walls);
+    const boundsChanged = Math.abs(width - previousBounds.width) > .5 ||
+      Math.abs(left - previousBounds.left) > .5 || Math.abs(right - previousBounds.right) > .5 ||
+      Math.abs(floor - previousBounds.floor) > .5;
+    if (boundsChanged) {
+      Composite.remove(engine.world, walls);
+      walls = [Bodies.rectangle(width / 2, floor + 50, width + 200, 100, { isStatic: true }),
+        Bodies.rectangle(left - 50, floor / 2, 100, floor * 2, { isStatic: true }),
+        Bodies.rectangle(right + 50, floor / 2, 100, floor * 2, { isStatic: true })];
+      Composite.add(engine.world, walls);
+    }
     bodies.forEach((b, index) => {
       const el = tags[index], size = sizes.get(index);
       let body = b;
@@ -88,7 +96,9 @@ export function createIdentityPhysics(
         x: clamp(body.position.x, 8, width - 8),
         y: clamp(body.position.y, 8, floor - 4),
       });
-      Sleeping.set(body, reduced.matches || frozen.has(index));
+      // 无关的布局通知不能让整堆已经睡稳的标签突然重新运动。
+      Sleeping.set(body, reduced.matches || frozen.has(index) ||
+        (!boundsChanged && body === b && b.isSleeping));
     });
     wake();
   }
@@ -193,7 +203,7 @@ export function createIdentityPhysics(
       el.setPointerCapture(e.pointerId);
       Sleeping.set(b, false);
       const joint = Constraint.create({ pointA: { x: e.clientX, y: e.clientY + scrollY }, bodyB: b,
-        pointB: { x: e.clientX - b.position.x, y: e.clientY + scrollY - b.position.y }, stiffness: .18, damping: .12, length: 0 });
+        pointB: { x: e.clientX - b.position.x, y: e.clientY + scrollY - b.position.y }, stiffness: .35, damping: .3, length: 0 });
       Composite.add(engine.world, joint);
       drag = { index, pointer: e.pointerId, joint, fromX: e.clientX, fromY: e.clientY, moved: 0, startedAt: performance.now() };
       el.dataset.dragging = 'true';
@@ -212,6 +222,7 @@ export function createIdentityPhysics(
       e.preventDefault();
       // 链接标签：回车 = 打开它指向的页面；方向键、空格仍然是"抛掷"。
       if (e.key === 'Enter' && el.dataset.identityLink) { onActivate?.(el); return; }
+      frozen.delete(index);
       Sleeping.set(b, false);
       if (reduced.matches) {
         Body.setPosition(b, { x: clamp(b.position.x + (e.key === 'ArrowLeft' ? -24 : e.key === 'ArrowRight' ? 24 : 0), left + el.offsetWidth / 2 + 2, right - el.offsetWidth / 2 - 2), y: clamp(b.position.y + (e.key === 'ArrowDown' ? 24 : -24), 20, floor - el.offsetHeight / 2 - 2) });
@@ -252,9 +263,10 @@ export function createIdentityPhysics(
       bodies.set(index, b); Composite.add(engine.world, b);
     }
     dropped.add(index);
-    // 可点击的那个标签又长又大：让它重一点、别自转 —— 一转起来就变成一根竖着的横幅。
+    // 长标签的转动惯量在 makeBody 统一设置，重复演奏不能累乘。
     const linked = Boolean(el.dataset.identityLink);
-    if (linked) Body.setInertia(b, b.inertia * 4);
+    Body.setVelocity(b, { x: 0, y: 0 });
+    Body.setAngularVelocity(b, 0);
     if (!resting) {
       Body.setVelocity(b, { x: (index % 2 ? -1 : 1) * (2.5 + index % 3), y: -9 - index % 3 });
       if (!linked) Body.setAngularVelocity(b, (index % 2 ? -1 : 1) * .035);
