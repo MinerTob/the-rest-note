@@ -1,6 +1,7 @@
 import type { MusicManager } from './music-manager';
 import { requestMotionAccess } from './identity-motion';
 import { primeIdentityPiano } from './identity-audio';
+import { primeMiniLabPiano } from './minilab';
 
 let entered = false;
 const ENTRY_KEY = 'rest-note.entry-passed';
@@ -97,6 +98,10 @@ export function initEntryGate(music: MusicManager): boolean {
     // 那次创建是"手势之外"的，上下文会挂起，夜曲不会自动开始（本人 iPhone 实测）。
     // 只在真正会用到它的页面（首页关于区 / About / 自我介绍）预载，别的页面不动。
     primeIdentityPiano();
+
+    // 同一手势里也把 MiniLab 那架琴预热：它的采样原来要等你第一次按琴键才开始下载，
+    // 于是第一声只能拿合成器顶上（本人反馈"第一声不是真实音源"）。现在走到实验室前就绪。
+    primeMiniLabPiano();
 
 	    gate.classList.add('is-leaving');
 	    button.disabled = true;
