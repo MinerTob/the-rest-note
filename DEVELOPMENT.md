@@ -684,6 +684,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 | `[data-identity]` 根 + `-arena` / `-canvas` / `-play` / `-restart` / `-progress` / `-status` / `-time` / `-volume` / `-tag` | `IdentityStage.astro` | `initIdentity()`、`identity-physics.ts` | About 身份实验场 |
 | `[data-revealed]` / `[data-dragging="true"]` | `identity-player.ts` | 组件 CSS | 标签出现前隐藏 / 拖拽光标 |
 | `[data-motion]` / `[data-motion-shakes]` / `[data-motion-pushes]` | `identity-motion.ts` 写在 `[data-identity]` 上 | 只有排查时人读（脚本不读） | 摇晃彩蛋的三个读数：`off` / `idle` / `listening` / `shaking`、识别到几次摇晃、真的推了几次 |
+| `[data-minilab-load]` / `[data-minilab-load-wrap]` / `[data-minilab-load-text]` | `minilab.ts`（`renderLoad()` 写 `--load` 与百分比） | 组件 CSS | 采样加载进度条：一颗音符跑在轨道上，只在真的在加载时出现 |
 | `[data-identity-link]` | `IdentityStage.astro`（第十个标签的 href） | `identity-physics.ts`（点按判定 + 回车）、`identity-player.ts`（`navigate()`） | 可点击标签：四行小字（标题 + 三行请求）+ 点开自我介绍页；有它就参与"点击"逻辑 |
 | `[data-contact]` / `[data-contact-row]` / `[data-contact-copy]` / `[data-contact-done]` | 联系组件 | `initContact()` | 复制交互与反馈 |
 | `[data-copied="true"]` | `contact.ts` 写在 `[data-contact-row]` 上 | 组件 CSS | 行内 COPY → COPIED（1.2s 后自动删掉） |
@@ -721,6 +722,18 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-19 · 冷缓存第一次进来"点琴键没反应"：合成器先顶上 + 音符加载条 + 采样补下
+
+- 需求：本人清掉缓存模拟"正常用户第一次打开网站"，发现音频相关交互会失灵（点不开），而第一次来的访客看到没反应就直接走了 —— 要求"无论用什么方式，务必让交互都正常，且不要让用户等太久"。他原本设想是在入场页前加一个"下完所有文件才给开始按钮"的进度页；评估后没有采用（全下完 ≈ 采样 1.9MB + 两首主题曲 9.6MB + 乐谱，会为了一个"可能用不到的 About 区"挡住所有人，而且它挡不住"加载逻辑本身有 bug"这类问题，见下一条日志）。改成"**不等站、但第一下必须有反应**"。
+- 根因：冷启动时采样还在下载（1.9MB / 30 个），而 `PianoEngine.noteOn()` 在对应采样还没解码时直接 return —— 按下去悄无声息。**"引擎状态是 loading" 和 "这个音有没有采样" 是两件事**，原来只按前者的失败兜底（`state === 'failed'` 才走合成器），所以"正在加载"这一段是哑的。
+- 文件：`src/scripts/minilab.ts`（按音兜底）、`src/scripts/piano.ts`（`hasSampleFor()` + 漏掉的采样过一会儿补下）、`src/components/MiniLab.astro`（加载条 + 音符 + 样式）、`DEVELOPMENT.md`。
+- 修复：
+  1. **按音判断**：`piano.getState() === 'failed' || !piano.hasSampleFor(midi)` → 走 `KeysSynth`（振荡器合成的电钢）；采样到位后同一批琴键自然换回采样音色。松键两边都松（没发声的那侧是空操作）。
+  2. **漏掉的采样补下**：`preload()` 第一轮结束后，如果还有没解码成功的，1.5 秒后再来一轮（只补缺的）；失败就作罢 —— 那几个音有合成器兜底。
+  3. **加载条**：MINILAB 页脚多了一条进度：轨道（`--line`）+ 填充（`--grad-a` + `--glow`）+ **一颗音符（♪）跑在当前位置**，位置由 `--load`（0–1）算出来，所以 modern 是蓝、baroque 是暖金；只在真的在加载时出现（`piano:progress` / `piano:state` 驱动 `renderLoad()`）。
+- 钩子/数据：新增 DOM 钩子 `[data-minilab-load]` / `[data-minilab-load-wrap]` / `[data-minilab-load-text]`（只在页面内部读写，已登记 §7）；无新增 storage key / 自定义事件；新增导出方法 `PianoEngine.hasSampleFor(midi)`。
+- 验证：`npm test` 88/88；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。Playwright **冷缓存 + 1.2Mbps + 200ms 延迟**下实测（包了 `createOscillator` / `createBufferSource` 计数来区分两个引擎）：进站后立刻按 C4 → **振荡器 +2、bufferSource +0**（立刻有声）、引擎读数 `LOADING`、`hasSample(C4)=false`、加载条可见；等采样到位后再按 → **振荡器 +0、bufferSource +1**（换成采样钢琴）。
 
 ### 2026-09-19 · "滑到关于区必须刷新才开始加载 MIDI、重播点了没反应"
 

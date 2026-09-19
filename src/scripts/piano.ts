@@ -127,6 +127,15 @@ export class PianoEngine extends EventTarget {
     return Math.min(1, this.buffers.size / wanted);
   }
 
+  /**
+   * 这个音现在有解码好的采样吗？
+   * MiniLab 用它决定"这一下走采样还是先拿合成器顶上" —— 冷启动第一次按琴键时
+   * 采样往往还在下载，不能让它变成"点了没反应"（见 §10）。
+   */
+  hasSampleFor(midi: number): boolean {
+    return this.bufferFor(midi) !== null;
+  }
+
   get requiredSamples(): PianoSample[] {
     return samplesForRange(this.firstMidi, this.lastMidi);
   }
@@ -197,6 +206,20 @@ export class PianoEngine extends EventTarget {
 
       await Promise.all(workers);
       if (ctx === this.ctx) this.setState(ok > 0 ? "ready" : "failed");
+
+      /*
+       * 漏掉的那几个（手机上一次请求被打断很常见）过一会儿再补一次：
+       * 不补的话，那几个音永远只能用最近的采样顶替，甚至没声。
+       * 只在还有上下文、而且确实缺东西的时候补，失败就作罢（合成器会兜底）。
+       */
+      const missing = needed.filter((sample) => !this.buffers.has(sample.midi));
+      if (missing.length > 0 && ctx === this.ctx && this.ctx) {
+        this.loading = null;
+        window.setTimeout(() => {
+          if (ctx !== this.ctx || this.buffers.size >= needed.length) return;
+          void this.preload();
+        }, 1500);
+      }
     })();
 
     return this.loading;

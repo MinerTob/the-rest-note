@@ -49,6 +49,9 @@ export function initMiniLab(): void {
   const engineEl = root.querySelector<HTMLElement>('[data-minilab-engine]');
   const midiEl = root.querySelector<HTMLElement>('[data-minilab-midi]');
   const midiDotEl = root.querySelector<HTMLElement>('[data-minilab-midi-dot]');
+  const loadWrapEl = root.querySelector<HTMLElement>('[data-minilab-load-wrap]');
+  const loadEl = root.querySelector<HTMLElement>('[data-minilab-load]');
+  const loadTextEl = root.querySelector<HTMLElement>('[data-minilab-load-text]');
   const words = root.dataset;
 
   const pressed = new Set<number>();
@@ -94,6 +97,23 @@ export function initMiniLab(): void {
             ? (words.wordEngineLoading ?? 'LOADING')
             : (words.wordEngineIdle ?? 'STANDBY');
     if (engineEl.textContent !== word) engineEl.textContent = word;
+    renderLoad();
+  };
+
+  /**
+   * 采样加载进度条：一条轨道 + 一颗音符跑在当前位置上（`--load` 由 CSS 用它算位置）。
+   * 只有真的在下载/解码时才出现 —— 加载完就收起，失败就让 ENGINE 那行去说明情况。
+   */
+  const renderLoad = () => {
+    const ratio = piano.getLoadedRatio();
+    const state = piano.getState();
+    const loading = state === 'loading' || (state === 'ready' && ratio < 1);
+    if (loadEl) {
+      loadEl.style.setProperty('--load', ratio.toFixed(3));
+      loadEl.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
+    }
+    if (loadTextEl) loadTextEl.textContent = `${Math.round(ratio * 100)}%`;
+    if (loadWrapEl) loadWrapEl.hidden = !loading;
   };
 
   /* ---------------- 控制器 ---------------- */
@@ -103,7 +123,12 @@ export function initMiniLab(): void {
       if (pressed.has(midiNote)) return;
       pressed.add(midiNote);
 
-      if (piano.getState() === 'failed') {
+      /*
+       * 冷启动（清过缓存 / 第一次来）时采样往往还在下载 —— 这一刻按琴键**必须**有声音，
+       * 否则用户看到的就是"点了没反应"，然后关掉页面。所以只要这个音还没有解码好的
+       * 采样，就先拿振荡器合成的那台电钢顶上；采样到位之后同一批琴键自然换回采样音色。
+       */
+      if (piano.getState() === 'failed' || !piano.hasSampleFor(midiNote)) {
         synth.noteOn(midiNote, velocity);
       } else {
         piano.noteOn(midiNote, velocity);
@@ -125,8 +150,9 @@ export function initMiniLab(): void {
       if (!pressed.has(midiNote)) return;
       pressed.delete(midiNote);
 
-      if (piano.getState() === 'failed') synth.noteOff(midiNote);
-      else piano.noteOff(midiNote);
+      // 两边都松：没在发声的那一侧本来就是空操作
+      synth.noteOff(midiNote);
+      piano.noteOff(midiNote);
 
       keyFor(midiNote)?.classList.remove('is-on');
 
