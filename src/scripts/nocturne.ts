@@ -173,6 +173,10 @@ export function initNocturne(): void {
   const activate = () => void start();
   document.addEventListener('pointerdown', activate, { signal });
   document.addEventListener('keydown', activate, { signal });
+  // 采样/音节还在路上时别干等着下一次点击：一就绪就自己接上
+  piano.addEventListener('piano:state', () => {
+    if (piano.getState() === 'ready' && piano.isRunning) void start();
+  }, { signal });
   document.addEventListener('visibilitychange', () => {
     // 与 About 页一致：切走时停手，切回来接着弹（位置存在同一条时间线上）
     if (document.hidden) pause();

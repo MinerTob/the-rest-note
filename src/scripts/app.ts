@@ -8,7 +8,7 @@ import { initMusicUI } from './music-ui';
 import { initContact } from './contact';
 import { initIdentity, disposeIdentity, setIdentityActive } from './identity-player';
 import { initNocturne, disposeNocturne } from './nocturne';
-import { releaseIdentityPiano } from './identity-audio';
+import { primeIdentityPianoOnFirstGesture, releaseIdentityPiano } from './identity-audio';
 import { initSystemMessages } from './system-message';
 import { initTheme } from './theme';
 import { initThemeSwitcher } from './theme-switch';
@@ -104,6 +104,9 @@ function boot(): void {
   initContact();
   if (!journey) initIdentity();
   initNocturne();
+  // 夜曲的 AudioContext 必须在用户手势里唤醒（iOS）：入场页那次点击之外，
+  // 再留一条"第一次触摸/按键就唤醒"的兜底，见 identity-audio.ts。
+  primeIdentityPianoOnFirstGesture();
   initMiniLab();
   initEasterEggs(global.store, theme);
   initThemeSwitcher(global.store, theme);

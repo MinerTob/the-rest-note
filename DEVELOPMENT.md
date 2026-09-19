@@ -551,7 +551,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 
 - 只在"地址栏输入 / 书签 / 外链"（navigation type = `navigate`）时要求重新入场；`reload` / `back_forward` 沿用 sessionStorage `rest-note.entry-passed`。
 - 进入方式：点击 `[data-entry-button]`。这个 click 处理器里**必须直接调用** `music.play()`（浏览器自动播放策略要求音频解锁发生在可信手势里，见代码注释）。
-- 同一个 click 处理器里还调 `requestMotionAccess()`（`identity-motion.ts`）：iOS 只允许在用户手势里申请"运动与方向"权限，而这是全站人人都要做的一次点击 —— 同意之后，About 页的摇晃彩蛋这一趟就能直接用。桌面 / 不支持 / 已经批过时静默返回，不影响入场。
+- 同一个 click 处理器里还调两个"必须在用户手势里做"的动作：`requestMotionAccess()`（`identity-motion.ts`，申请"运动与方向"权限，见 §5.8）和 `primeIdentityPiano()`（`identity-audio.ts`，把"关于"那架钢琴的 AudioContext 建起来并开始预载采样，见 §5.14）。两者都只在真正需要它们的页面生效，桌面 / 不需要 / 已经做过时静默返回，不影响入场。
 - 锁定期间 body 加 `.entry-locked`，除 gate 和 `.ambient` 外的直接子元素设为 `inert`。
 - 文案跟随浏览器语言（`navigator.language` 是否 `zh` 开头），不是站点语言。
 - `app.ts` 里：`if (!initEntryGate(music)) music.init();` —— 有入场页时由入场页负责解锁音频。
@@ -718,6 +718,15 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-19 · iPhone 上"手动滑到关于区，夜曲不会自己开始"：把手势里解锁提前到入场页
+
+- 需求：本人反馈"除了我自己手动滑到底部音乐没自动开始播放以外，其他都没问题了"（首页关于区；电脑端会自己开始）。
+- 根因：**iOS 只允许在用户手势里创建/唤醒 AudioContext**。原来的顺序是"用户滑到关于区 → 才 `new AudioContext()`"，那一下不在手势里，iPhone 上建出来是 `suspended`，于是只显示"点击或按键，即可接入钢琴演奏"，不会自己弹。桌面浏览器在入场页那次点击之后就已经放行，所以只有手机看得到。
+- 文件：`src/scripts/identity-audio.ts`（新增 `usesIdentityPiano()` / `primeIdentityPiano()` / `primeIdentityPianoOnFirstGesture()`）、`src/scripts/entry-gate.ts`（"进入空间"的 click 里调 `primeIdentityPiano()`）、`src/scripts/app.ts`（boot 里挂"第一次手势就唤醒"的兜底）、`src/scripts/identity-player.ts`（采样没齐时不再让人刷新，改为 `piano:state` 变 ready 自己接上）、`src/scripts/nocturne.ts`（同上）、`DEVELOPMENT.md`。
+- 逻辑：`primeIdentityPiano()` 只在页面真的有 `[data-identity]` / `[data-nocturne]` 时动作（首页关于区 / 独立 About 页 / 自我介绍页），其它页面不预载、不占带宽；它 `ensure()` 的副作用是顺带开始下载采样，所以等用户滑下去时已经就绪。没走入场页的情况（站内跳转、刷新后入场页不再出现）由 `primeIdentityPianoOnFirstGesture()` 兜底：页面上第一次 `pointerdown` / `keydown` 就唤醒 —— 为了滚动而按下的那一下就算。
+- 钩子/数据：无新增 data-* / storage key / 事件。
+- 验证：`npm test` 88/88；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。Playwright 实测（移动 393×852）：进入前 `identityPiano` 已建但 `ctx=null`；**点"进入空间"之后立刻** `ctx=running / state=ready / loaded=1`（采样 100% 预载完）；随后只做一次 `scrollTo(bottom)`、全程不再点击，`[data-identity][data-state]` 变成 `playing`、标签开始按音乐出场，0 console error。
 
 ### 2026-09-19 · 手机端"UI 变了、声音还没跟上"：预热另一套主题的曲子 + 收紧暂停淡出
 

@@ -155,6 +155,28 @@ export function initIdentity(): void {
     },
     { signal },
   );
+  /**
+   * 采样还在下载时不要"报错让人刷新"，等它加载完自己接上。
+   * 场景：用户进站后立刻往下滑到关于区 —— 那一刻采样可能还没齐，
+   * 原来的 start() 会走到 catch 显示"请刷新重试"，而不会自己再试一次。
+   */
+  piano.addEventListener(
+    "piano:state",
+    () => {
+      if (
+        piano.getState() === "ready" &&
+        piano.getLoadedRatio() >= 1 &&
+        piano.isRunning &&
+        wantsPlayback &&
+        sceneActive &&
+        !playing &&
+        !loading &&
+        !disposed
+      )
+        void start();
+    },
+    { signal },
+  );
   const music = getGlobal().music;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
   const time = () =>
@@ -371,9 +393,15 @@ export function initIdentity(): void {
       timer = window.setInterval(tick, 25);
       render();
     } catch {
-      status.textContent = zh
-        ? "钢琴采样未能完整加载，请刷新后重试。"
-        : "Piano samples could not load. Please reload and try again.";
+      // 还没加载完（不是真的失败）就别吓唬人：等 piano:state 变 ready 会自己接上
+      status.textContent =
+        piano.getState() === "failed"
+          ? zh
+            ? "钢琴采样未能完整加载，请刷新后重试。"
+            : "Piano samples could not load. Please reload and try again."
+          : zh
+            ? "钢琴采样加载中…"
+            : "Loading the piano samples…";
       label();
     } finally {
       loading = false;

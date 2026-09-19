@@ -1,5 +1,6 @@
 import type { MusicManager } from './music-manager';
 import { requestMotionAccess } from './identity-motion';
+import { primeIdentityPiano } from './identity-audio';
 
 let entered = false;
 const ENTRY_KEY = 'rest-note.entry-passed';
@@ -90,6 +91,12 @@ export function initEntryGate(music: MusicManager): boolean {
     // 同意之后 About 页的摇晃彩蛋当趟就能用（iOS 上不在这里问，用户到了那一页
     // 还得先碰标签才可能拿到权限，实测就是"摇了没反应"）。
     requestMotionAccess();
+
+    // 同一个手势里顺手把"关于"那架钢琴的 AudioContext 建起来。
+    // iOS 只允许在用户手势里创建/唤醒 AudioContext：不在这里做，用户滑到关于区时
+    // 那次创建是"手势之外"的，上下文会挂起，夜曲不会自动开始（本人 iPhone 实测）。
+    // 只在真正会用到它的页面（首页关于区 / About / 自我介绍）预载，别的页面不动。
+    primeIdentityPiano();
 
 	    gate.classList.add('is-leaving');
 	    button.disabled = true;
