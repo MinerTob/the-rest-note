@@ -380,8 +380,13 @@ export function initIdentity(): void {
     try {
       await piano.preload();
       if (disposed || !sceneActive || !wantsPlayback || document.hidden) return;
-      if (piano.getState() !== "ready" || piano.getLoadedRatio() < 1)
-        throw new Error("Samples unavailable");
+      /*
+       * 只要还没彻底失败就开始弹 —— **不要**等"采样一个不差"。
+       * 缺的那几个音本来就会用最近的采样顶替（`bufferFor()` 的退让逻辑），
+       * 而"必须全部加载完"这个条件会把**任何一个采样没下载成功**变成永远等下去：
+       * 表现就是"文件都下好了、按播放还是不出声，刷新几次才好"（本人实测的那种）。
+       */
+      if (piano.getState() === "failed") throw new Error("Samples unavailable");
       if (!piano.isRunning) {
         label();
         root.dataset.state = "waiting";
