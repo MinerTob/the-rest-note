@@ -803,6 +803,15 @@ a.chip:hover {
   margin-top: 1.15em;
 }
 
+/* 正文里的每个块级元素都显式写出自己的颜色。
+   不靠继承是因为 Safari（WebKit）不给"从祖先继承来的颜色变化"做补间：
+   换主题时只有写了 color 的元素会跟着渐隐，靠继承的会直接跳色 ——
+   实测本人 iPhone 上整页正文是硬切的，Chrome / Firefox 正常。值跟
+   `.prose` 上那一个完全一致（--reading-ink），只是把声明下沉一层。 */
+.prose > * {
+  color: var(--reading-ink);
+}
+
 .prose p {
   margin: 0;
 }

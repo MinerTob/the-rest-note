@@ -109,6 +109,8 @@ const rows = await Promise.all(
     line-height: 1.05;
     letter-spacing: -0.03em;
     font-weight: 600;
+    /* 显式写出自己的颜色：Safari 不给"继承来的颜色变化"补间（见 §5.13） */
+    color: var(--ink);
   }
 
   .station {
@@ -163,6 +165,8 @@ const rows = await Promise.all(
     font-size: clamp(1.1rem, 1rem + 0.6vw, 1.35rem);
     letter-spacing: -0.014em;
     font-weight: 600;
+    /* 同上：不靠继承，切主题才会跟着一起补间 */
+    color: var(--ink);
   }
 
   .labitem__status {

@@ -44,7 +44,8 @@ const zh = lang === 'zh';
   .identity { min-width: 0; padding-block: 0; }
   .identity__head { display:flex; align-items:center; justify-content:space-between; gap:16px; }
   .identity__head p { margin:0 0 7px; letter-spacing:.14em; }
-  .identity h2 { margin:0; font-size:var(--fs-xl); font-weight:500; }
+  /* color 必须显式写：Safari 不给"继承来的颜色变化"补间，靠继承的话切主题会直接跳色（见 §5.13） */
+  .identity h2 { margin:0; font-size:var(--fs-xl); font-weight:500; color:var(--ink); }
   .identity__piece { font-family:var(--font-mono); font-size:10px; line-height:1.8; text-align:right; color:var(--ink-3); letter-spacing:.08em; }
   .identity__tags { display:flex; flex-wrap:wrap; gap:8px; min-height:70px; align-content:center; padding:18px 0; margin:0; list-style:none; }
   .identity__tag { padding:5px 12px; border-radius:999px; background:var(--grad-quiet); color:var(--ink-2); font-size:var(--fs-xs); box-shadow:inset 0 1px 0 var(--glass-line-2); }

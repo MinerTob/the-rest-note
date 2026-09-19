@@ -579,6 +579,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 页面入场动画是 `.rise` / `.rise--2/3/4`（一次性 CSS animation）。**语言切换进新页面时会被有意去掉**（见 §5.4），因为那一次只该动文字。
 - 所有动画都要在 `@media (prefers-reduced-motion: no-preference)` 里，或自己判断 reduced motion。
 - **焦点圈只在键盘操作后画**：全局 `:focus-visible` 规则挂在 `html[data-input='keyboard']` 下；鼠标/触摸时连浏览器自带的默认圈也一起关掉（`html[data-input='pointer'] :focus-visible:not(input, textarea, select, [contenteditable='true'])`）。状态由 `src/scripts/input-modality.ts` 的 `trackInputModality()` 维护（boot 里调用，换页后重新写回 `<html>`）。原因见 §10「焦点圈又冒出来」那条：脚本 `focus()` 会被浏览器判成"键盘焦点"。
+- **文字颜色一律显式声明，不要靠继承**。Safari（WebKit）**不给"从祖先继承来的颜色变化"做补间**：切主题时 `.theme-shift` 给全站挂的那套 `transition` 只对"自己写了 `color`"的元素生效，靠继承的元素会**直接跳色**（Chrome / Firefox 继承也能补间，所以这个坑只在 Safari 上看得到）。本人 iPhone 实测：同一个 `.page__head.rise` 里的 `.lede` 平滑渐隐（自己写了 `color: var(--ink-2)`），旁边的 `.page__title` 直接变色（一个 `color` 都没写）。所以：**各页主标题、正文块级元素都写出自己的颜色**（`.page__title` / `.post__title` / `.labitem__title` / `.letter-page__title` / `.identity h2` / `.prose > *`）。改这类样式之后用 §10 那条的"颜色快照"办法验证：逐元素比对修改前后的 computed color，必须一条不差。
 
 ### 5.14 自我介绍页（About 第十个标签的去处）
 
@@ -717,6 +718,15 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-19 · iPhone 上切主题时主标题直接跳色（Safari 不给"继承来的颜色"补间）
+
+- 需求：本人反馈（iPhone 17 Pro）"手机端切主题的时候，每个页面上面的那个主标题（BLOG / LAB / 让音乐介绍我）没有跟着网页内容一起过渡，而是直接变色了；电脑端一切正常"。
+- 查证：先在桌面与手机尺寸的 Chrome 里采样切主题时 `.page__title` 与 `.lede` 的 computed color（每 60ms 一次）：**两者都在补间**（各采到 12-13 个中间色），所以 CSS 机制没问题，问题只在 WebKit。再看 DOM：`.lede` 和 `.page__title` 在**同一个** `.page__head.rise` 里（排除"合成层/动画容器"这类猜测），差别只有一个 —— `.lede` 自己写了 `color: var(--ink-2)`，而 `.page__title`、`.identity h2` **一个 `color` 都没写，靠从 `body` 继承**。Safari 不会给"继承来的颜色变化"做补间（`.theme-shift` 那套 `transition` 因此对它不生效），于是它直接跳色；Chrome / Firefox 继承也能补间。
+- 文件：`src/views/BlogIndexPage.astro`、`src/views/LabPage.astro`（`.page__title` / `.labitem__title`）、`src/views/PostPage.astro`（`.post__title`）、`src/views/IntroPage.astro`（`.letter-page__title`）、`src/components/IdentityStage.astro`（`.identity h2`）、`src/styles/global.css`（`.prose > *`）、`DEVELOPMENT.md`。
+- 函数/钩子：无脚本改动；无新增 data-* / storage key / 事件。
+- 验证：**逐元素颜色快照比对**——写 `.shots/color-snapshot.mjs` 抓取 5 个路由 × 2 个主题共 10 页、1782 个元素的 computed color，改动前后**差异 0 条**（颜色值完全没变，只是从"继承"变成"自己有声明"）。`npm test` 83/83；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。
+- 已知未处理（等真机确认后再决定）：导航/页脚/卡片名/小屏读数里那些 i18n `<span>` 也没写 `color`（它们同样靠继承），若真机上这些文字也硬切，用同一个办法继续补 —— 但当时"父级用了哪条声明"的 CDP 取数不可靠（导航父级其实也是继承），所以没有盲改。
 
 ### 2026-09-19 · 摇晃彩蛋在首页关于区没反应：认的是"恢复态"标签 + 推力被摩擦吃掉
 

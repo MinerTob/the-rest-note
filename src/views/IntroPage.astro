@@ -117,6 +117,8 @@ const backHref = `${localizePath('/', lang)}#about`;
     font-weight: 700;
     line-height: 1.18;
     letter-spacing: -0.028em;
+    /* 显式写出自己的颜色：Safari 不给"继承来的颜色变化"补间（见 §5.13） */
+    color: var(--ink);
   }
 
   /* 图片：满栏、圆角、跟正文同一套阴影，不额外加边框。 */

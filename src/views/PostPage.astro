@@ -157,6 +157,8 @@ const toc = headings.filter((heading) => heading.depth === 2 || heading.depth ==
     line-height: 1.2;
     letter-spacing: -0.026em;
     font-weight: 600;
+    /* 显式写出自己的颜色：Safari 不给"继承来的颜色变化"补间（见 §5.13） */
+    color: var(--ink);
   }
 
   .post__desc {

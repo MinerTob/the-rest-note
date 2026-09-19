@@ -106,6 +106,9 @@ const groups = posts.reduce<{ year: number; posts: typeof posts }[]>((accumulato
     line-height: 1.05;
     letter-spacing: -0.03em;
     font-weight: 600;
+    /* 显式写出自己的颜色：Safari 不给"继承来的颜色变化"补间，
+       靠继承的话切主题时这个标题会直接跳色（Chrome 正常）。见 §5.13 */
+    color: var(--ink);
   }
 
   .tagbar {
