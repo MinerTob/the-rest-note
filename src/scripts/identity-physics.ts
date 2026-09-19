@@ -130,22 +130,39 @@ export function createIdentityPhysics(
    * x / y 是**屏幕坐标**下、以重力为单位（1 ≈ 9.81m/s²）的加速度，右为正、下为正，
    * 由 identity-motion.ts 从 devicemotion 换算过来。
    *
-   * 只有已经落地、没被冻结、也没正被拖着的方块会被推 ——
-   * 还在排队等音乐放出来的那些不该被摇出来。
-   * 力施加在中心偏一点的位置上，方块会自己翻滚，不用手写角速度。
+   * 场上所有的方块都会被推（**包括**从落点记忆里恢复出来的那些）：摇是明确的
+   * "让它们动一下"，所以这里顺手解除它们的冻结 —— 恢复出来的方块是 `frozen` 且
+   * 不在 `dropped` 里（"先摆出来"的兜底，见 restore()），当初把这两种一起跳过，
+   * 结果凡是这一趟进过 About（有落点记忆）的人摇起来毫无反应（本人 iPhone 实测）。
+   * 还没上场的标签根本没有本体，自然不会被摇出来。
+   *
+   * 给的是**冲量（直接改速度）而不是力**：标签躺在地板上（friction .65），
+   * 按重力那一档去施力，走一步就被摩擦吃掉，实测只推动 1px —— 看起来就是"摇了没反应"。
+   * 冲量是立刻见效的，再叠一点向上的抬升和自转，方块就会真的跳起来翻滚，和外面那阵
+   * 晃动对得上（这也和 reveal() 把标签抛出来用的是同一种量级）。
    */
   function shove(x: number, y: number): void {
     if (disposed || reduced.matches) return;
-    // 和 matter 内部的 gravityScale 对齐：force = mass × 0.001 × 加速度
-    const scale = 0.001;
+    // 加速度（重力单位）→ 速度增量（px/step）。6 大致等于"晃一下，方块跳几厘米"
+    const gain = 6;
+    const strength = Math.min(2.5, Math.hypot(x, y));
     bodies.forEach((body, index) => {
-      if (!dropped.has(index) || frozen.has(index) || drag?.index === index) return;
+      if (drag?.index === index) return;
+      frozen.delete(index);
       Sleeping.set(body, false);
-      Body.applyForce(
-        body,
-        { x: body.position.x + (index % 2 ? 4 : -4), y: body.position.y - 3 },
-        { x: x * body.mass * scale, y: y * body.mass * scale },
-      );
+      const jitter = (index % 2 ? 1 : -1) * 0.8;
+      Body.setVelocity(body, {
+        // 越靠边的方块被甩得越远，看起来不像整排同时平移
+        x: clamp(body.velocity.x + x * gain + jitter, -16, 16),
+        // 略微往上抬：抬离地板才不会被摩擦按死（但不会一路飘走）
+        y: clamp(body.velocity.y + y * gain - strength * 0.8, -14, 10),
+      });
+      if (!body.isStatic) {
+        Body.setAngularVelocity(
+          body,
+          clamp(body.angularVelocity + (index % 2 ? 1 : -1) * strength * 0.06, -0.35, 0.35),
+        );
+      }
     });
     wake();
   }

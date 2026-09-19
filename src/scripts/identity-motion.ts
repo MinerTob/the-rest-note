@@ -105,9 +105,28 @@ export function attachIdentityMotion(
   root: HTMLElement,
   shove: (x: number, y: number) => void,
 ): () => void {
+  /**
+   * 排查用的读数（和 identity 的 data-deadline / nocturne 的 data-nocturne-at 同一个习惯）：
+   *   data-motion      —— off（没挂：桌面 / 不支持 / reduced-motion）/ idle（不在视口里）
+   *                       / listening（在听）/ shaking（刚识别到一次摇晃）
+   *   data-motion-shakes —— 识别到几次摇晃
+   *   data-motion-pushes —— 真的往场地里推了几次
+   * 手机上说"摇了没反应"时，先看这三个数：没 listening 是挂载问题，
+   * shakes 不动是阈值问题，pushes 不动是"识别到了但没推"。
+   */
+  const mark = (state: string) => {
+    root.dataset.motion = state;
+  };
+  const bump = (key: 'motionShakes' | 'motionPushes') => {
+    root.dataset[key] = String((Number(root.dataset[key]) || 0) + 1);
+  };
+
   if (typeof window.DeviceMotionEvent === 'undefined') return () => {};
   if (!matchMedia('(pointer: coarse)').matches) return () => {};
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return () => {};
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    mark('off');
+    return () => {};
+  }
 
   const abort = new AbortController();
   const { signal } = abort;
@@ -141,17 +160,23 @@ export function attachIdentityMotion(
 
     const magnitude = Math.hypot(accel.x, accel.y, accel.z);
     const now = performance.now();
-    if (detector.push(magnitude, now)) windowUntil = now + MOTION_WINDOW_MS;
+    if (detector.push(magnitude, now)) {
+      windowUntil = now + MOTION_WINDOW_MS;
+      bump('motionShakes');
+      mark('shaking');
+    }
     if (now > windowUntil || !visible || magnitude < MIN_ACCEL) return;
 
     // 推力 = 单位方向 × 强度（以重力为单位）；设备坐标 y 朝屏幕上方，场地里 y 朝下
     const strength = Math.min(MAX_ACCEL, (magnitude / GRAVITY) * GAIN);
     shove((accel.x / magnitude) * strength, -(accel.y / magnitude) * strength);
+    bump('motionPushes');
   };
 
   const listen = (on: boolean) => {
     if (on === listening) return;
     listening = on;
+    mark(on ? 'listening' : 'idle');
     if (on) window.addEventListener('devicemotion', onMotion);
     else window.removeEventListener('devicemotion', onMotion);
   };

@@ -475,7 +475,10 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
 ```
 
 - 标签的入场不是 `scale(0)→scale(1)`，而是被"弹出来"的物理动画：ejection → flight（浅抛物线 + 轻微旋转）→ landing → settle。动画参数在 `IDENTITY_MOTION`。
-- **手机端独有的彩蛋：摇晃手机，场上的标签跟着一块晃。** `identity-motion.ts` 把 `devicemotion` 接到 `lib/shake.ts` 的摇晃识别上（默认：1.1 秒窗口里攒够 **3** 次 ≥ **11** m/s² 的强脉冲），识别成功后打开一段 4.2 秒的"跟着晃"时间窗（窗内继续晃会一直续上）：窗里每次采样都把设备加速度换算成一场推力交给 `physics.shove(x, y)`（力施加在中心偏一点的位置上，方块会自己翻滚）。三条边界写在文件头：**只有手机端**（`(pointer: coarse)` + 有 `DeviceMotionEvent`）、**只有 About 这一块在屏幕上时才听传感器**（IntersectionObserver，否则会在看不见的地方把标签甩乱、还费电）、**开了 reduced-motion 就完全不挂**。阈值与推力在 `identity-motion.ts` 顶部（`GAIN` / `MAX_ACCEL` / `MIN_ACCEL`）与 `lib/shake.ts` 的默认值里。
+- **手机端独有的彩蛋：摇晃手机，场上的标签跟着一块晃。** `identity-motion.ts` 把 `devicemotion` 接到 `lib/shake.ts` 的摇晃识别上（默认：1.1 秒窗口里攒够 **3** 次 ≥ **11** m/s² 的强脉冲），识别成功后打开一段 4.2 秒的"跟着晃"时间窗（窗内继续晃会一直续上）：窗里每次采样都把设备加速度换算成一阵**冲量**交给 `physics.shove(x, y)`。三条边界写在文件头：**只有手机端**（`(pointer: coarse)` + 有 `DeviceMotionEvent`）、**只有 About 这一块在屏幕上时才听传感器**（IntersectionObserver，否则会在看不见的地方把标签甩乱、还费电）、**开了 reduced-motion 就完全不挂**。阈值与推力在 `identity-motion.ts` 顶部（`GAIN` / `MAX_ACCEL` / `MIN_ACCEL`）与 `lib/shake.ts` 的默认值里。
+  - `shove()` 给的是**冲量（直接改速度）**，不是力：标签躺在地板上（`friction .65`），按重力那一档施力走一步就被摩擦吃掉 —— 实测只推动 **1px**，看起来就是"摇了没反应"。冲量是立刻见效的（gain 6 ≈ 晃一下跳几厘米），再叠一点向上抬升与自转，方块才会真的跳起来翻滚（和 `reveal()` 把标签抛出来是同一种量级）。
+  - `shove()` 会**解除 `frozen`**：从落点记忆恢复出来的方块是 `frozen` 且不在 `dropped` 里（"先摆出来"的兜底，见 `restore()`）。当初把这两种一起跳过，结果是**凡是这一趟进过 About（有落点记忆）的人摇起来毫无反应** —— 本人 iPhone 上就是"弹窗有了但摇不动"。现在场上所有方块都参与，还没上场的（没有本体）自然不会被摇出来。
+  - 排查读数（写在 `[data-identity]` 上，和 `data-nocturne-at` 同一个习惯）：`data-motion` = `off` / `idle` / `listening` / `shaking`，`data-motion-shakes` = 识别到几次摇晃，`data-motion-pushes` = 真的推了几次。"摇了没反应"先看这三个数：没到 `listening` 是挂载问题，`shakes` 不动是阈值问题，`pushes` 有数但标签不动才是物理问题（这次就是最后一种）。
 - **iOS 的运动与方向权限在入场页那次点击里申请**（`requestMotionAccess()`，被 `entry-gate.ts` 的"进入空间"处理器调用）：iOS 只允许在用户手势里调 `DeviceMotionEvent.requestPermission()`，而"进入"是全站人人都要做的那一次点击 —— 同意之后这一趟里摇晃彩蛋随手就能用。**只把权限挂在"碰标签"上是不够的**：本人 iPhone 实测只是摇了手机、没先碰标签，权限从没被申请过，传感器一个事件都收不到，看起来就是"摇了没反应"。
   - 状态是**三态**，记在 `getGlobal().motionAccess`：`true` 批过、`false` 明确拒绝过、`undefined` 还没问过。拒绝过的不再问 —— iOS 本来也不会再弹，反复调用只会让日志变脏。
   - **只问一次**：`askOnce()` 的结果缓存在模块内的 `pendingRequest` 上，所以"入场点击"和"About 区兜底"同一次点击里各调一次时仍然只发一个请求（实测：入场点击只调用 1 次 `requestPermission`）。iOS 上重复调用是危险的：第二次常常立刻返回 `denied`。
@@ -676,6 +679,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 | --- | --- | --- | --- |
 | `[data-identity]` 根 + `-arena` / `-canvas` / `-play` / `-restart` / `-progress` / `-status` / `-time` / `-volume` / `-tag` | `IdentityStage.astro` | `initIdentity()`、`identity-physics.ts` | About 身份实验场 |
 | `[data-revealed]` / `[data-dragging="true"]` | `identity-player.ts` | 组件 CSS | 标签出现前隐藏 / 拖拽光标 |
+| `[data-motion]` / `[data-motion-shakes]` / `[data-motion-pushes]` | `identity-motion.ts` 写在 `[data-identity]` 上 | 只有排查时人读（脚本不读） | 摇晃彩蛋的三个读数：`off` / `idle` / `listening` / `shaking`、识别到几次摇晃、真的推了几次 |
 | `[data-identity-link]` | `IdentityStage.astro`（第十个标签的 href） | `identity-physics.ts`（点按判定 + 回车）、`identity-player.ts`（`navigate()`） | 可点击标签：放大 1.2× + 点开自我介绍页；有它就参与"点击"逻辑 |
 | `[data-contact]` / `[data-contact-row]` / `[data-contact-copy]` / `[data-contact-done]` | 联系组件 | `initContact()` | 复制交互与反馈 |
 | `[data-copied="true"]` | `contact.ts` 写在 `[data-contact-row]` 上 | 组件 CSS | 行内 COPY → COPIED（1.2s 后自动删掉） |
@@ -713,6 +717,17 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-19 · 摇晃彩蛋在首页关于区没反应：认的是"恢复态"标签 + 推力被摩擦吃掉
+
+- 需求：本人（iPhone，地址 `/en/#about` 那一带）说"这一次询问了，但还是摇不动那些东西"（运动权限已经批了）。
+- 查证：给彩蛋补了三个读数（`[data-identity]` 上的 `data-motion` / `data-motion-shakes` / `data-motion-pushes`）后按他的场景（`/#about`，手机视口）复现，得到 `motion=shaking, shakes=4, pushes=12`，但标签只动了 **1.0px** —— 传感器、阈值、监听器全都是好的，问题在物理那一侧，而且有两层：
+  1. **恢复态标签被跳过**：从落点 cookie 恢复出来的方块是 `frozen` 且不在 `dropped` 里（`restore()` 的"先摆出来"兜底），而 `shove()` 当初把这两种都排除了。只要这一趟进过 About（有记忆落点），场上就全是这种方块 —— 摇多少次都不动。
+  2. **推力被摩擦吃掉**：原来给的是力（对齐 matter 的 gravityScale）。标签躺在地板上（`friction .65`），2.4 倍重力的一步只换来约 1px 位移，之后立刻被摩擦按停。
+- 文件：`src/scripts/identity-physics.ts`（`shove()` 改成冲量 + 解除 `frozen`）、`src/scripts/identity-motion.ts`（新增三个排查读数）、`DEVELOPMENT.md`。
+- 函数：`shove(x, y)` —— 现在对**场上所有本体**生效（跳过正在被拖的那一个），`Body.setVelocity` 直接叠速度（`gain 6` px/step + 左右抖动 + 向上抬升 `strength × 0.8`）、并叠一点自转；`attachIdentityMotion` 里新增 `mark()` / `bump()` 两个读数写入。
+- 钩子/数据：新增只读读数 `data-motion`、`data-motion-shakes`、`data-motion-pushes`（写在 `[data-identity]` 上）；无 storage key、无新事件。
+- 验证：`npm test` 83/83；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。Playwright 手机模拟实测（合成 devicemotion，比对基线上已睡稳的标签）：**首页 `/#about` 场景 1.0px → 74.9px**（同一场景、同一段合成数据，改前改后对比）；独立 `/about/` 页 332.6px；轻晃（远低于阈值）0.0px；桌面（`(pointer: coarse)` 为假）0.0px；全程 0 console error。
 
 ### 2026-09-19 · 运动权限：单飞、手持设备判定放宽、被拒时给一句实话
 
