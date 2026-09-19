@@ -207,6 +207,11 @@ export class PianoEngine extends EventTarget {
     if (this.master) this.master.gain.value = this.volume * this.outputGain;
   }
 
+  /** 当前音量：换页接手别人的琴时，音量要"从这里滑过去"，所以得能读出来 */
+  getVolume(): number {
+    return this.volume;
+  }
+
   noteOn(midi: number, velocity = 0.8): void {
     this.ensure();
     const ctx = this.ctx;

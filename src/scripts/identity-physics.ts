@@ -125,6 +125,30 @@ export function createIdentityPhysics(
     else { last = 0; saveWhenSettled(); }
   }
   function wake() { if (!frame) { last = 0; frame = requestAnimationFrame(step); } }
+  /**
+   * 手机摇晃彩蛋用：把设备加速度当成一阵"推"灌进场地。
+   * x / y 是**屏幕坐标**下、以重力为单位（1 ≈ 9.81m/s²）的加速度，右为正、下为正，
+   * 由 identity-motion.ts 从 devicemotion 换算过来。
+   *
+   * 只有已经落地、没被冻结、也没正被拖着的方块会被推 ——
+   * 还在排队等音乐放出来的那些不该被摇出来。
+   * 力施加在中心偏一点的位置上，方块会自己翻滚，不用手写角速度。
+   */
+  function shove(x: number, y: number): void {
+    if (disposed || reduced.matches) return;
+    // 和 matter 内部的 gravityScale 对齐：force = mass × 0.001 × 加速度
+    const scale = 0.001;
+    bodies.forEach((body, index) => {
+      if (!dropped.has(index) || frozen.has(index) || drag?.index === index) return;
+      Sleeping.set(body, false);
+      Body.applyForce(
+        body,
+        { x: body.position.x + (index % 2 ? 4 : -4), y: body.position.y - 3 },
+        { x: x * body.mass * scale, y: y * body.mass * scale },
+      );
+    });
+    wake();
+  }
   function release(event?: Event) {
     if (!drag) return;
     Composite.remove(engine.world, drag.joint);
@@ -273,7 +297,7 @@ export function createIdentityPhysics(
   // 样式/字体就位后再量一次：脚本刚接手时元素尺寸可能还是错的（换语言最容易撞上），
   // 这一次会让 bounds() 发现尺寸对不上、重造本体 —— 位置不动，只是把尺寸补正。
   void document.fonts?.ready.then(() => { requestAnimationFrame(bounds); });
-  return { reveal, restore, markPlaced, snapshot,
+  return { reveal, restore, markPlaced, snapshot, shove,
     reset() { release(); bodies.forEach(b => Composite.remove(engine.world, b)); bodies.clear(); sizes.clear(); frozen.clear(); dropped.clear(); tags.forEach(el => { delete el.dataset.revealed; el.style.transform = ''; }); },
     dispose() { disposed = true; release(); window.clearTimeout(settleTimer); cancelAnimationFrame(frame); abort.abort(); observer.disconnect(); Engine.clear(engine); layer.remove(); }
   };

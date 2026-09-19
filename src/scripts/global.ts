@@ -16,6 +16,10 @@ export type SpaceGlobal = {
   theme?: ThemeManager;
   midi?: MidiBridge;
   piano?: PianoEngine;
+  /** "关于"这一族共用的钢琴引擎：About / 自我介绍 / 首页关于区跨页不断音（见 identity-audio.ts） */
+  identityPiano?: PianoEngine;
+  /** 上一次交棒：演奏排到了第几秒 + 什么时候交的 */
+  identityHandover?: { position: number; at: number };
   eggs?: EasterEggManager;
   minilab?: MiniLabController;
   windowKeysBound?: boolean;

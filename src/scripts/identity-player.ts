@@ -1,5 +1,13 @@
 import { navigate } from 'astro:transitions/client';
 import { createIdentityPhysics, type IdentityLayout } from './identity-physics';
+import { attachIdentityMotion } from './identity-motion';
+import {
+  HANDOVER_AHEAD,
+  handOverIdentityPiano,
+  identityPiano,
+  rampIdentityVolume,
+  takeIdentityHandover,
+} from './identity-audio';
 import {
   parseMidi,
   identityRevealPlan,
@@ -7,7 +15,6 @@ import {
   type MidiNote,
 } from "@/lib/identity-midi";
 import { IDENTITY_TRACK_SRC } from "@/lib/identity";
-import { PianoEngine } from "./piano";
 import { getGlobal } from "./global";
 import { savedPosition, savePosition, restartPosition } from "@/lib/live-timeline";
 import { takeLanguageSwap } from './lang';
@@ -92,8 +99,13 @@ export function initIdentity(): void {
     "[data-identity-volume]",
   )!;
   const tags = [...root.querySelectorAll<HTMLElement>("[data-identity-tag]")];
-  const piano = new PianoEngine(FIRST, LAST, 1.7);
-  piano.setVolume(Number(volume.value));
+  // 这架琴是 About / 自我介绍 / 首页关于区共用的：从别处接手时，声音已经在响了
+  const piano = identityPiano();
+  let handoverAt = takeIdentityHandover();
+  const adopted = handoverAt !== null;
+  let cancelVolumeRamp: () => void = () => {};
+  if (adopted) cancelVolumeRamp = rampIdentityVolume(piano, Number(volume.value), 600);
+  else piano.setVolume(Number(volume.value));
   const abort = new AbortController(),
     signal = abort.signal;
   let score: MidiScore, plan: ReturnType<typeof identityRevealPlan>;
@@ -124,6 +136,9 @@ export function initIdentity(): void {
     // 万一 router 还没就绪，退回一次普通跳转。
     void navigate(href).catch(() => window.location.assign(href));
   });
+  // 手机端独有的彩蛋：摇晃手机 → 这些标签跟着一块晃。
+  // 桌面、开了 reduced-motion、或传感器不可用时，这个函数直接返回空实现。
+  const detachMotion = attachIdentityMotion(root, (x, y) => physics.shove(x, y));
   // 落点记忆先摆出来当兜底：万一声音还没解锁，也不会是一片空地。
   // 换语言时地板可能挪了位置（英文内容更高），restore() 会按地板差值整体平移。
   physics.restore(readLayout());
@@ -257,17 +272,7 @@ export function initIdentity(): void {
       lastPositionSave = now;
     }
     // Schedule ahead on the audio clock; animation frames never trigger sound.
-    while (cursor < notes.length && notes[cursor].start < now + 0.15) {
-      const n = notes[cursor++];
-      if (n.end > now)
-        piano.scheduleNote(
-          n.midi,
-          n.velocity,
-          origin + Math.max(n.start, now),
-          origin + n.end,
-          Math.max(0, now - n.start),
-        );
-    }
+    schedule(0.15);
     if (loop === 0 && needsAnimation)
       plan.triggers.forEach((n, i) => {
         if (now >= n.start) reveal(i, n);
@@ -283,7 +288,30 @@ export function initIdentity(): void {
     draw();
     frame = requestAnimationFrame(render);
   }
-  function pause() {
+  /**
+   * 把接下来 ahead 秒内的音排进音频时钟。
+   * 平时 ahead 只有 0.15 秒；换页交棒时会用大得多的值先排一小段，
+   * 于是换页那几百毫秒里声音照样在走（见 identity-audio.ts 的 HANDOVER_AHEAD）。
+   */
+  function schedule(ahead: number) {
+    const now = time();
+    while (cursor < notes.length && notes[cursor].start < now + ahead) {
+      const n = notes[cursor++];
+      if (n.end > now)
+        piano.scheduleNote(
+          n.midi,
+          n.velocity,
+          origin + Math.max(n.start, now),
+          origin + n.end,
+          Math.max(0, now - n.start),
+        );
+    }
+  }
+  /**
+   * keepRinging = true 时不掐音：留给下一个"关于"页面接着响（无缝换页用）。
+   * 平时（暂停按钮、离开这一族页面）就是原来的行为，立刻收声。
+   */
+  function pause(keepRinging = false) {
     if (!playing) return;
     offset = time();
     savePosition(TIMELINE, offset);
@@ -292,7 +320,7 @@ export function initIdentity(): void {
     cancelAnimationFrame(frame);
     timer = 0;
     frame = 0;
-    piano.allNotesOff();
+    if (!keepRinging) piano.allNotesOff();
 
     music?.setDucked(false);
     label();
@@ -316,10 +344,18 @@ export function initIdentity(): void {
           : "Click or press a key to join the piano performance.";
         return;
       }
-      offset = savedPosition(TIMELINE, duration());
+      // 接手上一页的交棒点（换页不断音）；没有就按 live-timeline 的记忆继续
+      if (adopted && handoverAt !== null) {
+        offset = handoverAt;
+        handoverAt = null;
+        // 交棒时那一段已经由上一个页面排好并正在响，所以这里跳过它们、只排往后的音
+        cursor = notes.findIndex((n) => n.start >= offset);
+      } else {
+        offset = savedPosition(TIMELINE, duration());
+        cursor = notes.findIndex((n) => n.end > offset);
+      }
       root.dataset.loops = String(loop);
       music?.setDucked(true);
-      cursor = notes.findIndex((n) => n.end > offset);
       if (cursor < 0) cursor = 0;
       origin = piano.currentTime - offset;
       playing = true;
@@ -413,7 +449,11 @@ export function initIdentity(): void {
   progress.addEventListener("blur", finishSeek, { signal });
   volume.addEventListener(
     "input",
-    () => piano.setVolume(Number(volume.value)),
+    () => {
+      // 手动拖音量时先停掉"换页滑行"，否则两个值会互相打架
+      cancelVolumeRamp();
+      piano.setVolume(Number(volume.value));
+    },
     { signal },
   );
   document.addEventListener(
@@ -424,7 +464,7 @@ export function initIdentity(): void {
     },
     { signal },
   );
-  window.addEventListener("pagehide", pause, { signal });
+  window.addEventListener("pagehide", () => pause(), { signal });
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(canvas);
   const themeObserver = new MutationObserver(() => {
@@ -469,15 +509,24 @@ export function initIdentity(): void {
     });
   disposeCurrent = () => {
     disposed = true;
-    pause();
+    // 交棒：先把接下来这一小段排进音频时钟，再停下来（不掐音），
+    // 于是换页过程中声音是连续的；下一个页面从交棒位置接着往下排。
+    // 真的离开"关于"这一族页面时，app.ts 会调 releaseIdentityPiano() 收掉这架琴。
+    if (playing) {
+      schedule(HANDOVER_AHEAD);
+      pause(true);
+      handOverIdentityPiano(offset + HANDOVER_AHEAD);
+    }
+    cancelVolumeRamp();
     // 离开这一页之前把"此刻"的落点写下来（不是上一次静止时的旧快照）：
     // 换页时标签多半还躺着没睡，旧快照会缺几条，下次回到这一页就会整排重抛。
     writeLayout(physics.snapshot());
     abort.abort();
+    detachMotion();
     resizeObserver.disconnect();
     themeObserver.disconnect();
     physics.dispose();
-    piano.dispose();
+    // 不 dispose 钢琴：这架琴是三个"关于"页面共用的（见 identity-audio.ts）
     delete root.dataset.bound;
     setActiveCurrent = undefined;
   };

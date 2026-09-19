@@ -134,6 +134,8 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 真实 MIDI 键盘 | `src/scripts/midi.ts` | `MidiBridge`、`getMidiBridge()` | 事件 `midi:noteon` / `midi:noteoff` / `midi:change` |
 | 彩蛋（隐藏曲目） | `src/lib/easter-eggs.ts`、`src/lib/sequences.ts`、`src/scripts/easter-eggs.ts` | `EASTER_EGGS`、`HOLD_TO_ARM` / `isArmChord()`（入口和弦）、`createSequenceDetector()`、`createSequenceSession()`、`EasterEggManager`（`toggleHint()` / `holdNote()` / `releaseNote()`） | `[data-note]`（琴键）、事件 `minilab:note` / `minilab:release` / `egg:hint` / `egg:accept` / `egg:miss` |
 | About 身份实验场 | `src/components/IdentityStage.astro`、`src/scripts/identity-player.ts`、`identity-physics.ts`、`src/lib/identity.ts`、`identity-midi.ts` | `createIdentityPhysics()`（`reveal()` / `restore()` / `placeMissing()` / `snapshot()`，内部 `makeBody()` 管尺寸自愈）、`initIdentity()`、`disposeIdentity()`、`setIdentityActive()`、`identityRevealPlan()` | `[data-identity*]`、`[data-identity-tag][data-revealed]`、cookie `rest-note-identity-v2-<visit>` |
+| 手机摇晃彩蛋（标签跟着晃） | `src/scripts/identity-motion.ts`、`src/lib/shake.ts`、`src/scripts/identity-physics.ts`（`shove()`） | `attachIdentityMotion()`、`createShakeDetector()` | `[data-identity]`、`[data-identity-arena]`（申请 iOS 运动权限的手势落点）；传感器事件 `devicemotion` |
+| 夜曲跨页不断音（关于 ⇄ 关于我） | `src/scripts/identity-audio.ts`、`src/scripts/identity-player.ts`、`src/scripts/nocturne.ts`、`src/scripts/app.ts` | `identityPiano()`、`handOverIdentityPiano()` / `takeIdentityHandover()`、`releaseIdentityPiano()`、`rampIdentityVolume()`、`HANDOVER_AHEAD` | `getGlobal().identityPiano` / `.identityHandover`；无 DOM 钩子 |
 | 自我介绍页（第十个标签的去处） | `src/views/IntroPage.astro`、`src/pages/about/intro/index.astro`、`src/content/pages/intro.zh.md` / `intro.en.md`、`src/lib/pages.ts` | `getPage('intro', lang)`、`render(entry)`、`introRoutes` | `[data-identity-link]`（写在 About 页的标签上） |
 | 联系方式 / 复制 | `src/components/ContactTiles.astro`、`ContactPanel*.astro`、`src/scripts/contact.ts`、`src/lib/contact.ts` | `initContact()`、`CONTACT`、`isInteractive()` | `[data-contact]`、`[data-contact-row]`、`[data-contact-copy]` |
 | 系统提示 LCD | `src/components/SystemMessage.astro`、`src/scripts/system-message.ts` | `initSystemMessages()` | `[data-system-message]`、window 事件 `space:message` |
@@ -437,7 +439,7 @@ MiniLab 松开某个键
 
 ### 5.8 About：身份实验场
 
-**文件**：`src/components/IdentityStage.astro`、`src/scripts/identity-player.ts`、`src/scripts/identity-physics.ts`、`src/lib/identity.ts`、`src/lib/identity-midi.ts`
+**文件**：`src/components/IdentityStage.astro`、`src/scripts/identity-player.ts`、`src/scripts/identity-physics.ts`、`src/scripts/identity-motion.ts`（手机摇晃彩蛋）、`src/scripts/identity-audio.ts`（跨页共用的那架琴，见 §5.14）、`src/lib/identity.ts`、`src/lib/identity-midi.ts`、`src/lib/shake.ts`
 
 ```ts
 // identity-player.ts
@@ -451,9 +453,16 @@ createIdentityPhysics(root, tags, onSettled?, onActivate?): {
   restore(layout): number;         // 按 cookie 里的落点摆好（按地板差值整体平移），返回摆好几个
   markPlaced(): void;              // 把场上这些记成"已上场"并解除快照冻结（切语言用，见下）
   snapshot(): IdentityLayout;      // 此刻的文档像素落点 + 地板位置（离开页面前写进 cookie）
+  shove(x, y): void;               // 手机摇晃彩蛋：把设备加速度当一阵推力灌进场地
   reset(): void;                   // 清空身体与记忆（重新演奏按钮）
   dispose(): void;
 }
+
+// identity-motion.ts（手机端独有的彩蛋）
+attachIdentityMotion(root, shove): () => void;   // 返回注销函数
+
+// lib/shake.ts（纯逻辑，有单测）
+createShakeDetector({ threshold?, peaks?, windowMs?, quietMs? }): { push(magnitude, at?), reset(), peaks }
 
 // lib/identity.ts
 IDENTITY_TAGS / IDENTITY_TAG_IDS / tagLabel(tag, lang) / tagById(id)
@@ -466,6 +475,7 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
 ```
 
 - 标签的入场不是 `scale(0)→scale(1)`，而是被"弹出来"的物理动画：ejection → flight（浅抛物线 + 轻微旋转）→ landing → settle。动画参数在 `IDENTITY_MOTION`。
+- **手机端独有的彩蛋：摇晃手机，场上的标签跟着一块晃。** `identity-motion.ts` 把 `devicemotion` 接到 `lib/shake.ts` 的摇晃识别上，识别成功后打开一段 4.2 秒的"跟着晃"时间窗（窗内继续晃会一直续上）：窗里每次采样都把设备加速度换算成一场推力交给 `physics.shove(x, y)`（力施加在中心偏一点的位置上，方块会自己翻滚）。三条边界写在文件头：**只有手机端**（`(pointer: coarse)` + 有 `DeviceMotionEvent`）、**只有 About 这一块在屏幕上时才听传感器**（IntersectionObserver，否则会在看不见的地方把标签甩乱、还费电）、**开了 reduced-motion 就完全不挂**。iOS 只有用户手势里才能申请运动权限，所以不主动弹窗：等用户第一次碰"关于"这一块（标签容器或身份区）时才 `requestPermission()`，拒绝就当作没有这个彩蛋。阈值与推力都在 `identity-motion.ts` 顶部（`GAIN` / `MAX_ACCEL` / `MIN_ACCEL`）与 `lib/shake.ts` 的默认值里。
 - 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数，cookie 名 `rest-note-identity-v3-<visit>`，visit id 每次会话一个；`v3` 是落点格式版本，见下）。这份记忆**只当"先摆出来"的兜底**（万一声音还没解锁，页面也不会是一片空地）：`physics.restore()` 之后 `needsAnimation` 仍然是 `true`，音乐一响 `reveal()` 就把已有的身体重新抛回场上再落一次 —— 每次回到这一页，方块都是活的（本人报过"返回之后方块的物理效果就没了"）。`reset()`（重新演奏按钮）会连内部的 `dropped` 一起清空、并 `clearLayout()`，所以下一轮整排重抛。
 - **落点存的是文档像素坐标 + 地板位置**（`{ floor, items: [{ x, y, angle }] }`，`x/y/angle` = 本体中心 + 角度），不是归一化比例。曾经存过比例（`(x-left)/(right-left)`、`(floor-y)/floor`），但两种语言的页面高度差几像素，比例还原时会被整体缩放，实测偏 20-80px —— 本人看到的就是"切语言之后标签位移"。`floor` 是写下落点时 `.identity__landing` 下沿的文档位置：换语言/换宽度会让整块区域上下移动（实测首页那串拼接页切到英文时下沉 **115px**），`restore()` 会先算 `shift = floor_now - layout.floor` 再整体平移，标签才不会漂出自己那一块。改格式记得同时改 `LAYOUT_VERSION`（cookie 名字里那个 `v3`），否则新代码会把旧格式的值当新格式读。
 - `bounds()` 与 `restore()` 的夹取只做"别出视口、别陷进地板"（`x ∈ [8, width-8]`、`y ∈ [8, floor-4]`），**不按方块自己的尺寸算**。按尺寸算会出事：脚本刚接手时量到的元素尺寸常常是错的（样式还没应用，实测 46px 的标签量成 134px），一夹就把方块顶歪 44px；按舞台宽度夹也会把更宽的英文标签整排推走（实测偏 75px）。另外 `bounds()` 里有**尺寸自愈**：元素尺寸和造本体时记下的不一样，就用同一个中心重造本体（位置不动，只补尺寸），`document.fonts.ready` 之后还会再量一次。
@@ -570,7 +580,13 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 头图来自 `src/images/Gensokyo.png`，用 `astro:assets` 的 `<Image>`（自动出 webp + srcset，2.6MB → 33/70/142/273kB 四档）。`src/images/` 的图不要手写 `<img>`，也不要拷进 `public/`。
 - 阅读栏宽度与文章页一致：`max-width: calc(var(--measure) + var(--gutter) * 2)`；正文用 `.prose` 纸面，页脚一个"回到关于"链接。
 - **左上角有一个返回按钮**（中文只写`返回`，英文写 `Back to About`；中文里"关于"两个字是多余的，英文语法需要宾语，所以只改中文）：`a.letter-page__back` 和页脚那个"回到关于"都指向 **`localizePath('/', lang) + '#about'`**，也就是首页那串拼接页里的关于区，**不是独立的 `/about/` 页**。本人要求：从这一页回去要落回"整串页面"里的关于区（他进这一页多半是从那里点的第十个标签）。实测点返回后：URL `/#about`（英文 `/en/#about`）、关于区停在屏幕上 78、`body > [data-identity-arena]` 存在、十个标签都在且能拖。
-- **背景音乐：这一页接着放 About 页的夜曲**（不放主题曲）。`src/scripts/nocturne.ts` 用 `PianoEngine` + `parseMidi()` 复刻 About 的演奏，和 `identity-player.ts` 共用 `live-timeline` 的同一个 id（`identity:nocturne`），两边互相"接着放"，不是各弹各的；音量用 `IDENTITY_INTRO_VOLUME`（0.7，比演奏模式的 0.85 克制），淡入用 `AUDIO.fadeInMs`。
+- **背景音乐：这一页接着放 About 页的夜曲，而且是"不断音"的接法**（不放主题曲）。`src/scripts/nocturne.ts` 用 `PianoEngine` + `parseMidi()` 复刻 About 的演奏，和 `identity-player.ts` 共用 `live-timeline` 的同一个 id（`identity:nocturne`）；音量用 `IDENTITY_INTRO_VOLUME`（0.7，比演奏模式的 0.85 克制）。
+- **跨页共用同一架琴（`src/scripts/identity-audio.ts`）—— "关于 ⇄ 关于我"听起来是一口气弹下来的。** 以前两页各自 `new PianoEngine()`：换页时旧页面 `dispose()`（`allNotesOff` + 关掉 AudioContext）、新页面重新解码采样、再从 0 淡入，听感上就是"停一下再从头接上"。现在引擎挂在 `getGlobal().identityPiano` 上（About / 自我介绍 / 首页关于区共用同一个实例）：
+  1. **离开时交棒**：先把接下来 `HANDOVER_AHEAD`（0.45 秒）的音排进音频时钟，再 `pause(keepRinging = true)`（**不** `allNotesOff`），并 `handOverIdentityPiano(offset + HANDOVER_AHEAD)` —— 换页那几百毫秒里声音照常在走；
+  2. **接手方** `takeIdentityHandover()` 拿到"声音已经排到第几秒"，从那里继续排（`cursor` 取 `start >= offset` 的第一个音，跳过上一页已经排过的那段，不会重复触发）；拿不到交棒（直接打开这一页）就按原来的 `live-timeline` 记忆继续；
+  3. **音量不归零**：`rampIdentityVolume()` 从当前音量滑到这一页的目标音量（About 用滑杆值、自我介绍用 `IDENTITY_INTRO_VOLUME`，滑 600 / 700ms）；手动拖滑杆会取消滑行；
+  4. **只在真的离开这一族时才收**：下一张页面里没有 `[data-identity]` / `[data-nocturne]` 时，`app.ts` 在 `astro:before-swap` 里调 `releaseIdentityPiano()` 停声并关掉 AudioContext。
+  实测（Playwright + 真实 AudioContext，见 §10 那条）：`/about/` → `/about/intro/` → 返回 `/#about`，`AudioContext` 始终是同一个实例（新建计数全程 0）、采样不重新解码、音量在 0.85 ↔ 0.7 之间滑行（从不归零）、演奏位置接着走（About 的 3.5 秒进到自我介绍的 5.5 秒），去 `/blog/` 时这架琴被释放。
   - `initNocturne()` 在 boot 里调用，`disposeNocturne()` 在 `astro:before-swap` 里调用；缺采样或缺用户手势时只把状态标成 `waiting`，等下一次点击再开始。
   - 切到后台会暂停、切回来接着弹（与 About 页一致）；主题曲的让位由 `app.ts` 的 `setAboutActive(true)` 负责（见 §5.5）。
 - 状态钩子：`[data-nocturne-ready]`（乐谱解析完成）、`[data-nocturne-state="waiting|playing|paused"]` —— 排查"这一页怎么没声音"先看这两个。
@@ -690,6 +706,23 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-19 · 夜曲跨页不断音：关于 ⇄ 关于我 用同一架琴接棒
+
+- 需求：本人发现从 About 页点进自我介绍页时，夜曲会停一下再从头接上；要求做成无缝切换。
+- 根因：两页各自 `new PianoEngine()`，换页时旧页面 `dispose()`（`allNotesOff` + 关掉 AudioContext）、新页面重新解码采样、再从 0 淡入 —— 中间必然是"断一下"。
+- 文件：**新增** `src/scripts/identity-audio.ts`；改 `src/scripts/identity-player.ts`、`src/scripts/nocturne.ts`、`src/scripts/app.ts`、`src/scripts/global.ts`（`identityPiano` / `identityHandover`）、`src/scripts/piano.ts`（新增 `getVolume()`）、`DEVELOPMENT.md`。
+- 函数：`identityPiano()`（三处共用的同一个引擎，挂 `getGlobal()`）、`handOverIdentityPiano(position)` / `takeIdentityHandover()`（交棒点，含"这一跳太慢就跳过超出部分"）、`releaseIdentityPiano()`、`rampIdentityVolume(piano, target, ms)`；两页的 `pause(keepRinging = true)` 不掐音，`schedule(ahead)` 支持交棒时按 `HANDOVER_AHEAD`（0.45s）预排一段。
+- 钩子/数据：无新增 DOM 钩子 / storage key / 自定义事件；新增全局字段 `getGlobal().identityPiano`、`.identityHandover`。
+- 验证：`npm test` 79/79；`npm run check` 0 错误 0 警告；`npm run build` 17 页。Playwright 实测（真实 AudioContext，1280×900）：`/about/` → `/about/intro/` → 返回 `/#about`，`AudioContext` 全程同一个实例（用包装过的 `AudioContext` 计数：新建 0 次）、音频时钟持续前进、音量 0.85 ↔ 0.7 滑行且从不为 0、自我介绍页 `data-nocturne-at` 从 5.5 秒接着走（不是 0），去 `/blog/` 时 `identityPiano` 已被释放，全程 0 console error。
+
+### 2026-09-19 · 手机端独有彩蛋：摇晃手机，About 的标签跟着一块晃
+
+- 需求：本人要求加一个手机端独有的彩蛋 —— 摇晃手机时"关于"页那些标签跟着一起晃（标签本来就有 matter-js 物理，直接接上即可）。
+- 文件：**新增** `src/lib/shake.ts`（纯逻辑摇晃识别）、`src/scripts/identity-motion.ts`；改 `src/scripts/identity-physics.ts`（新增 `shove(x, y)`）、`src/scripts/identity-player.ts`（挂载 / 注销）、`tests/shake.test.mjs`、`DEVELOPMENT.md`。
+- 逻辑：`devicemotion` → `createShakeDetector()`（默认：1.1 秒窗口里攒够 4 次 ≥13 m/s² 的强脉冲才算摇晃；单次颠簸、走路不会触发）→ 打开 4.2 秒的"跟着晃"时间窗（继续晃会续上）→ 窗内每次采样把设备加速度换算成推力交给 `physics.shove()`（力施加在中心偏一点的位置，方块自己翻滚；只有已落地、未冻结、没在拖的方块会被推）。三条边界：只有粗指针（手机）+ 有 `DeviceMotionEvent` 才挂；只有 `[data-identity]` 滚进视口才听传感器（IntersectionObserver，省电且不会在看不见的地方把标签甩乱）；`prefers-reduced-motion` 直接不挂。iOS 的 `DeviceMotionEvent.requestPermission()` 必须在用户手势里调，所以不主动弹窗：第一次碰标签容器或身份区时才申请一次，拒绝就当作没有这个彩蛋。
+- 钩子/数据：无新增 DOM 钩子 / storage key / 自定义事件（只用既有的 `[data-identity]`、`[data-identity-arena]` 与传感器事件）。
+- 验证：`npm test` 79/79（新增 `tests/shake.test.mjs` 8 条：单次颠簸不触发、安静采样不触发、窗口内脉冲够了才触发、超过窗口不累计、触发后有安静期、NaN/Infinity 不计入、reset 清空、阈值可配）；`npm run check` 0 错误；Playwright 双场景实测（合成 `devicemotion`，只统计"基线上已经睡稳"的标签，按标签 id 比对）：手机模拟（390×844、`hasTouch`、`(pointer: coarse)` 为真）轻晃位移 **0.0px**、猛晃位移 **22.4px**；桌面（`(pointer: coarse)` 为假）同样的猛晃 **0.0px** —— 手机端独有这条门确实生效，全程 0 console error。
 
 ### 2026-09-19 · 手机端也能进彩蛋提示模式：同时按住 D4 + F#4 一秒
 

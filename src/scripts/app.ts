@@ -8,6 +8,7 @@ import { initMusicUI } from './music-ui';
 import { initContact } from './contact';
 import { initIdentity, disposeIdentity, setIdentityActive } from './identity-player';
 import { initNocturne, disposeNocturne } from './nocturne';
+import { releaseIdentityPiano } from './identity-audio';
 import { initSystemMessages } from './system-message';
 import { initTheme } from './theme';
 import { initThemeSwitcher } from './theme-switch';
@@ -119,6 +120,11 @@ document.addEventListener('astro:before-swap', (event) => {
   disposeNocturne();
   getGlobal().minilab?.dispose();
   getGlobal().minilab = undefined;
+
+  // 夜曲的跨页交棒：下一张页面仍然是"关于"这一族（About / 自我介绍 / 首页关于区）时，
+  // 这架琴就留着 —— 已经排进音频时钟的音继续响，新页面从交棒位置接着往下排，
+  // 于是"关于 → 关于我"听起来是一口气弹下来的。去别的页面才真的收掉它。
+  if (!event.newDocument.querySelector('[data-identity], [data-nocturne]')) releaseIdentityPiano();
 
   // 换页的瞬间就把主题写进即将替换上来的那份文档。不然 <html data-theme>
   // 会被新文档的属性覆盖掉，主题在换页时退回默认值。

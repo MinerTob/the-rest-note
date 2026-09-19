@@ -2,7 +2,13 @@ import { parseMidi, type MidiNote, type MidiScore } from '@/lib/identity-midi';
 import { IDENTITY_INTRO_VOLUME, IDENTITY_TRACK_SRC } from '@/lib/identity';
 import { AUDIO } from '@/lib/music';
 import { savedPosition, savePosition } from '@/lib/live-timeline';
-import { PianoEngine } from './piano';
+import {
+  HANDOVER_AHEAD,
+  handOverIdentityPiano,
+  identityPiano,
+  rampIdentityVolume,
+  takeIdentityHandover,
+} from './identity-audio';
 
 /**
  * 自我介绍页（/about/intro/）的背景演奏：把 About 页那首夜曲接着放下去。
@@ -20,8 +26,6 @@ import { PianoEngine } from './piano';
 const TIMELINE = 'identity:nocturne';
 const FIRST = 21;
 const LAST = 108;
-/** 与 About 页演奏用同一个音量倍数，两页听起来是同一架琴 */
-const OUTPUT_GAIN = 1.7;
 /** 提前多少秒把音符排进音频时钟（太短会漏音，太长会影响随后切换） */
 const LOOKAHEAD = 0.15;
 const TICK_MS = 25;
@@ -40,7 +44,10 @@ export function initNocturne(): void {
   disposeNocturne();
   root.dataset.bound = 'true';
 
-  const piano = new PianoEngine(FIRST, LAST, OUTPUT_GAIN);
+  // 与 About 页、首页关于区共用同一架琴：从那边点进来时，声音一秒都不会停
+  const piano = identityPiano();
+  let handoverAt = takeIdentityHandover();
+  const adopted = handoverAt !== null;
   const abort = new AbortController();
   const signal = abort.signal;
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -54,7 +61,7 @@ export function initNocturne(): void {
   let cursor = 0;
   let timer = 0;
   let lastSave = 0;
-  let fadeFrame = 0;
+  let cancelVolumeRamp: () => void = () => {};
 
   const duration = () => (score ? score.duration + 0.8 : 0);
   const time = () => (playing ? Math.max(0, piano.currentTime - origin) : offset);
@@ -80,8 +87,16 @@ export function initNocturne(): void {
       // 便于排查"有没有接着上一页放"：把当前秒数写在页面上（与 identity-player 的 data-* 读数同一个习惯）
       root.dataset.nocturneAt = now.toFixed(1);
     }
-    // 只往音频时钟里排；动画帧不负责出声（和 identity-player.ts 同一条规矩）
-    while (cursor < notes.length && notes[cursor].start < now + LOOKAHEAD) {
+    schedule(LOOKAHEAD);
+  }
+
+  /**
+   * 只往音频时钟里排；动画帧不负责出声（和 identity-player.ts 同一条规矩）。
+   * 换页交棒时 ahead 会被换成 HANDOVER_AHEAD，先把换页那几百毫秒排满。
+   */
+  function schedule(ahead: number): void {
+    const now = time();
+    while (cursor < notes.length && notes[cursor].start < now + ahead) {
       const note = notes[cursor++];
       if (note.end > now)
         piano.scheduleNote(
@@ -100,23 +115,25 @@ export function initNocturne(): void {
       piano.setVolume(target);
       return;
     }
-    const started = performance.now();
-    const step = (now: number) => {
-      const progress = Math.min(1, (now - started) / AUDIO.fadeInMs);
-      piano.setVolume(target * progress);
-      if (progress < 1) fadeFrame = requestAnimationFrame(step);
-    };
-    fadeFrame = requestAnimationFrame(step);
+    // 从 About 页接手时声音正在响：从**当前**音量滑到这一页的目标音量。
+    // 先归零再淡入那一下，就是"听起来断了一截"的来源。
+    if (adopted) {
+      cancelVolumeRamp = rampIdentityVolume(piano, target, 700);
+      return;
+    }
+    piano.setVolume(0);
+    cancelVolumeRamp = rampIdentityVolume(piano, target, AUDIO.fadeInMs);
   }
 
-  function pause(): void {
+  /** keepRinging = true 时不掐音：留给下一个"关于"页面接着响（无缝换页用） */
+  function pause(keepRinging = false): void {
     if (!playing) return;
     savePosition(TIMELINE, time());
     playing = false;
     setState('paused');
     window.clearInterval(timer);
     timer = 0;
-    piano.allNotesOff();
+    if (!keepRinging) piano.allNotesOff();
   }
 
   async function start(): Promise<void> {
@@ -131,14 +148,20 @@ export function initNocturne(): void {
         setState('waiting');
         return;
       }
-      offset = savedPosition(TIMELINE, duration());
-      cursor = Math.max(0, notes.findIndex((note) => note.end > offset));
+      if (adopted && handoverAt !== null) {
+        // 接手上一页：那一段已经排好、正在响，所以只排往后的音
+        offset = handoverAt;
+        handoverAt = null;
+        cursor = Math.max(0, notes.findIndex((note) => note.start >= offset));
+      } else {
+        offset = savedPosition(TIMELINE, duration());
+        cursor = Math.max(0, notes.findIndex((note) => note.end > offset));
+      }
       origin = piano.currentTime - offset;
       playing = true;
       setState('playing');
       lastSave = offset;
       root.dataset.nocturneAt = offset.toFixed(1);
-      piano.setVolume(0);
       fadeIn();
       timer = window.setInterval(tick, TICK_MS);
     } finally {
@@ -154,7 +177,7 @@ export function initNocturne(): void {
     if (document.hidden) pause();
     else void start();
   }, { signal });
-  window.addEventListener('pagehide', pause, { signal });
+  window.addEventListener('pagehide', () => pause(), { signal });
 
   void fetch(IDENTITY_TRACK_SRC, { signal })
     .then((response) => {
@@ -174,10 +197,16 @@ export function initNocturne(): void {
 
   disposeCurrent = () => {
     disposed = true;
-    pause();
+    // 交棒：先排好接下来这一小段再停（不掐音），声音在换页期间不断
+    if (playing) {
+      schedule(HANDOVER_AHEAD);
+      const at = time();
+      pause(true);
+      handOverIdentityPiano(at + HANDOVER_AHEAD);
+    }
     abort.abort();
-    cancelAnimationFrame(fadeFrame);
-    piano.dispose();
+    cancelVolumeRamp();
+    // 不 dispose 钢琴：这架琴是三个"关于"页面共用的（见 identity-audio.ts）
     delete root.dataset.bound;
   };
 }
