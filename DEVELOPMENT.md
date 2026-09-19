@@ -476,7 +476,12 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
 
 - 标签的入场不是 `scale(0)→scale(1)`，而是被"弹出来"的物理动画：ejection → flight（浅抛物线 + 轻微旋转）→ landing → settle。动画参数在 `IDENTITY_MOTION`。
 - **手机端独有的彩蛋：摇晃手机，场上的标签跟着一块晃。** `identity-motion.ts` 把 `devicemotion` 接到 `lib/shake.ts` 的摇晃识别上（默认：1.1 秒窗口里攒够 **3** 次 ≥ **11** m/s² 的强脉冲），识别成功后打开一段 4.2 秒的"跟着晃"时间窗（窗内继续晃会一直续上）：窗里每次采样都把设备加速度换算成一场推力交给 `physics.shove(x, y)`（力施加在中心偏一点的位置上，方块会自己翻滚）。三条边界写在文件头：**只有手机端**（`(pointer: coarse)` + 有 `DeviceMotionEvent`）、**只有 About 这一块在屏幕上时才听传感器**（IntersectionObserver，否则会在看不见的地方把标签甩乱、还费电）、**开了 reduced-motion 就完全不挂**。阈值与推力在 `identity-motion.ts` 顶部（`GAIN` / `MAX_ACCEL` / `MIN_ACCEL`）与 `lib/shake.ts` 的默认值里。
-- **iOS 的运动与方向权限在入场页那次点击里申请**（`requestMotionAccess()`，被 `entry-gate.ts` 的"进入空间"处理器调用）：iOS 只允许在用户手势里调 `DeviceMotionEvent.requestPermission()`，而"进入"是全站人人都要做的那一次点击 —— 同意之后这一趟里摇晃彩蛋随手就能用。桌面 / 不支持 / 已经批过的场合静默返回（`getGlobal().motionAccess` 记住结果），不影响入场。**只把权限挂在"碰标签"上是不够的**：本人 iPhone 实测只是摇了手机、没先碰标签，权限从没被申请过，传感器一个事件都收不到，看起来就是"摇了没反应"。入场那次之外，还留了一条兜底：这一块在屏幕上时用户点 / 滑页面任何地方也会问一次（`document` 捕获阶段的 `pointerdown`，只触发一次）。
+- **iOS 的运动与方向权限在入场页那次点击里申请**（`requestMotionAccess()`，被 `entry-gate.ts` 的"进入空间"处理器调用）：iOS 只允许在用户手势里调 `DeviceMotionEvent.requestPermission()`，而"进入"是全站人人都要做的那一次点击 —— 同意之后这一趟里摇晃彩蛋随手就能用。**只把权限挂在"碰标签"上是不够的**：本人 iPhone 实测只是摇了手机、没先碰标签，权限从没被申请过，传感器一个事件都收不到，看起来就是"摇了没反应"。
+  - 状态是**三态**，记在 `getGlobal().motionAccess`：`true` 批过、`false` 明确拒绝过、`undefined` 还没问过。拒绝过的不再问 —— iOS 本来也不会再弹，反复调用只会让日志变脏。
+  - **只问一次**：`askOnce()` 的结果缓存在模块内的 `pendingRequest` 上，所以"入场点击"和"About 区兜底"同一次点击里各调一次时仍然只发一个请求（实测：入场点击只调用 1 次 `requestPermission`）。iOS 上重复调用是危险的：第二次常常立刻返回 `denied`。
+  - **识别手持设备用两条判据**（`isHandheld()`）：`(pointer: coarse)`，或者 `maxTouchPoints > 1` 且 UA 含 `iPad|iPhone|iPod|Macintosh` —— iPhone 开"请求桌面网站"后 UA 会变成 Mac，只看 media query 会漏掉这种机器。桌面上（两条都不满足）直接记 `false`、不打扰。
+  - **被拒绝时会说一句实话**：`announceMotionOffline()` 通过 `space:message` 在 LCD 上打一行 `MOTION OFFLINE / motion & orientation access denied`（只在页面真有 `[data-identity]` 时）。这是设备读数，和 MiniLab 的 `NO DEVICE` 同一种语气，也是排查"为什么摇不动"的第一现场。
+  - 兜底入口：这一块在屏幕上时，用户点 / 滑页面任何地方也会走同一个 `requestMotionAccess()`（`document` 捕获阶段的 `pointerdown`，只触发一次）。
 - 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数，cookie 名 `rest-note-identity-v3-<visit>`，visit id 每次会话一个；`v3` 是落点格式版本，见下）。这份记忆**只当"先摆出来"的兜底**（万一声音还没解锁，页面也不会是一片空地）：`physics.restore()` 之后 `needsAnimation` 仍然是 `true`，音乐一响 `reveal()` 就把已有的身体重新抛回场上再落一次 —— 每次回到这一页，方块都是活的（本人报过"返回之后方块的物理效果就没了"）。`reset()`（重新演奏按钮）会连内部的 `dropped` 一起清空、并 `clearLayout()`，所以下一轮整排重抛。
 - **落点存的是文档像素坐标 + 地板位置**（`{ floor, items: [{ x, y, angle }] }`，`x/y/angle` = 本体中心 + 角度），不是归一化比例。曾经存过比例（`(x-left)/(right-left)`、`(floor-y)/floor`），但两种语言的页面高度差几像素，比例还原时会被整体缩放，实测偏 20-80px —— 本人看到的就是"切语言之后标签位移"。`floor` 是写下落点时 `.identity__landing` 下沿的文档位置：换语言/换宽度会让整块区域上下移动（实测首页那串拼接页切到英文时下沉 **115px**），`restore()` 会先算 `shift = floor_now - layout.floor` 再整体平移，标签才不会漂出自己那一块。改格式记得同时改 `LAYOUT_VERSION`（cookie 名字里那个 `v3`），否则新代码会把旧格式的值当新格式读。
 - `bounds()` 与 `restore()` 的夹取只做"别出视口、别陷进地板"（`x ∈ [8, width-8]`、`y ∈ [8, floor-4]`），**不按方块自己的尺寸算**。按尺寸算会出事：脚本刚接手时量到的元素尺寸常常是错的（样式还没应用，实测 46px 的标签量成 134px），一夹就把方块顶歪 44px；按舞台宽度夹也会把更宽的英文标签整排推走（实测偏 75px）。另外 `bounds()` 里有**尺寸自愈**：元素尺寸和造本体时记下的不一样，就用同一个中心重造本体（位置不动，只补尺寸），`document.fonts.ready` 之后还会再量一次。
@@ -708,6 +713,15 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-19 · 运动权限：单飞、手持设备判定放宽、被拒时给一句实话
+
+- 需求：本人反馈"不应该呀，是不是接口没用对，他根本就没有询问"（指 iOS 那个「某某网站想要访问动作与方向」）。
+- 先查证：在线上把 `DeviceMotionEvent.requestPermission` **包一层计数**（不是替身实现，改的是真调用）后点"进入空间"，确认产品代码确实调到了它 —— 但**同一次点击里调了两次**（入场页一次 + About 区兜底一次）。iOS 上重复调用是危险的：第二次常常立刻返回 `denied`；而且只要用户点过一次"不允许"，Safari 会一直记住、此后静默拒绝、再也不弹。
+- 文件：`src/scripts/identity-motion.ts`、`DEVELOPMENT.md`。
+- 函数：新增模块内 `askOnce()`（并发共享同一个 Promise）与 `isHandheld()`、`announceMotionOffline()`；`requestMotionAccess()` 改成三态 + 单飞，兜底入口也统一走它。
+- 钩子/数据：`getGlobal().motionAccess` 语义明确为三态（`true` 批过 / `false` 拒绝过 / `undefined` 没问过）；无新增 DOM 钩子、storage key、自定义事件。被拒时复用已有的 `space:message`（LCD）说 `MOTION OFFLINE`。
+- 验证：`npm run check` 0 错误 0 警告 0 提示；`npm test` 83/83。线上实测（包一层计数）：改动前入场点击 = 2 次调用，改动后 = **1 次**；桌面（`(pointer: coarse)` 为假且 UA 不是 Apple 手持）直接记 `false`、不调用；`requestPermission` 在 Chrome 上同步返回 `granted`（不会打扰桌面用户）。
 
 ### 2026-09-19 · 修两处真机反馈：换页音乐向前跳 0.45 秒 + iPhone 摇了没反应
 
