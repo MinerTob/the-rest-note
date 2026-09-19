@@ -121,11 +121,6 @@ export class PianoEngine extends EventTarget {
     return this.state;
   }
 
-  /** 排查用：AudioContext 的原始状态（`suspended` / `interrupted` / `running` / `none`） */
-  audioState(): string {
-    return this.ctx?.state ?? 'none';
-  }
-
   /** 已解码的采样数 / 需要的总数，用于显示加载进度 */
   getLoadedRatio(): number {
     const wanted = this.requiredSamples.length || 1;

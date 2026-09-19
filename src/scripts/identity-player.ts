@@ -390,12 +390,9 @@ export function initIdentity(): void {
       if (!piano.isRunning) {
         label();
         root.dataset.state = "waiting";
-        // 排查用：把 AudioContext 的原始状态写出来（iOS 会有 suspended / interrupted 之分）
-        const ctxState = piano.audioState();
-        root.dataset.audioState = ctxState;
         status.textContent = zh
-          ? `音频未解锁（${ctxState}）：点击或按键，即可接入钢琴演奏。`
-          : `Audio locked (${ctxState}): click or press a key to join.`;
+          ? "点击或按键，即可接入钢琴演奏。"
+          : "Click or press a key to join the piano performance.";
         return;
       }
       // 接手上一页的交棒点（换页不断音）；没有就按 live-timeline 的记忆继续
@@ -569,21 +566,16 @@ export function initIdentity(): void {
         draw();
         if (sceneActive) void start();
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         if (disposed || signal.aborted) return;
-        // 排查用：把失败的类型与第几次尝试写出来（iOS 上常见 TypeError: Load failed / AbortError）
-        const detail = error instanceof Error ? error.name : String(error);
-        root.dataset.scoreError = `${detail} x${scoreAttempts}`;
         if (scoreAttempts < 3) {
-          status.textContent = zh
-            ? `乐谱加载中…（${detail} ×${scoreAttempts}）`
-            : `Loading the score… (${detail} x${scoreAttempts})`;
+          status.textContent = zh ? "乐谱加载中…" : "Loading the score…";
           window.setTimeout(loadScore, 1200 * scoreAttempts);
           return;
         }
         status.textContent = zh
-          ? `乐谱读取失败：${detail} ×${scoreAttempts}`
-          : `Score failed: ${detail} x${scoreAttempts}`;
+          ? "乐谱读取失败，请刷新重试。"
+          : "The score could not load. Please reload.";
         play.textContent = zh ? "无法播放" : "Unavailable";
       });
   };

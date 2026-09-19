@@ -723,6 +723,13 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 
 ## 10. 功能日志（规定动作）
 
+### 2026-09-19 · 撤掉音频/乐谱的调试读数（功能已全部正常）
+
+- 需求：本人确认"全正常了"，要求**只**撤掉调试信息，其它一律不动。
+- 文件：`src/scripts/identity-player.ts`（状态文案恢复为 `点击或按键，即可接入钢琴演奏。` / `乐谱加载中…` / `乐谱读取失败，请刷新重试。`，去掉 `data-audio-state` / `data-score-error`）、`src/scripts/piano.ts`（去掉只为调试加的 `audioState()`）、`DEVELOPMENT.md`。
+- 保留（这次没动）：乐谱失败自动重试两次、`data-bound` 放到上下文检查之后、采样"没彻底失败就开始弹"、解锁音频每个手势重试直到真的在跑、`state !== 'running'` 就 `resume()`（含 iOS 的 `interrupted`）、合成器兜底、音符加载条、主题曲后台预热。
+- 验证：`npm test` 88/88；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页；`git diff` 确认相对调试那一版只改了上面这几行。
+
 ### 2026-09-19 · "文件都下好了，点播放还是不出声，刷新一下才行"
 
 - 需求：本人反馈音频文件已经下载完，但**点播放键不播、滑到关于区也不播**，刷新页面之后再点就能播 —— 明确说这不是他想要的行为。
