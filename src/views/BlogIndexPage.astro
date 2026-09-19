@@ -33,6 +33,23 @@ const groups = posts.reduce<{ year: number; posts: typeof posts }[]>((accumulato
   }
   return accumulator;
 }, []);
+
+/**
+ * 年份下面再按月份分一层（带篇数），年份本身是锚点：`/blog/#2026` 能直接跳进那一年。
+ * 借的是 Dejavu's Blog 那种"年份 → 月份 → 条目"的三层结构；文章越堆越多时，
+ * 这层几乎不增加视觉重量，但滚动时眼睛有落脚点（见 §10）。
+ */
+const monthFormat = new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', { month: 'short' });
+const months = groups.map((group) => {
+  const byMonth = group.posts.reduce<{ month: number; posts: typeof posts }[]>((accumulator, post) => {
+    const month = post.data.pubDate.getMonth();
+    const last = accumulator[accumulator.length - 1];
+    if (last && last.month === month) last.posts.push(post);
+    else accumulator.push({ month, posts: [post] });
+    return accumulator;
+  }, []);
+  return { year: group.year, count: group.posts.length, byMonth };
+});
 ---
 
 <Layout
@@ -68,14 +85,29 @@ const groups = posts.reduce<{ year: number; posts: typeof posts }[]>((accumulato
 
     {posts.length > 0 ? (
       <div class="archive rise rise--2">
-        {groups.map((group) => (
-          <section class="archive__group">
-            <p class="archive__year num">{group.year}</p>
-            <ul class="notelist">
-              {group.posts.map((post) => (
-                <NoteRow post={post} lang={lang} />
+        {months.map((group) => (
+          <section class="archive__group" id={String(group.year)}>
+            <p class="archive__year num">
+              <a class="archive__yearLink" href={`#${group.year}`}>
+                {group.year}
+                <span class="archive__count num">{group.count}</span>
+              </a>
+            </p>
+            <div class="archive__months">
+              {group.byMonth.map((month) => (
+                <div class="archive__month">
+                  <p class="archive__monthLabel num">
+                    {monthFormat.format(new Date(group.year, month.month, 1))}
+                    <span class="archive__count num">{month.posts.length}</span>
+                  </p>
+                  <ul class="notelist">
+                    {month.posts.map((post) => (
+                      <NoteRow post={post} lang={lang} />
+                    ))}
+                  </ul>
+                </div>
               ))}
-            </ul>
+            </div>
           </section>
         ))}
       </div>
@@ -138,6 +170,8 @@ const groups = posts.reduce<{ year: number; posts: typeof posts }[]>((accumulato
     display: grid;
     grid-template-columns: 68px minmax(0, 1fr);
     gap: 20px;
+    /* 年份锚点：顶栏是 sticky 的，跳过来时别被它盖住 */
+    scroll-margin-top: calc(var(--nav-h) + 16px);
   }
 
   .archive__year {
@@ -145,6 +179,52 @@ const groups = posts.reduce<{ year: number; posts: typeof posts }[]>((accumulato
     padding-top: 14px;
     font-size: var(--fs-2xs);
     color: var(--ink-4);
+  }
+
+  /* 年份本身可点（就是它自己的锚点），所以数字用主色、带下划线提示 */
+  .archive__yearLink {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    text-decoration: none;
+    color: var(--ink-3);
+    transition: color var(--dur-1) var(--ease);
+  }
+
+  .archive__yearLink:hover {
+    color: var(--accent-2);
+  }
+
+  /* 年份 / 月份的篇数：比正文小一号、更淡，只当读数 */
+  .archive__count {
+    font-size: 0.92em;
+    color: var(--ink-4);
+    opacity: 0.75;
+  }
+
+  .archive__months {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  /* 月份是"行内小标签"：一条细线 + 月份 + 篇数，不抢年份的主次 */
+  .archive__monthLabel {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    margin: 0 0 2px;
+    padding-top: 12px;
+    font-size: var(--fs-2xs);
+    letter-spacing: var(--track-mid);
+    color: var(--ink-4);
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .archive__month:first-child .archive__monthLabel {
+    padding-top: 14px;
+    border-top-color: transparent;
   }
 
   .notelist {

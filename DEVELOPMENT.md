@@ -723,6 +723,15 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 
 ## 10. 功能日志（规定动作）
 
+### 2026-09-19 · 归档列表加"月份"这一层 + 年份锚点（参考 Dejavu's Blog 的三层结构）
+
+- 需求：本人给了参考站点 `blog.dejavu.moe/posts/`，要求借它"年份 → 月份 → 条目"的分类方式；选定其中两条（① 年份下加月份小标题带篇数；③ 年份做成锚点 `#2026`），不要阅读时长/字数。
+- 参考站的做法（抓下来看）：年份（带该年篇数）→ 月份（带该月篇数）→ 条目（日期 · 阅读时长 · 字数）；标签是独立一页；顶栏另有搜索。
+- 文件：`src/views/BlogIndexPage.astro`、`DEVELOPMENT.md`。
+- 实现：`groups`（按年）再 reduce 一层 `months`（`{ year, count, byMonth }`）；月份名用 `Intl.DateTimeFormat(lang, { month: 'short' })`（中文 `9月` / 英文 `Sep`）。年份那一格变成 `<a href="#2026">2026 <span>1</span></a>`，`section` 带 `id="2026"`；月份是"细线 + 月份 + 篇数"的行内小标签（第一条月份不画线，避免和年份挤在一起）。年份锚点加了 `scroll-margin-top: calc(var(--nav-h) + 16px)`，顶栏是 sticky 的，跳过来不会被盖住。
+- 钩子/数据：无新增 data-* / storage key / 事件（纯模板 + 样式）。
+- 验证：`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页；检查构建产物 `/blog/index.html` 的实际节点：`<section class="archive__group" id="2026">` → `archive__yearLink href="#2026"` 后跟篇数 → `archive__monthLabel` 渲染成 `9月` 后跟篇数。首页串页里的 BLOG 区是同一个组件，自动跟着变。
+
 ### 2026-09-19 · 撤掉音频/乐谱的调试读数（功能已全部正常）
 
 - 需求：本人确认"全正常了"，要求**只**撤掉调试信息，其它一律不动。
