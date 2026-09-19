@@ -352,7 +352,13 @@ export class MusicManager extends EventTarget {
       // 播放稳定之后，后台把另一套主题的曲子也缓冲好（见 warmOtherTrack）
       this.warmOtherTrack();
     } catch {
+      /*
+       * 被浏览器拦下（或那一次手势被系统弹窗吃掉）时挂上一次性监听，
+       * 等下一次交互自己再试 —— 之前这里只把状态标成 ready 就完了，
+       * 用户再按播放键也可能还是不出声，只能刷新页面（本人实测）。
+       */
       this.setState("ready");
+      this.bindAutoplayFallback();
     }
   }
 

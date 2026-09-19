@@ -71,9 +71,22 @@ export function primeIdentityPianoOnFirstGesture(): void {
   if (!usesIdentityPiano()) return;
   if (identityPiano().isRunning) return;
 
-  const prime = () => primeIdentityPiano();
-  document.addEventListener('pointerdown', prime, { once: true, capture: true });
-  document.addEventListener('keydown', prime, { once: true, capture: true });
+  /*
+   * 注意这里**不能**只要一次（`{ once: true }`）。iOS 上"这一次手势能不能解锁音频"
+   * 并不总是成立：入场那一下点击如果同时弹了"运动与方向"的系统权限框，那一次激活
+   * 可能就用掉了 —— 只试一次的话，之后按播放键也不会再唤醒它，只有刷新页面重新来一次
+   * 干净的手势才恢复（本人实测："文件都下好了，点播放就是不出声，刷新一下就好了"）。
+   * 所以一直挂着，直到上下文真的在跑为止。
+   */
+  const prime = () => {
+    primeIdentityPiano();
+    if (identityPiano().isRunning) {
+      document.removeEventListener('pointerdown', prime, { capture: true });
+      document.removeEventListener('keydown', prime, { capture: true });
+    }
+  };
+  document.addEventListener('pointerdown', prime, { capture: true });
+  document.addEventListener('keydown', prime, { capture: true });
 }
 
 /** 离开时交棒：`position` 是此刻听到的位置，`scheduledUntil` 是已经排到的位置 */
