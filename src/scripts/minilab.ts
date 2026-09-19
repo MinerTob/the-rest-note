@@ -102,18 +102,25 @@ export function initMiniLab(): void {
 
   /**
    * 采样加载进度条：一条轨道 + 一颗音符跑在当前位置上（`--load` 由 CSS 用它算位置）。
-   * 只有真的在下载/解码时才出现 —— 加载完就收起，失败就让 ENGINE 那行去说明情况。
+   *
+   * **只在真的在等的时候出现**：采样本来就是在后台加载的（以前也一样，只是没显示出来），
+   * 正常几毫秒到几百毫秒就绪，这时候弹个进度条反而像"多了一道工序"（本人反馈）。
+   * 所以延迟 0.9 秒才露面 —— 快的时候用户完全看不到它，冷启动/慢网时才有个交代。
    */
+  let loadingSince = 0;
   const renderLoad = () => {
     const ratio = piano.getLoadedRatio();
     const state = piano.getState();
     const loading = state === 'loading' || (state === 'ready' && ratio < 1);
+    if (loading && loadingSince === 0) loadingSince = performance.now();
+    if (!loading) loadingSince = 0;
+    const waited = loading && loadingSince > 0 ? performance.now() - loadingSince : 0;
     if (loadEl) {
       loadEl.style.setProperty('--load', ratio.toFixed(3));
       loadEl.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
     }
     if (loadTextEl) loadTextEl.textContent = `${Math.round(ratio * 100)}%`;
-    if (loadWrapEl) loadWrapEl.hidden = !loading;
+    if (loadWrapEl) loadWrapEl.hidden = waited < 900;
   };
 
   /* ---------------- 控制器 ---------------- */
