@@ -7,7 +7,7 @@ import {
   volumeAt,
 } from "@/lib/music";
 import { savedPosition, savePosition } from "@/lib/live-timeline";
-import { trackForTheme } from "@/lib/themes";
+import { THEMES, trackForTheme } from "@/lib/themes";
 import { readBool, readNumber, writeBool, writeNumber } from "./storage";
 import type { AppStore } from "./app-state";
 
@@ -86,6 +86,8 @@ export class MusicManager extends EventTarget {
   private pauseTimer = 0;
   /** 只让最后一次切换生效，被打断的那次直接作废 */
   private switchToken = 0;
+  /** 后台预热另一套主题曲子的定时器 */
+  private warmTimer = 0;
 
   constructor(store: AppStore) {
     super();
@@ -104,6 +106,38 @@ export class MusicManager extends EventTarget {
   /** 把「真实在放的那首」写回统一状态，播放器显示的就是这个值 */
   private syncState(): void {
     this.store.set({ currentTrack: this.trackId }, { persist: false });
+  }
+
+  /**
+   * 后台把**另一套主题的曲子**先缓冲好。
+   *
+   * 为什么需要：两首主题曲分别是 5.2MB / 4.3MB，而切主题走的 `crossfadeTo()`
+   * 会先 `waitForCanPlay()`（最多等 6 秒）再交叉淡入。桌面网络快、或者曲子早已
+   * 在缓存里，感觉是"瞬间切过去"；手机上一旦那首还没下载过，就会是
+   * **UI 已经变成本主题、歌还愣在上一首 / 干脆没声**，要等几秒才跟上（本人实测）。
+   * 所以第一次播放稳定之后（5 秒）悄悄把另一首拉下来 —— 切主题时它已经就绪。
+   */
+  private warmOtherTrack(): void {
+    window.clearTimeout(this.warmTimer);
+    this.warmTimer = window.setTimeout(() => {
+      // 用户开了省流量模式就别自作主张下 4MB
+      const connection = (navigator as Navigator & { connection?: { saveData?: boolean } })
+        .connection;
+      if (connection?.saveData) return;
+
+      const other = THEMES.map((theme) => trackForTheme(theme)).find((id) => id !== this.trackId);
+      const track = other ? getTrack(other) : undefined;
+      if (!track) return;
+
+      // elementFor 会把元素留在 elements 里，切主题时直接复用这个已经缓冲好的
+      const el = this.elementFor(track);
+      if (el.readyState >= 3) return;
+      try {
+        el.load();
+      } catch {
+        /* 预加载失败无所谓，到真正切主题时会再等一次 */
+      }
+    }, 5000);
   }
 
   get track(): Track {
@@ -315,6 +349,8 @@ export class MusicManager extends EventTarget {
       }
       this.setState("active");
       this.applyVolume(true);
+      // 播放稳定之后，后台把另一套主题的曲子也缓冲好（见 warmOtherTrack）
+      this.warmOtherTrack();
     } catch {
       this.setState("ready");
     }
@@ -517,6 +553,8 @@ export class MusicManager extends EventTarget {
 
     this.syncState();
     this.setState(started ? "active" : this.userPaused ? "paused" : "ready");
+    // 切过去之后，下一首同样值得提前缓冲（用户来回切主题时尤其明显）
+    if (started) this.warmOtherTrack();
     return true;
   }
 

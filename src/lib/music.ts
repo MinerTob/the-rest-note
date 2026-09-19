@@ -45,7 +45,9 @@ export const DEFAULT_TRACK_ID = 'dao-xiang';
 export const AUDIO = {
   volume: 0.3,
   fadeInMs: 2400,
-  fadeOutMs: 1200,
+  /* 暂停的淡出从 1200ms 收到 450ms：按暂停是"现在停下"的意思，
+     手机上那 1.2 秒的余音会被当成"UI 变了声音还在放"（见 §10）。 */
+  fadeOutMs: 450,
   crossfadeMs: 2000,
 } as const;
 
