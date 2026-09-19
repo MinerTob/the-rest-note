@@ -45,7 +45,8 @@
 | 自我介绍 | `/about/intro/`、`/en/about/intro/` | 关于页第十个标签点进来的长文页；中英各一篇，续播同一首夜曲，左上角"返回"回到首页那串页面里的关于区（`#about`） |
 | 背景音乐 | 全局 | 淡入淡出、交叉淡入淡出、静音 / 暂停，音量与状态记忆 |
 | MiniLab | `/lab/#minilab` | 25 键（C4–C6）；鼠标 / 触摸 / 电脑键盘 / `Tab`+方向键 / Web MIDI |
-| 机关（彩蛋） | MiniLab | 提示模式里弹对旋律 → 换主题 + 换曲 + 解锁隐藏曲目 |
+| 机关（彩蛋） | MiniLab | 提示模式里弹对旋律 → 换主题 + 换曲 + 解锁隐藏曲目；提示模式的入口电脑和手机各有一条（手机上不需要键盘） |
+| 摇一摇彩蛋（手机端独有） | `/about/`、首页关于区 | 摇晃手机 → 场上的身份标签跟着一块晃；只在触摸设备 + 支持 `DeviceMotionEvent` 时生效，iPhone 在入场那一次点击里会问一次「运动与方向」 |
 | 主题系统 | 右下角开关 | `modern` / `baroque` 两套，改一个 `<html>` 属性，不重新渲染 |
 | 语言切换 | 右上角 `ZH / EN` | 跳到同一页的另一种语言；**只有文字动**：旧的向左滑出、新的从右滑入；切完停在原处——正在看的那一块按屏幕里的地标对齐（内容高度变了也不跑），关于页那十个标签留在原来的落点 |
 | 系统提示 | 左下角 LCD | 复制、状态变更等的轻量反馈，不弹窗 |
@@ -58,7 +59,7 @@
 | --- | --- |
 | 框架 | Astro 7（默认静态输出，`ClientRouter` 做站内客户端路由） |
 | 语言 | TypeScript（`astro check` 零错误） |
-| 样式 | 原生 CSS：`tokens.css`（语义令牌 + 主题）+ `global.css` + `home-glass.css`，无预处理器、无 Tailwind |
+| 样式 | 原生 CSS：`tokens.css`（语义令牌 + 主题，含统一的环境背景与 `--liquid-*` 面板玻璃）+ `global.css`（基础 / 玻璃 / LCD / 正文），无预处理器、无 Tailwind |
 | 声音 | Web Audio API（`AudioContext` + `playbackRate` 移调）、`<audio>` 元素 |
 | 输入 | Web MIDI API、Pointer Events、键盘事件 |
 | 物理 | `matter-js`（About 页身份标签的落地回弹） |
@@ -137,7 +138,7 @@ src/
 ├── i18n/               # ui.ts 字典 + utils.ts 工具
 ├── lib/                # 站点信息、内容查询、音乐、钢琴采样表、彩蛋、联系方式、身份标签
 ├── scripts/            # 只在需要交互时才加载的客户端代码
-└── styles/             # tokens.css（设计令牌）+ global.css + home-glass.css
+└── styles/             # tokens.css（设计令牌 + 主题 + 环境背景与玻璃材质）+ global.css
 
 public/
 ├── favicon.svg
@@ -196,13 +197,15 @@ Lab 还支持 `order`（排序）、`status`（状态灯颜色）；`component: 
 
 加一首新曲子：编辑 `src/lib/music.ts` 的 `TRACKS`，加一条 `{ id, title, subtitle, src }`；不想让它出现在列表里就标记 `hidden: true`（隐藏曲目只作为彩蛋目标使用）。
 
-行为约定（都在 `AUDIO` 常量里）：默认音量 0.3、淡入 2.4s、淡出 1.2s、交叉淡入淡出 2s。浏览器禁止自动播放时不会强播，而是安静地停在 `READY`，等用户第一次点击/按键后再启动。音量、静音与暂停状态会记在 `localStorage`。
+行为约定（都在 `AUDIO` 常量里）：默认音量 0.3、淡入 2.4s、**淡出 0.45s**、交叉淡入淡出 2s。浏览器禁止自动播放时不会强播，而是安静地停在 `READY`，等用户第一次点击/按键后再启动。音量、静音与暂停状态会记在 `localStorage`。
+
+**另一套主题的曲子会在后台预热。** 两首主题曲分别是 5.2MB / 4.3MB，而切主题要先等目标曲目能播（最多 6 秒）再交叉淡入 —— 桌面网络快或曲子已在缓存里感觉不到，手机上一旦没缓冲过就是「UI 已经变了、歌还没来」。所以第一次播放稳定 5 秒后，`MusicManager` 会在后台把另一首也 `load()` 好（复用同一个 `<audio>`，切主题时直接拿来用）；用户开了省流量模式（`navigator.connection.saveData`）就跳过。
 
 **换主题一定会出声。** 换主题是一次明确的用户动作，等于「我要听这套主题的音乐」，所以 `crossfadeTo(id, { force: true })` 会清掉之前的暂停，把新曲目真的放出来 —— 而不是只把播放器上的名字换掉。这条对两个入口都成立：右下角的主题开关，以及彩蛋触发。否则会出现「界面已经切到 Baroque、canon 却不出声」这种假切换。
 
 反过来说，用户手动按暂停之后不会再自动出声，除非他主动换一次主题。
 
-音量渐变用 `requestAnimationFrame` 跑，进度两头都夹在 [0, 1]（`clamp01` / `volumeAt`，在 `src/lib/music.ts` 里，有单元测试）：rAF 回调拿到的时间戳有可能早于渐变记下的起点，负进度会让缓动反向过冲，算出 -0.003 这种音量；给 `HTMLMediaElement.volume` 赋越界值会抛 `IndexSizeError`，整条淡入当场断在半路 —— 听感就是「曲目切过去了，却没有声音」。另外每首曲子只建一个 `<audio>` 并留着，切回去时文件已经缓冲好，不用重新下载，也不会卡在等 `canplay` 上；快速连续切换时只有最后一次生效，被打断的那次直接作废。
+音量渐变用 `requestAnimationFrame` 跑，进度两头都夹在 [0, 1]（`clamp01` / `volumeAt`，在 `src/lib/music.ts` 里，有单元测试）：rAF 回调拿到的时间戳有可能早于渐变记下的起点，负进度会让缓动反向过冲，算出 -0.003 这种音量；给 `HTMLMediaElement.volume` 赋越界值会抛 `IndexSizeError`，整条淡入当场断在半路 —— 听感就是「曲目切过去了，却没有声音」。另外每首曲子只建一个 `<audio>` 并留着，切回去时文件已经缓冲好，不用重新下载，也不会卡在等 `canplay` 上；快速连续切换时只有最后一次生效，被打断的那次直接作废。暂停的淡出只有 0.45 秒：按暂停是「现在停下」的意思，一秒多的余音会被当成「UI 变了、声音还在放」。
 
 如果目标文件放不出来（文件缺失 / 解码失败），切换会静默失败：当前音乐继续播，并且播放器会 `syncState()` 回到**真正在放的那首** —— 播放器永远不会显示一首其实没在放的曲子。
 
@@ -235,7 +238,7 @@ MiniLab 是固定 25 键（C4–C6），支持鼠标、触摸（含按住滑动�
 
 **旋律判定只在提示模式里运行。** 平时弹琴（鼠标 / 触摸 / 电脑键盘 / MIDI）只发出声音，Sequence Detector 根本不参与 —— 不按入口键、把整条旋律原样弹一遍，也不会有任何反应。
 
-提示模式的入口是 MiniLab 页面上的一组按键（具体是什么键看 `src/scripts/easter-eggs.ts`）。进入后**一次只点亮一个目标琴键**：按对 → 当前键变成 ACCEPTED、下一个亮起；按错 → 只是当前提示很轻地闪一下，不弹窗、不重置页面、不显示 WRONG。全程不显示完整序列、不显示进度数字、不暗示下一个音。
+提示模式有两个等价入口，都在 `src/lib/easter-eggs.ts` / `src/scripts/easter-eggs.ts` 里写着：电脑键盘上一个隐藏组合，手机上则是「同时按住两个琴键」这种用手指也做得到的动作（触摸设备才能用）。进入后**一次只点亮一个目标琴键**：按对 → 当前键变成 ACCEPTED、下一个亮起；按错 → 只是当前提示很轻地闪一下，不弹窗、不重置页面、不显示 WRONG。全程不显示完整序列、不显示进度数字、不暗示下一个音。
 
 提示高亮用的是主题自己的颜色（`--key-hint-*`），所以切到木质主题时提示会自然变成暖色，不会留下一块蓝。
 
@@ -264,7 +267,7 @@ MiniLab 是固定 25 键（C4–C6），支持鼠标、触摸（含按住滑动�
 
 ## About：88 键音乐体验
 
-`src/components/IdentityStage.astro` + `src/scripts/identity-player.ts` 展示 A0–C8 的 88 键瀑布流。进入 About 后自动接入现有 Salamander / PianoEngine 采样演奏；首次访问被浏览器阻止自动播放时，在第一次点击或按键后接入。离开 About 恢复当前主题音乐；About 内暂停时保持安静。
+`src/components/IdentityStage.astro` + `src/scripts/identity-player.ts` 展示 A0–C8 的 88 键瀑布流。进入 About 后自动接入现有 Salamander / PianoEngine 采样演奏。**这架钢琴的 `AudioContext` 在入场页那次点击里就建好了**（`primeIdentityPiano()`）—— iOS 只允许在用户手势里创建 / 唤醒 AudioContext，不在那里做的话，用户滑到关于区时那次创建会落在手势之外、上下文挂起，夜曲不会自己开始，只显示「点击或按键」；现在滑到底部就自动开始弹，采样在那之前也已经预载完。离开 About 恢复当前主题音乐；About 内暂停时保持安静。
 
 乐谱为 `public/music/secret/f-chopin-nocturne-op9-no2-in-e-flat-major.mid`。其 480 PPQ、1/8 弱起加四个 12/8 完整小节，对应 tick 11760，按原始变速表积分为 33.464427875 秒。十个标签在此之前全部落定，整首继续并循环；循环保留标签，重新开始按钮才重新展示标签动画。
 
@@ -275,8 +278,10 @@ About 只展示 88 键介绍与版权页脚。夜曲与每首主题曲各有独�
 数据与规格：
 
 - 标签数据在 `src/lib/identity.ts`：`{ id, zh, en }`，中英各一份。`ANALYTICAL` 指的是拆解问题、找规律，不是「小心谨慎」，翻中文时别写成「细心」。
-- 第十个标签（`intro`）比别的大 0.2 倍，点一下进 `/about/intro/`；拖动抛出不会误触发（按下后位移 < 8px、0.7 秒内抬手才算点击）。放大只能改 font-size / padding，`transform: scale()` 会被物理引擎每帧覆盖。
-- 自我介绍页：`src/views/IntroPage.astro` + `src/content/pages/intro.zh.md` / `intro.en.md`（15 个小节，`##` = 加大加粗的标题）。这一页跟 About 共用同一首夜曲的实时位置，两边互相「接着放」；左上角有返回按钮（中文只写`返回`）。
+- 第十个标签（`intro`）是唯一能点开的标签（进 `/about/intro/`），文案排成四行（标题 + 三行请求，`\n` 分行，不用括号），尺寸和别的标签同档或略小 —— 想调只改 `.identity__tag[data-identity-link]` 的 `font-size`，`transform: scale()` 会被物理引擎每帧覆盖。拖动抛出不会误触发（按下后位移 < 8px、0.7 秒内抬手才算点击）。
+- 自我介绍页：`src/views/IntroPage.astro` + `src/content/pages/intro.zh.md` / `intro.en.md`（15 个小节，`##` = 加大加粗的标题）。左上角有返回按钮（中文只写`返回`）。
+- **「关于 ⇄ 关于我」换页时夜曲不会断**：首页关于区 / About / 自我介绍三处共用同一架 `PianoEngine`（`src/scripts/identity-audio.ts`，挂在 `getGlobal().identityPiano`）。离开时会先把接下来 0.45 秒的音排进音频时钟再停下（不掐音、不关 AudioContext），接手的那一页从交棒位置继续排、音量滑过去而不是归零；只有去别的页面才真的释放。`identity:nocturne` 这条实时位置记在 `sessionStorage`，刷新也能接着走。
+- **手机端独有：摇一摇，标签跟着晃。** `src/scripts/identity-motion.ts` 把 `devicemotion` 接到 `src/lib/shake.ts` 的摇晃识别上，识别成功后 4.2 秒内把设备加速度当成冲量灌给 `identity-physics.ts` 的 `shove()`。只在触摸设备、且「关于」这一块真的在屏幕上时才听传感器；开了 `prefers-reduced-motion` 就完全不挂。iPhone 的运动权限只在入场那次点击里问一次（拒绝就当作没有这个彩蛋）。
 - 动画规格在 `IDENTITY_MOTION`：弹出 → 飞行 → 落地 → 回弹的时长、弧线高度、旋转上限。测试给这组数字兜底 —— 调过头就变成小游戏了。
 - MIDI 映射在 `src/lib/identity-midi.ts`，`tests/identity-midi.test.mjs` 会挡住不合法的值。
 - DOM 钩子是 `data-identity` / `data-identity-state` / `data-identity-tag` / `--i`，改名之前先看 `DEVELOPMENT.md` §7 的 DOM 钩子总表。
