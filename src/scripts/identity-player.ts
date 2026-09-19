@@ -40,6 +40,26 @@ let setActiveCurrent: ((active: boolean) => void) | undefined;
 const VISIT_KEY = 'rest-note.identity-visit';
 /** 落点格式版本：v1 存归一化比例，v2 存文档像素，v3 连地板位置一起存 —— 换名字，免得把旧值当新格式读。 */
 const LAYOUT_VERSION = 'v3';
+
+/**
+ * 一次"进入网站"（地址栏输入 / 外链 / 书签 = navigation type `navigate`）算一次新的访问：
+ * 先把 visit id 清掉，下面 layoutCookieName() 就会生成一个新的，
+ * 于是落点 cookie 是新的、标签会被音乐重新抛一遍。
+ *
+ * 为什么需要：浏览器"继续上次的标签页"时会把 sessionStorage 一起恢复，
+ * 同一个 visit id 会让上一趟的落点沿用下来 —— 本人反馈的"每一次进入新 cookies 的动作
+ * 都不见了"就是这个。刷新 / 前进后退不算新访问（沿用同一个 visit），
+ * 和入场页 rest-note.entry-passed 是同一条规矩（见 entry-gate.ts）。
+ */
+try {
+  const navigation = performance.getEntriesByType('navigation')[0] as
+    | PerformanceNavigationTiming
+    | undefined;
+  if ((navigation?.type ?? 'navigate') === 'navigate') sessionStorage.removeItem(VISIT_KEY);
+} catch {
+  /* 隐私模式下读不到就当作没有 —— 下面会退回随机 visit id */
+}
+
 function layoutCookieName(): string {
   let visit = '';
   try {
@@ -83,11 +103,15 @@ export function initIdentity(): void {
   if (!found || found.dataset.bound) return;
   const root: HTMLElement = found;
   disposeIdentity();
-  root.dataset.bound = "true";
   const zh = root.dataset.lang === "zh";
   const canvas = root.querySelector<HTMLCanvasElement>("canvas")!;
   const ctx = canvas.getContext("2d");
+  // 拿不到 2d 上下文就先别把 data-bound 立起来 —— 那是个"已初始化"的记号，
+  // 立了之后这次没跑完，后面每次 initIdentity() 都会被它挡在门外，整块区域就
+  // 一直死着，只能刷新页面（本人报过"必须手动刷新才开始加载"）。留个空门，
+  // 滚回这一块时还能再试一次。
   if (!ctx) return;
+  root.dataset.bound = "true";
   const play = root.querySelector<HTMLButtonElement>("[data-identity-play]")!;
   const restart = root.querySelector<HTMLButtonElement>(
     "[data-identity-restart]",
@@ -507,36 +531,50 @@ export function initIdentity(): void {
   });
   colors();
   resize();
-  void fetch(SOURCE, { signal })
-    .then((r) => {
-      if (!r.ok) throw new Error("Missing score");
-      return r.arrayBuffer();
-    })
-    .then((data) => {
-      if (disposed) return;
-      score = parseMidi(new Uint8Array(data));
-      plan = identityRevealPlan(score, tags.length);
-      notes = score.notes.filter((n) => n.midi >= FIRST && n.midi <= LAST);
-      root.dataset.ready = "true";
-      root.dataset.deadline = String(plan.deadline);
-      root.dataset.deadlineTick = String(plan.endTick);
-      root.dataset.duration = String(duration());
-      root.dataset.keyCount = "88";
-      play.disabled = false;
-      restart.disabled = false;
-      progress.disabled = false;
-      label();
-      draw();
-      if (sceneActive) void start();
-    })
-    .catch(() => {
-      if (!disposed) {
+  /**
+   * 读乐谱。失败会自动重试两次再报错 —— 手机上这一下被系统/网络打断是常事，
+   * 而原来的行为是直接写"请刷新重试"：本人实测过"必须手动刷新一下才开始加载"。
+   * 重试之间隔 1.2s / 2.4s，都在同一条 abort 信号上，换页时不会漏。
+   */
+  let scoreAttempts = 0;
+  const loadScore = (): void => {
+    scoreAttempts += 1;
+    void fetch(SOURCE, { signal })
+      .then((r) => {
+        if (!r.ok) throw new Error("Missing score");
+        return r.arrayBuffer();
+      })
+      .then((data) => {
+        if (disposed) return;
+        score = parseMidi(new Uint8Array(data));
+        plan = identityRevealPlan(score, tags.length);
+        notes = score.notes.filter((n) => n.midi >= FIRST && n.midi <= LAST);
+        root.dataset.ready = "true";
+        root.dataset.deadline = String(plan.deadline);
+        root.dataset.deadlineTick = String(plan.endTick);
+        root.dataset.duration = String(duration());
+        root.dataset.keyCount = "88";
+        play.disabled = false;
+        restart.disabled = false;
+        progress.disabled = false;
+        label();
+        draw();
+        if (sceneActive) void start();
+      })
+      .catch(() => {
+        if (disposed || signal.aborted) return;
+        if (scoreAttempts < 3) {
+          status.textContent = zh ? "乐谱加载中…" : "Loading the score…";
+          window.setTimeout(loadScore, 1200 * scoreAttempts);
+          return;
+        }
         status.textContent = zh
           ? "乐谱读取失败，请刷新重试。"
           : "The score could not load. Please reload.";
         play.textContent = zh ? "无法播放" : "Unavailable";
-      }
-    });
+      });
+  };
+  loadScore();
   disposeCurrent = () => {
     disposed = true;
     // 交棒：先把接下来这一小段排进音频时钟，再停下来（不掐音），

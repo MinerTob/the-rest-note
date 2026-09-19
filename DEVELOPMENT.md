@@ -486,6 +486,8 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
   - **被拒绝时会说一句实话**：`announceMotionOffline()` 通过 `space:message` 在 LCD 上打一行 `MOTION OFFLINE / motion & orientation access denied`（只在页面真有 `[data-identity]` 时）。这是设备读数，和 MiniLab 的 `NO DEVICE` 同一种语气，也是排查"为什么摇不动"的第一现场。
   - 兜底入口：这一块在屏幕上时，用户点 / 滑页面任何地方也会走同一个 `requestMotionAccess()`（`document` 捕获阶段的 `pointerdown`，只触发一次）。
 - 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数，cookie 名 `rest-note-identity-v3-<visit>`，visit id 每次会话一个；`v3` 是落点格式版本，见下）。这份记忆**只当"先摆出来"的兜底**（万一声音还没解锁，页面也不会是一片空地）：`physics.restore()` 之后 `needsAnimation` 仍然是 `true`，音乐一响 `reveal()` 就把已有的身体重新抛回场上再落一次 —— 每次回到这一页，方块都是活的（本人报过"返回之后方块的物理效果就没了"）。`reset()`（重新演奏按钮）会连内部的 `dropped` 一起清空、并 `clearLayout()`，所以下一轮整排重抛。
+- **visit id 跟着"是不是新的一趟访问"走**：`identity-player.ts` 模块加载时，如果这次导航的 `performance.navigation.type` 是 `navigate`（地址栏输入 / 外链 / 书签），就先清掉 sessionStorage 里的 `rest-note.identity-visit`，让下面重新生成一个 —— 于是落点 cookie 是新的、标签会被音乐重新抛一遍。`reload` / `back_forward` 沿用同一个 visit（刷新不算新访问），和入场页的 `rest-note.entry-passed` 是同一条规矩。原因见 §10：浏览器"继续上次的标签页"会把 sessionStorage 一起恢复，不这么做的话上一趟的落点会一直沿用，"每一次进入都是一趟新访问"这件事就消失了。
+- **加载乐谱会自动重试；`data-bound` 必须最后才立**：`initIdentity()` 读 `public/music/secret/*.mid` 失败时最多重试两次（间隔 1.2s / 2.4s）再报错，重试挂在同一条 abort 信号上，换页不会漏。另外 `root.dataset.bound = 'true'` 这个"已初始化"记号要放在拿到 2d 上下文**之后**：放在前面的话，取上下文失败的那一次会把自己锁死（后面每次 `initIdentity()` 都被这个记号挡在门外），整块区域一直死到刷新页面为止 —— 本人反馈的"必须手动刷新一下才开始加载 MIDI、重播点了也没反应"就是这个形态。取不到上下文就留个空门，滚回这一块时还能再试。
 - **落点存的是文档像素坐标 + 地板位置**（`{ floor, items: [{ x, y, angle }] }`，`x/y/angle` = 本体中心 + 角度），不是归一化比例。曾经存过比例（`(x-left)/(right-left)`、`(floor-y)/floor`），但两种语言的页面高度差几像素，比例还原时会被整体缩放，实测偏 20-80px —— 本人看到的就是"切语言之后标签位移"。`floor` 是写下落点时 `.identity__landing` 下沿的文档位置：换语言/换宽度会让整块区域上下移动（实测首页那串拼接页切到英文时下沉 **115px**），`restore()` 会先算 `shift = floor_now - layout.floor` 再整体平移，标签才不会漂出自己那一块。改格式记得同时改 `LAYOUT_VERSION`（cookie 名字里那个 `v3`），否则新代码会把旧格式的值当新格式读。
 - `bounds()` 与 `restore()` 的夹取只做"别出视口、别陷进地板"（`x ∈ [8, width-8]`、`y ∈ [8, floor-4]`），**不按方块自己的尺寸算**。按尺寸算会出事：脚本刚接手时量到的元素尺寸常常是错的（样式还没应用，实测 46px 的标签量成 134px），一夹就把方块顶歪 44px；按舞台宽度夹也会把更宽的英文标签整排推走（实测偏 75px）。另外 `bounds()` 里有**尺寸自愈**：元素尺寸和造本体时记下的不一样，就用同一个中心重造本体（位置不动，只补尺寸），`document.fonts.ready` 之后还会再量一次。
 - **切语言是唯一的例外：位置原样接续，恢复的身体重新受重力，还没上场的继续排队，不提前补位、不重弹。** 判定靠 `lang.ts` 的 `takeLanguageSwap()`（sessionStorage `space.lang-swap`，见 §5.4），流程是：
@@ -551,6 +553,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 
 - 只在"地址栏输入 / 书签 / 外链"（navigation type = `navigate`）时要求重新入场；`reload` / `back_forward` 沿用 sessionStorage `rest-note.entry-passed`。
 - 进入方式：点击 `[data-entry-button]`。这个 click 处理器里**必须直接调用** `music.play()`（浏览器自动播放策略要求音频解锁发生在可信手势里，见代码注释）。
+- **点"进入"之后一定落在首页最顶上（`#home`）**：遮罩收起时把地址里遗留的锚点（浏览器恢复标签页时常见的 `#about` / `#blog`）去掉，并 `scrollTo(0, 0)`；因为 `html` 有 `scroll-behavior: smooth`，必须用 `behavior: 'instant'`，否则会当着他的面滑一大段。**要补三次**（立即 / 下一帧 / 260ms 后）：Safari 常在遮罩收起之后才把上次的滚动位置恢复回来，只滚一次会被它盖掉；后两次都跳过"有 `#锚点`"的情况 —— 那是用户自己点的站内跳转，不能抢。站内导航走客户端路由，不经过这里。
 - 同一个 click 处理器里还调两个"必须在用户手势里做"的动作：`requestMotionAccess()`（`identity-motion.ts`，申请"运动与方向"权限，见 §5.8）和 `primeIdentityPiano()`（`identity-audio.ts`，把"关于"那架钢琴的 AudioContext 建起来并开始预载采样，见 §5.14）。两者都只在真正需要它们的页面生效，桌面 / 不需要 / 已经做过时静默返回，不影响入场。
 - 锁定期间 body 加 `.entry-locked`，除 gate 和 `.ambient` 外的直接子元素设为 `inert`。
 - 文案跟随浏览器语言（`navigator.language` 是否 `zh` 开头），不是站点语言。
@@ -718,6 +721,31 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-19 · "滑到关于区必须刷新才开始加载 MIDI、重播点了没反应"
+
+- 需求：本人反馈"到底下的关于页必须手动刷新一下才开始加载 MIDI，还要手动按播放；刷新之前点重播没效果"。
+- 查证：本地按两条可能的路（`#about` 直接进站 + 旧落点 cookie；从博客页客户端路由跳到首页再下滑）都跑通了 —— 乐谱 2ms 到位、按钮正常、0 报错，说明这是**偶发失败**，而当时的代码在偶发失败下只有两条死路。于是把两条死路都堵掉：
+  1. `initIdentity()` 里 `root.dataset.bound = 'true'` 写在拿 2d 上下文**之前**：一旦 `getContext('2d')` 返回 null（低内存 / 偶发），这一次直接 return，而"已初始化"的记号已经立住了 —— 之后每次 `initIdentity()` 都被挡回去，整块关于区一直死到刷新页面为止，表现就是"必须刷新才开始加载"。
+  2. 乐谱 fetch 失败时直接写"请刷新重试"，**不会自己再试**。手机上一次请求被系统/网络打断太常见。
+- 文件：`src/scripts/identity-player.ts`、`DEVELOPMENT.md`。
+- 修复：① 把 `data-bound` 挪到上下文检查之后（拿不到就留个空门，滚回这一块还能再 init 一次）；② 乐谱改成 `loadScore()`，失败自动重试两次（1.2s / 2.4s，同一个 abort 信号），全失败才提示"请刷新"。
+- 钩子/数据：无新增 data-* / storage key / 事件。
+- 验证：`npm test` 88/88；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。Playwright 两处定向验证：
+  · **请求失败自动恢复**：用 `page.route` 让第一次 `.mid` 请求 `abort` → 观测到共发出 **2** 次请求、`data-ready=true`、`data-state=playing`、重播按钮可用、**没有刷新页面**、0 console error；
+  · **上下文失败不再锁死**：init script 让第一次 `getContext('2d')` 返回 null → 第一次激活后 `data-bound` 仍为 null（没立记号）；滚开再滚回来 → `data-bound=true / data-ready=true / data-state=playing / 重播可用`，同样不需要刷新，0 console error。
+
+### 2026-09-19 · "点开始页之后直接进了关于页/博客页" + "新一趟访问的 cookie 不见了"
+
+- 需求：本人反馈"每一次进入网站（刷新不算）应该是一趟新的访问、并且落在首页最顶上（`#home`）；但现在只有干净的内置浏览器正常，别的浏览器一点开始就直接停在关于页或博客页，连'每一趟都换新 cookie'这件事也不见了"。
+- 根因：这两件事是同一个来源 —— **浏览器"继续上次的标签页"会把 sessionStorage 和滚动位置一起恢复**（Chrome / Safari 都会）。于是：
+  1. `rest-note.identity-visit` 还是上一趟的那个 id → 落点 cookie 沿用 → 标签不再被音乐重抛（"新访问"的痕迹消失）；
+  2. 地址里可能还留着 `#about` / `#blog`，或者浏览器把上次的滚动位置又恢复了一遍 → 点完"进入"人不在首页顶部。
+  Instagram 那种内置浏览器每次都是干净的新会话，所以只有它看起来正常。
+- 文件：`src/scripts/identity-player.ts`（模块加载时按 `navigate` 清 visit id）、`src/scripts/entry-gate.ts`（进入时清掉遗留锚点 + 拉回顶部，补三次）、`DEVELOPMENT.md`。
+- 逻辑：判断"新一趟访问"用的是和入场页同一条规矩 —— `performance.getEntriesByType('navigation')[0].type === 'navigate'`（地址栏输入 / 外链 / 书签），`reload` / `back_forward` 不算。顶部那三下：立即、下一帧、260ms 后各一次（Safari 常在遮罩收起之后才恢复滚动位置）；后两次都跳过"有 `#锚点`"的情况，因为那代表用户刚点了站内跳转。
+- 钩子/数据：无新增 data-* / storage key / 事件；沿用 sessionStorage `rest-note.identity-visit`（现在会在新一趟访问时被清掉）。
+- 验证：`npm test` 88/88；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。Playwright 实测（模拟"恢复的标签页"：预置 `rest-note.identity-visit = OLDVISIT` 并用 `/#about` 打开）—— 点"进入"之后 `location.hash` 变成空、`window.scrollY = 0`、sessionStorage 里的 visit id 变成新的 UUID（不再是 `OLDVISIT`）。
 
 ### 2026-09-19 · 按一下音量键，页面底部又冒出那根蓝线（main 的焦点框优先级）
 

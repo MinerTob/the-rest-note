@@ -107,6 +107,30 @@ export function initEntryGate(music: MusicManager): boolean {
 	      cleaned = true;
 	      setPageLocked(gate, false);
 	      gate.remove();
+	      /*
+	       * 进站就落在首页最顶上（#home）。
+	       *
+	       * 浏览器"继续上次的标签页"／恢复会话时，会把上一次的滚动位置（有时还有 URL 里的
+	       * #about / #blog）一起带回来，于是点完"进入"发现自己不在首页 —— 本人反馈：
+	       * 只有干净的内置浏览器正常，别的浏览器一点开始就直接停在关于区或博客区。
+	       * 这里把地址里那次遗留的锚点去掉、页面拉回顶部；用 instant 是因为
+	       * html 有 scroll-behavior: smooth，不然会当着他的面滑一大段。
+	       * 站内导航（客户端路由）不走这里，所以"返回关于"这类锚点跳转不受影响。
+	       */
+	      if (location.hash && location.hash !== '#home') {
+	        history.replaceState(null, '', location.pathname + location.search);
+	      }
+	      /*
+	       * 拉回顶部要补两次：Safari 经常在遮罩收起之后才把上次的滚动位置恢复回来，
+	       * 只滚一次会被它盖掉。第二、三次都跳过有 #锚点 的情况 —— 那是用户自己点了
+	       * 站内跳转（例如"返回关于"），不能抢。
+	       */
+	      const toTop = () => window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+	      toTop();
+	      requestAnimationFrame(toTop);
+	      window.setTimeout(() => {
+	        if (!location.hash) toTop();
+	      }, 260);
 	      const main = document.querySelector<HTMLElement>('#main');
 	      if (main) {
 	        main.setAttribute('tabindex', '-1');
