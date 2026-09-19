@@ -98,13 +98,6 @@ const blacks = keys
       <span class="minilab__foot-label"><T k="minilab.engine" lang={lang} /></span>
       <span data-minilab-engine>{t('minilab.engine.idle')}</span>
     </span>
-    {/* 采样加载进度：一颗音符跑在轨道上。只在真的在加载时出现（见 renderLoad()） */}
-    <span class="minilab__foot-item minilab__foot-item--load" data-minilab-load-wrap hidden>
-      <span class="minilab__load" data-minilab-load role="progressbar" aria-label={lang === 'zh' ? '钢琴采样加载进度' : 'Piano sample loading progress'}>
-        <i class="minilab__load-note" aria-hidden="true">♪</i>
-      </span>
-      <span class="minilab__load-text num" data-minilab-load-text>0%</span>
-    </span>
     <span class="minilab__foot-item minilab__foot-item--credit">
       <T k="minilab.source.credit" lang={lang} />
     </span>
@@ -349,50 +342,6 @@ const blacks = keys
     gap: 6px;
   }
 
-  /* 采样加载进度：一条轨道 + 一颗音符跑在当前位置上。颜色全部走主题 token，
-     所以它在 modern 是蓝色、在 baroque 是暖金。只有真的在加载时才出现。 */
-  .minilab__foot-item--load {
-    flex: 1 1 150px;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .minilab__load {
-    position: relative;
-    flex: 1 1 auto;
-    min-width: 72px;
-    height: 3px;
-    border-radius: 999px;
-    background-color: var(--line);
-  }
-
-  .minilab__load::before {
-    content: '';
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: calc(var(--load, 0) * 100%);
-    border-radius: inherit;
-    background-image: var(--grad-a);
-    box-shadow: 0 0 10px -2px var(--glow);
-    transition: width var(--dur-2) var(--ease);
-  }
-
-  .minilab__load-note {
-    position: absolute;
-    left: calc(var(--load, 0) * 100%);
-    top: 50%;
-    translate: -50% -58%;
-    font-size: 13px;
-    line-height: 1;
-    color: var(--accent-2);
-    text-shadow: 0 0 10px var(--glow);
-    transition: left var(--dur-2) var(--ease);
-  }
-
-  .minilab__load-text {
-    font-size: 10px;
-    color: var(--ink-4);
-  }
 
   .minilab__foot-label {
     color: var(--ink-4);

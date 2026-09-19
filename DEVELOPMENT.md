@@ -723,6 +723,13 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 
 ## 10. 功能日志（规定动作）
 
+### 2026-09-19 · 撤掉 MiniLab 的加载条（回到之前的安静样子）
+
+- 需求：本人明确"**我不要加载条了，就按之前的来**" —— 他反感的不是加载慢，而是这件事被显示出来了。
+- 文件：`src/components/MiniLab.astro`（删掉 `[data-minilab-load*]` 的标记与样式）、`src/scripts/minilab.ts`（删掉三个元素引用、`renderLoad()` 与它在 `renderEngine()` 里的调用）、`DEVELOPMENT.md`。
+- 保留：`primeMiniLabPiano()`（入场点击时就把这架琴的采样预载好 —— 这才是"第一声就是真实采样"的原因）、`hasSampleFor()` 的合成器兜底（只在采样真的还没到时替一下）、以及之前那些音频修复。
+- 验证：`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。
+
 ### 2026-09-19 · 归档列表加"月份"这一层 + 年份锚点（参考 Dejavu's Blog 的三层结构）
 
 - 需求：本人给了参考站点 `blog.dejavu.moe/posts/`，要求借它"年份 → 月份 → 条目"的分类方式；选定其中两条（① 年份下加月份小标题带篇数；③ 年份做成锚点 `#2026`），不要阅读时长/字数。
