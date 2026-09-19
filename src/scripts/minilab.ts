@@ -130,6 +130,13 @@ export function initMiniLab(): void {
 
       keyFor(midiNote)?.classList.remove('is-on');
 
+      // 和 'minilab:note' 对称的松键事件：彩蛋的长按入口靠它判断"某个音松开了"
+      window.dispatchEvent(
+        new CustomEvent('minilab:release', {
+          detail: { midi: midiNote, note: noteName(midiNote) },
+        }),
+      );
+
       if (pressed.size === 0) {
         window.clearTimeout(idleTimer);
         idleTimer = window.setTimeout(() => {

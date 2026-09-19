@@ -13,7 +13,7 @@ import {
   midiFromName,
   noteName,
 } from '../src/scripts/notes.ts';
-import { EASTER_EGGS } from '../src/lib/easter-eggs.ts';
+import { EASTER_EGGS, HOLD_TO_ARM, isArmChord } from '../src/lib/easter-eggs.ts';
 
 /** 从彩蛋配置里取音符，避免测试和配置各写一份、慢慢对不上 */
 const EGG_NOTES = [...new Set(EASTER_EGGS.flatMap((egg) => egg.notes))];
@@ -41,6 +41,30 @@ test('every note used by an easter egg is a playable key', () => {
     assert.ok(Number.isFinite(midi), `${name} should parse`);
     assert.ok(MINILAB_KEYS.includes(midi), `${name} should be on the keyboard`);
   }
+});
+
+test('the hold-to-arm chord is two different playable keys', () => {
+  assert.equal(HOLD_TO_ARM.notes.length, 2);
+  assert.equal(new Set(HOLD_TO_ARM.notes).size, 2, '两个音不能是同一个键');
+  for (const name of HOLD_TO_ARM.notes) {
+    const midi = midiFromName(name);
+    assert.ok(Number.isFinite(midi), `${name} should parse`);
+    assert.ok(MINILAB_KEYS.includes(midi), `${name} should be on the keyboard`);
+  }
+  assert.ok(
+    HOLD_TO_ARM.holdMs >= 800 && HOLD_TO_ARM.holdMs <= 5000,
+    '长按时长要落在手感区间里（太短会误触，太长按不住）',
+  );
+});
+
+test('the arm chord only opens when every required key is held', () => {
+  const [a, b] = HOLD_TO_ARM.notes;
+  assert.equal(isArmChord([]), false);
+  assert.equal(isArmChord([a]), false);
+  assert.equal(isArmChord([b]), false);
+  assert.equal(isArmChord(['C4', a]), false);
+  assert.equal(isArmChord([a, b]), true);
+  assert.equal(isArmChord([b, a, 'C4']), true, '同时按别的音不影响');
 });
 
 test('noteName handles accidentals and octave boundaries', () => {

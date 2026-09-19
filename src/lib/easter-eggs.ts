@@ -65,3 +65,28 @@ export function eggById(id: string): EasterEgg | undefined {
 }
 
 export const EGG_SEQUENCES = EASTER_EGGS.map((egg) => egg.notes);
+
+/**
+ * 提示模式的入口（触屏 / 鼠标 / 键盘共用）
+ * ------------------------------------------------------------
+ * 电脑上有 Shift+P；手机上没有 Shift，所以给同一个开关准备一个
+ * 用手指也能做的等价动作：**同时按住 D4 和 F#4 一秒**。
+ *
+ * 为什么是"按住"而不是点几下：
+ *   · 这两个键本来就属于琴键，按下必然要松手，长按不会和弹奏打架；
+ *   · 手上同时按两个音，比"某个区域连点三次"更难误触；
+ *   · 电脑键盘上等价于同时按住 x + g（见 notes.ts 的 KEYBOARD_MAP）。
+ *
+ * 两个音都必须落在 25 键范围内（tests/notes.test.mjs 会校验）。
+ * 这里只是数据；"按住够不够久"由 EasterEggManager 按 holdMs 判断。
+ */
+export const HOLD_TO_ARM = {
+  notes: ['D4', 'F#4'],
+  holdMs: 1000,
+} as const;
+
+/** 当前按住的那组音里，是否包含了入口要求的每一个音（纯函数，可单测） */
+export function isArmChord(held: Iterable<string>): boolean {
+  const set = new Set(held);
+  return HOLD_TO_ARM.notes.every((note) => set.has(note));
+}

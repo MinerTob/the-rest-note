@@ -132,7 +132,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 钢琴采样引擎 | `src/scripts/piano.ts`、`src/lib/piano.ts` | `PianoEngine`、`nearestSample()`、`playbackRateFor()`、`samplesForRange()` | 事件 `piano:state` / `piano:context` / `piano:progress` |
 | 合成器（无采样兜底） | `src/scripts/synth.ts` | `KeysSynth.unlock()` / `noteOn()` / `noteOff()` / `allNotesOff()` | — |
 | 真实 MIDI 键盘 | `src/scripts/midi.ts` | `MidiBridge`、`getMidiBridge()` | 事件 `midi:noteon` / `midi:noteoff` / `midi:change` |
-| 彩蛋（隐藏曲目） | `src/lib/easter-eggs.ts`、`src/lib/sequences.ts`、`src/scripts/easter-eggs.ts` | `EASTER_EGGS`、`createSequenceDetector()`、`createSequenceSession()`、`EasterEggManager` | `[data-note]`（琴键）、事件 `minilab:note` / `egg:hint` / `egg:accept` / `egg:miss` |
+| 彩蛋（隐藏曲目） | `src/lib/easter-eggs.ts`、`src/lib/sequences.ts`、`src/scripts/easter-eggs.ts` | `EASTER_EGGS`、`HOLD_TO_ARM` / `isArmChord()`（入口和弦）、`createSequenceDetector()`、`createSequenceSession()`、`EasterEggManager`（`toggleHint()` / `holdNote()` / `releaseNote()`） | `[data-note]`（琴键）、事件 `minilab:note` / `minilab:release` / `egg:hint` / `egg:accept` / `egg:miss` |
 | About 身份实验场 | `src/components/IdentityStage.astro`、`src/scripts/identity-player.ts`、`identity-physics.ts`、`src/lib/identity.ts`、`identity-midi.ts` | `createIdentityPhysics()`（`reveal()` / `restore()` / `placeMissing()` / `snapshot()`，内部 `makeBody()` 管尺寸自愈）、`initIdentity()`、`disposeIdentity()`、`setIdentityActive()`、`identityRevealPlan()` | `[data-identity*]`、`[data-identity-tag][data-revealed]`、cookie `rest-note-identity-v2-<visit>` |
 | 自我介绍页（第十个标签的去处） | `src/views/IntroPage.astro`、`src/pages/about/intro/index.astro`、`src/content/pages/intro.zh.md` / `intro.en.md`、`src/lib/pages.ts` | `getPage('intro', lang)`、`render(entry)`、`introRoutes` | `[data-identity-link]`（写在 About 页的标签上） |
 | 联系方式 / 复制 | `src/components/ContactTiles.astro`、`ContactPanel*.astro`、`src/scripts/contact.ts`、`src/lib/contact.ts` | `initContact()`、`CONTACT`、`isInteractive()` | `[data-contact]`、`[data-contact-row]`、`[data-contact-copy]` |
@@ -390,12 +390,21 @@ createSequenceSession(sequence, { maxGapMs = 2600 }): { push(note, at?) => { cor
 // scripts/easter-eggs.ts
 class EasterEggManager extends EventTarget {
   get hintArmed(): boolean;
-  toggleHint(): void;    // Shift+P：进入 / 退出提示模式
+  toggleHint(): void;    // 进入 / 退出提示模式（两条入口都走它）
   disarm(): void;
+  holdNote(note): void;      // 长按入口：某个音被按住
+  releaseNote(note): void;   // 长按入口：某个音松开
   note(note: string): void;   // 唯一的音符入口
 }
 function initEasterEggs(store: AppStore, theme: ThemeManager): void;
 ```
+
+**进入提示模式的两条入口**（等价，配置在 `lib/easter-eggs.ts` 的 `HOLD_TO_ARM`）：
+
+| 入口 | 谁用 | 怎么判定 |
+| --- | --- | --- |
+| `Shift` + `P` | 电脑键盘 | `keydown`，只认带 shiftKey 的 p；页面上没有 MiniLab 时无效 |
+| **同时按住 `D4` + `F#4` 一秒** | 触屏 / 鼠标 / 键盘都行（手机上唯一做得到的） | `minilab:note` / `minilab:release` 维护"当前被按住的那组音"，`isArmChord()` 为真之后计时 `HOLD_TO_ARM.holdMs`（1000ms）；中途松开任何一个就作废，按住不放只触发一次（想退出得松开再按住同样久）。键盘上等价于按住 `x` + `g` |
 
 **三条铁律（写在 `lib/easter-eggs.ts` 注释里）**：
 
@@ -408,6 +417,7 @@ function initEasterEggs(store: AppStore, theme: ThemeManager): void;
 ```
 MiniLab 弹下某个键
   → window 'minilab:note' { midi, note, velocity, source }
+     → EasterEggManager.holdNote(note)   （只喂给长按入口）
      → EasterEggManager.note(note)
         → 不在提示模式 → 直接返回（不比对、不记录）
         → 在提示模式：SequenceSession.push()
@@ -415,6 +425,10 @@ MiniLab 弹下某个键
                                + 'space:message' 系统提示 + 'egg:hint' 收尾
              按对 → window 'egg:accept'（琴键先 ACCEPTED，再亮下一个）
              按错 → window 'egg:miss'（当前提示轻闪一下，不清空重来）
+
+MiniLab 松开某个键
+  → window 'minilab:release' { midi, note }
+     → EasterEggManager.releaseNote(note)  （长按入口：中途松手就作废计时）
 ```
 
 - 管理器是 `getGlobal().eggs` 单例：**客户端路由换页后进度不丢**。
@@ -588,7 +602,8 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 | `change` | `AppStore` | `{ state, previous }` | `app-state.ts` | `theme.ts`、其它 UI |
 | `change` | `MusicManager` | — | `music-manager.ts` | `music-ui.ts` |
 | `space:message` | window | `{ message, detail? }` | 彩蛋 / 联系复制 / 任意模块 | `system-message.ts`（LCD 提示） |
-| `minilab:note` | window | `{ midi, note, velocity, source }` | `minilab.ts` | `easter-eggs.ts` |
+| `minilab:note` | window | `{ midi, note, velocity, source }` | `minilab.ts` | `easter-eggs.ts`（旋律比对 + 长按入口计时） |
+| `minilab:release` | window | `{ midi, note }` | `minilab.ts` | `easter-eggs.ts`（长按入口：中途松手就作废） |
 | `egg:hint` | window | `{ armed, note }` | `easter-eggs.ts` | `minilab.ts`（点亮下一键 / 熄灭） |
 | `egg:accept` | window | `{ note }` | `easter-eggs.ts` | `minilab.ts`（当前键 ACCEPTED） |
 | `egg:miss` | window | `{ note }` | `easter-eggs.ts` | `minilab.ts`（提示轻闪一下） |
@@ -675,6 +690,14 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-19 · 手机端也能进彩蛋提示模式：同时按住 D4 + F#4 一秒
+
+- 需求：本人发现手机上按不了 `Shift`+`P`，而"先进入提示模式"是整条彩蛋链路的前置条件——等于手机永远进不去（琴键本身支持多点触控，缺的只是这个开关）。本人选定等价动作：**同时按住 D4 与 F#4**，时长先定 2 秒，实测后觉得久，改成 **1 秒**。
+- 文件：`src/lib/easter-eggs.ts`（新增 `HOLD_TO_ARM` + `isArmChord()`）、`src/scripts/easter-eggs.ts`（`holdNote()` / `releaseNote()` / `syncHold()`，并监听 `minilab:release`）、`src/scripts/minilab.ts`（`release()` 里补发 `minilab:release`）、`tests/notes.test.mjs`（+2 条）、`DEVELOPMENT.md`。
+- 逻辑：MiniLab 松键时派发 `minilab:release`（与既有的 `minilab:note` 对称）；管理器只维护"当前哪些音正被按住"，`isArmChord()` 成立后计时 `HOLD_TO_ARM.holdMs`，到点才 `toggleHint()`。中途松开任何一个音就作废重来；一直按着不放只触发一次，想退出得先松开、再按住同样久。桌面 `Shift`+`P` 保留，两条入口等价，都只在有 MiniLab 的页面上有效。
+- 钩子/数据：新增自定义事件 **`minilab:release`**（detail `{ midi, note }`，已登记进 §6.2）；无新增 DOM 钩子、无 storage key。入口和弦本身是 `lib/easter-eggs.ts` 里的数据，改时长只动 `HOLD_TO_ARM.holdMs` 一个值。
+- 验证：`npm test` 71/71（新增"入口和弦必须是 25 键上的两个不同键"与"必须两个音都按住才算"）；Playwright 手机模拟（390×844、`isMobile`+`hasTouch`、CDP 双指触摸事件）实测：只按住 D4 2.3s 不触发、两键同按 **0.6s 不触发**、**同按 1.3s 进入提示模式**（LCD 出现 `LISTEN`、目标键亮起），随后点 G4 E4 F4 G4 成功切到 baroque 并提示 `SEQUENCE ACCEPTED`；桌面端 `Shift`+`P`（开 / 关）与按住 `x`+`g`（D4+F#4 的键盘映射）都通过，全程 0 console error。
 
 ### 2026-09-19 · 现代主题：全站统一淡蓝背景 + 时钟 / 播放器 / 联系方式的厚玻璃
 

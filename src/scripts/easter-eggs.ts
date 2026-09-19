@@ -1,4 +1,10 @@
-import { EASTER_EGGS, eggForTheme, type EasterEgg } from '@/lib/easter-eggs';
+import {
+  EASTER_EGGS,
+  HOLD_TO_ARM,
+  eggForTheme,
+  isArmChord,
+  type EasterEgg,
+} from '@/lib/easter-eggs';
 import { createSequenceSession, type SequenceSession } from '@/lib/sequences';
 import { getGlobal } from './global';
 import { getDocumentLang, getPreferredLang } from './lang';
@@ -16,11 +22,15 @@ import type { ThemeManager } from './theme';
  *   序列识别**只在提示模式里**运行。
  *
  * 普通状态下随便弹什么 —— 鼠标、触摸、电脑键盘、真实 MIDI 键盘 ——
- * 都只是弹钢琴，永远不会触发彩蛋。只有先按 Shift+P 进入提示模式，
+ * 都只是弹钢琴，永远不会触发彩蛋。只有先进入提示模式，
  * 提示模式才会按当前主题挑一条序列开始逐个点亮琴键。
  *
+ * 进入提示模式有两个等价入口（配置见 lib/easter-eggs.ts 的 HOLD_TO_ARM）：
+ *   · 电脑键盘：Shift + P
+ *   · 触屏 / 鼠标：同时按住 D4 与 F#4 一秒（手机上没有 Shift，只有这条）
+ *
  * 它自己不认识 MiniLab，也不知道琴键长什么样：
- * - 输入只有 window 上的 'minilab:note' 事件
+ * - 输入只有 window 上的 'minilab:note' / 'minilab:release' 事件
  * - 输出只有三件事：改主题（音乐跟着 theme profile 走）、
  *   记下解锁、加上一行动词很短的 LCD 提示
  */
@@ -42,6 +52,11 @@ export class EasterEggManager extends EventTarget {
   private theme: ThemeManager;
   private entries: EggEntry[];
   private armedId: string | null = null;
+  /** 当前被按住不放的音：长按入口用，只有 note / release 两个来源会写它 */
+  private held = new Set<string>();
+  private holdTimer = 0;
+  /** 这一次"按住"已经触发过，松开之前不会触发第二次 */
+  private holdFired = false;
 
   constructor(store: AppStore, theme: ThemeManager) {
     super();
@@ -89,6 +104,44 @@ export class EasterEggManager extends EventTarget {
     this.armedId = null;
     this.store.set({ hintMode: false }, { persist: false });
     this.emitHint();
+  }
+
+  /**
+   * 长按入口：某个音被按住。
+   *
+   * 只有入口要求的音**全部**被按住满 HOLD_TO_ARM.holdMs 才切换提示模式；
+   * 中途松开任何一个就作废重来。按着不放只触发一次 ——
+   * 想再切换（退出提示模式）得先松开、再重新按住一段同样的时间。
+   */
+  holdNote(note: string): void {
+    this.held.add(note);
+    this.syncHold();
+  }
+
+  /** 长按入口：某个音松开了 */
+  releaseNote(note: string): void {
+    this.held.delete(note);
+    this.syncHold();
+  }
+
+  private syncHold(): void {
+    if (!isArmChord(this.held)) {
+      if (this.holdTimer !== 0) {
+        window.clearTimeout(this.holdTimer);
+        this.holdTimer = 0;
+      }
+      this.holdFired = false;
+      return;
+    }
+
+    // 已经在计时 / 这一次已经触发过，就什么都不做
+    if (this.holdFired || this.holdTimer !== 0) return;
+
+    this.holdTimer = window.setTimeout(() => {
+      this.holdTimer = 0;
+      this.holdFired = true;
+      this.toggleHint();
+    }, HOLD_TO_ARM.holdMs);
   }
 
   /**
@@ -169,12 +222,22 @@ export function initEasterEggs(store: AppStore, theme: ThemeManager): void {
 
   // 唯一的音符来源。MIDI、触摸、鼠标、电脑键盘最终都走这里，
   // 但只有提示模式内部才会去比对序列。
+  // 同时喂给长按入口：它只关心"哪几个音正被按住"，不看序列。
   window.addEventListener('minilab:note', (event) => {
     const detail = (event as CustomEvent<{ note?: string }>).detail;
-    if (detail?.note) manager.note(detail.note);
+    if (!detail?.note) return;
+    manager.holdNote(detail.note);
+    manager.note(detail.note);
   });
 
-  // Shift + P：隐藏入口，而且只在真的有 MiniLab 的页面上有效
+  // 松键：长按入口靠它判断"中途松手了没有"
+  window.addEventListener('minilab:release', (event) => {
+    const detail = (event as CustomEvent<{ note?: string }>).detail;
+    if (detail?.note) manager.releaseNote(detail.note);
+  });
+
+  // Shift + P：电脑上的隐藏入口，而且只在真的有 MiniLab 的页面上有效
+  // （手机上按不了，等价动作是同时按住 D4 + F#4 一秒，见 HOLD_TO_ARM）
   window.addEventListener('keydown', (event) => {
     if (!event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key.toLowerCase() !== 'p') return;
