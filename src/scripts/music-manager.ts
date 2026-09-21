@@ -85,7 +85,6 @@ export class MusicManager extends EventTarget {
    * 恢复路径都要经过它；入场页按钮里那次真实的 `play()` 不走这里。
    */
   private autoStart: boolean;
-  private fallbackBound = false;
   private fellBack = false;
   /**
    * 本次文档里这首歌**已经响过一次**没有。
@@ -124,18 +123,13 @@ export class MusicManager extends EventTarget {
 
     /*
      * 自己管自己的恢复，不靠任何 UI：切回这个标签页 / 从 bfcache 回来时，
-     * 只要"应该响而没响"就再试一次（浏览器拦下的那次会走下面的手势兜底）。
+     * 只要"应该响而没响"就再试一次。被自动播放策略拦下的那一种，等
+     * `audio-unlock.ts` 在页面第一次真实手势时统一再来（这里不自己挂手势监听）。
      */
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) this.retryIfIdle();
     });
     window.addEventListener("pageshow", () => this.retryIfIdle());
-  }
-
-  /** 应该响却没响时再试一次（不改变用户的暂停意图，也不碰 About 的让位） */
-  private retryIfIdle(): void {
-    if (this.userPaused || this.inAbout || !this.autoStart || this.isPlaying()) return;
-    void this.attemptStart();
   }
 
   /**
@@ -145,6 +139,16 @@ export class MusicManager extends EventTarget {
    */
   setAutoStart(allowed: boolean): void {
     this.autoStart = allowed;
+  }
+
+  /**
+   * 手势解锁用：让"该响而没响"的这首接上（幂等，尊重 userPaused / About 让位 / 闸门）。
+   * `audio-unlock.ts` 在第一次 pointerdown / keydown 时调它 —— 手势本身不等于
+   * "要出声"，这里只恢复本来就应该播放的那一首。
+   */
+  retryIfIdle(): void {
+    if (this.userPaused || this.inAbout || !this.autoStart || this.isPlaying()) return;
+    void this.attemptStart();
   }
 
   /** 把「真实在放的那首」写回统一状态，播放器显示的就是这个值 */
@@ -274,37 +278,11 @@ export class MusicManager extends EventTarget {
     void this.attemptStart();
   }
 
-  /** 浏览器拦截自动播放时，挂一次性监听，等用户第一次交互后再初始化 */
-  private bindAutoplayFallback(): void {
-    if (this.fallbackBound) return;
-    this.fallbackBound = true;
-
-    const events: (keyof WindowEventMap)[] = [
-      "pointerdown",
-      "keydown",
-      "touchstart",
-      /* 滚动本身也可能带着手势（手机上滚动就是 touch / pointer），
-         多点几种输入，用户动一下就能接上，不用非得点到播放器那一块 */
-      "touchmove",
-      "wheel",
-      "scroll",
-      "pointerup",
-    ];
-    const onFirstGesture = () => {
-      events.forEach((name) =>
-        window.removeEventListener(name, onFirstGesture),
-      );
-      this.fallbackBound = false;
-      if (!this.userPaused && !this.inAbout && this.autoStart) void this.attemptStart();
-    };
-    events.forEach((name) =>
-      window.addEventListener(name, onFirstGesture, {
-        once: false,
-        passive: true,
-      }),
-    );
-  }
-
+  /**
+   * 被浏览器拦下自动播放时**不再自己挂手势监听**：全局的手势解锁统一由
+   * `audio-unlock.ts` 负责，它会在第一次 pointerdown / keydown 时调 `retryIfIdle()`。
+   * 这里只是把状态标成 ready，等那只手落下来。
+   */
   private async attemptStart(): Promise<void> {
     if (this.inAbout) return;
     const el = this.ensureElement();
@@ -319,7 +297,6 @@ export class MusicManager extends EventTarget {
       this.applyVolumeForStart();
     } catch {
       this.setState("ready");
-      this.bindAutoplayFallback();
     }
   }
 
@@ -413,9 +390,9 @@ export class MusicManager extends EventTarget {
        * 被浏览器拦下（或那一次手势被系统弹窗吃掉）时挂上一次性监听，
        * 等下一次交互自己再试 —— 之前这里只把状态标成 ready 就完了，
        * 用户再按播放键也可能还是不出声，只能刷新页面（本人实测）。
+       * 现在不自己挂监听了：等页面第一次真实手势由 audio-unlock.ts 统一再来一次。
        */
       this.setState("ready");
-      this.bindAutoplayFallback();
     }
   }
 
@@ -598,8 +575,7 @@ export class MusicManager extends EventTarget {
         await incoming.play();
         started = true;
       } catch {
-        // 浏览器还是不让播：不硬来，等下一次手势
-        this.bindAutoplayFallback();
+        // 浏览器还是不让播：不硬来，等 audio-unlock 在第一次手势时统一再来
       }
     }
 

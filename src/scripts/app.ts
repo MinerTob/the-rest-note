@@ -8,7 +8,8 @@ import { initMusicUI } from './music-ui';
 import { initContact } from './contact';
 import { initIdentity, disposeIdentity, setIdentityActive } from './identity-player';
 import { initNocturne, disposeNocturne } from './nocturne';
-import { primeIdentityPianoOnFirstGesture, releaseIdentityPiano } from './identity-audio';
+import { releaseIdentityPiano } from './identity-audio';
+import { initAudioUnlock } from './audio-unlock';
 import { initSystemMessages } from './system-message';
 import { initTheme } from './theme';
 import { initThemeSwitcher } from './theme-switch';
@@ -253,17 +254,20 @@ function boot(): void {
   initContact();
   if (!journey) initIdentity();
   initNocturne();
-  // 夜曲的 AudioContext 必须在用户手势里唤醒（iOS）：入场页那次点击之外，
-  // 再留一条"第一次触摸/按键就唤醒"的兜底，见 identity-audio.ts。
-  primeIdentityPianoOnFirstGesture();
   initMiniLab();
   initEasterEggs(global.store, theme);
   initThemeSwitcher(global.store, theme);
   if (journey) initJourney(journey, global.music);
 
-  // 首次硬加载由入场页里的真实点击解锁声音；站内导航不重复拦截。
+  /*
+   * 音频解锁只有这一个入口（见 audio-unlock.ts）：
+   *   · 没有入场页这一趟（SAME VISIT 刷新 / 站内换页）：先自己试自动恢复，
+   *     被浏览器拦下就等着 —— 页面第一次 pointerdown / keydown 会统一再来一次；
+   *   · 入场页还立着（NEW VISIT 没点"进入"）：什么都不做，绝不起播。
+   *     那一路由入场页在"进入"的同一个手势里调 `audioUnlock()` 接手。
+   */
   const gated = initEntryGate(global.music);
-  if (!gated) global.music.init();
+  initAudioUnlock({ gated });
 }
 
 document.addEventListener('astro:before-swap', (event) => {

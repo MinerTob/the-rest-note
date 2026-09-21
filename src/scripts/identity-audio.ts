@@ -35,40 +35,14 @@ export function usesIdentityPiano(): boolean {
  * 原来的顺序是"用户滑到关于区 → 才 `new AudioContext()`" —— 那一下不在手势里，
  * 在 iPhone 上建出来是 suspended 的，于是只会显示"点击或按键，即可接入钢琴演奏"，
  * 不会自己开始弹（本人实测）；桌面浏览器在那次入场点击之后就已经放行，所以看不到这个问题。
- * 现在入场页点"进入空间"时就顺手调它，滑到底部就能直接开始。
+ *
+ * 现在由 `audio-unlock.ts` 统一调它：入场页点"进入空间"那次手势、
+ * 以及页面第一次 pointerdown / keydown（没走入场页的刷新 / 站内换页）。
+ * 这里不再自己挂 document 监听 —— 以前和 MusicManager 的手势兜底重复，两个入口。
  */
 export function primeIdentityPiano(): void {
   if (!usesIdentityPiano()) return;
   identityPiano().ensure();
-}
-
-/**
- * 兜底：这一页需要夜曲、而这架琴还睡着的时候，页面上**第一次用户手势**就把它唤醒。
- *
- * 覆盖"没走入场页"的情况 —— 站内跳到首页、或者刷新之后（入场页只在一次新的
- * navigate 时出现），用户可能是直接往下滑到关于区的：那次触摸（pointerdown）
- * 就是合法手势，夜曲于是能在滑到位的同一刻自己开始，而不是停在那里等第二次点击。
- */
-export function primeIdentityPianoOnFirstGesture(): void {
-  if (!usesIdentityPiano()) return;
-  if (identityPiano().isRunning) return;
-
-  /*
-   * 注意这里**不能**只要一次（`{ once: true }`）。iOS 上"这一次手势能不能解锁音频"
-   * 并不总是成立：入场那一下点击如果同时弹了"运动与方向"的系统权限框，那一次激活
-   * 可能就用掉了 —— 只试一次的话，之后按播放键也不会再唤醒它，只有刷新页面重新来一次
-   * 干净的手势才恢复（本人实测："文件都下好了，点播放就是不出声，刷新一下就好了"）。
-   * 所以一直挂着，直到上下文真的在跑为止。
-   */
-  const prime = () => {
-    primeIdentityPiano();
-    if (identityPiano().isRunning) {
-      document.removeEventListener('pointerdown', prime, { capture: true });
-      document.removeEventListener('keydown', prime, { capture: true });
-    }
-  };
-  document.addEventListener('pointerdown', prime, { capture: true });
-  document.addEventListener('keydown', prime, { capture: true });
 }
 
 /** 下一张页面不再需要这架琴：停声、断开节点、关掉 AudioContext */

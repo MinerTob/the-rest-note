@@ -106,6 +106,15 @@ export class NocturneTransport {
     return this.playing;
   }
 
+  /**
+   * 这台播放器"想不想播"（用户 / 页面表达过的意图）。
+   * 只读：`audio-unlock.ts` 用它决定手势解锁时要不要把夜曲接上 ——
+   * 手势本身不等于"要出声"，没表达过想播就不起。
+   */
+  isDesired(): boolean {
+    return this.desired;
+  }
+
   isReady(): boolean {
     return this.ready;
   }

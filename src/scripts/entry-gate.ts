@@ -1,6 +1,6 @@
 import type { MusicManager } from './music-manager';
 import { requestMotionAccess } from './identity-motion';
-import { primeIdentityPiano } from './identity-audio';
+import { audioUnlock } from './audio-unlock';
 import { primeMiniLabPiano } from './minilab';
 import { visitSession } from './visit-session';
 
@@ -58,27 +58,24 @@ export function initEntryGate(music: MusicManager): boolean {
     if (visit.hasEntered()) return;
     visit.markEntered();
 
-    /*
-     * 用户自己点了"进入"：这里是解除音乐闸门的地方 —— 先放开（`setAutoStart(true)`），
-     * 再在同一个可信手势里真正开播。顺序不能反：闸门关着时 `play()` 之外的自动恢复
-     * 全被挡住，先放开才能让"之前被挡下的那几条恢复路径"接上这次手势。
-     */
+    // 用户点了"进入"：先解除闸门，后面那一下 play() 与解锁才不会被它挡住
     music.setAutoStart(true);
 
-    // This call must stay directly inside the trusted click handler: it is what
-    // unlocks audible playback under browser autoplay policies.
+    // 这一下必须留在可信手势里：它才是自动播放策略认的那次启动
     void music.play();
+
+    /*
+     * 同一个可信手势里解锁整套音频（见 audio-unlock.ts）：把"第一次手势就解锁"
+     * 那条挂上（这一次就是那一次）、建/唤醒"关于"那架钢琴的 AudioContext
+     * （iOS 只允许在手势里做，晚了会挂起）、再按各自意图恢复。
+     * MP3 上面那一下已经起播，这里是幂等的。
+     */
+    audioUnlock();
 
     // 运动与方向权限也只能在用户手势里申请。这里是全站人人都要做的那一次点击，
     // 同意之后 About 页的摇晃彩蛋当趟就能用（iOS 上不在这里问，用户到了那一页
     // 还得先碰标签才可能拿到权限，实测就是"摇了没反应"）。
     requestMotionAccess();
-
-    // 同一个手势里顺手把"关于"那架钢琴的 AudioContext 建起来。
-    // iOS 只允许在用户手势里创建/唤醒 AudioContext：不在这里做，用户滑到关于区时
-    // 那次创建是"手势之外"的，上下文会挂起，夜曲不会自动开始（本人 iPhone 实测）。
-    // 只在真正会用到它的页面（首页关于区 / About / 自我介绍）预载，别的页面不动。
-    primeIdentityPiano();
 
     // 同一手势里也把 MiniLab 那架琴预热：它的采样原来要等你第一次按琴键才开始下载，
     // 于是第一声只能拿合成器顶上（本人反馈"第一声不是真实音源"）。现在走到实验室前就绪。
