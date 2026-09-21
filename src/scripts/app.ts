@@ -227,32 +227,34 @@ function boot(): void {
   // 它们放的是同一首夜曲的钢琴演奏，不是 MusicManager 里的 MP3。
   const aboutFamily = Boolean(document.querySelector('[data-identity], [data-nocturne]'));
   /*
-   * 换页带过来的落点：这里再对齐一次（关于区把标签搬进 body 之后文档高度会变），
-   * 顺便用它决定"这一页上来就在关于区吗" —— 少了这一步，从自我介绍页返回时
-   * 会先按首页顶部放一下背景音乐、再被观察器纠正（本人听到的"先响一下首页音乐"）。
+   * 这一趟的**初始目标位置**。
+   *
+   * NEW VISIT（地址栏重新输入网址 / 外链 / 新标签页）是一次全新的站点进入：
+   * 它的初始目标就是 Home 顶部（scrollY 0）。上一趟留下的任何落点都不该把这一趟
+   * 恢复到 About / Blog / Lab —— 连"只属于上一趟"的那条站内换页落点记忆也一起忽略。
+   * 入场页是覆盖在 Home 之上的入场层，不是盖在旧页面上的遮罩；所以这一趟从一开始
+   * 底层就在 Home，点"进入"只是揭开它，不会再发生"从旧位置跳回 Home"。
+   *
+   * SAME VISIT（刷新 / 前进后退 / 站内换页 / 语言切换）走下面原来的恢复逻辑，一行未动：
+   *   · 站内换页回来的精确落点 = `pendingRestore`（或 space.scene-scroll）；
+   *   · 其余（刷新、前进后退）没有落点时**什么都不做** —— 交给浏览器与 ClientRouter
+   *     各自的恢复机制，这也是"决定初始目标"而不是"事后纠正位置"。
    */
-  const restored = pendingRestore ?? takeFamilyScroll(window.location.pathname);
+  const isNewVisit = visitSession().isNew;
+  const restored = isNewVisit
+    ? null
+    : (pendingRestore ?? takeFamilyScroll(window.location.pathname));
   pendingRestore = null;
-  if (restored !== null) {
+  if (isNewVisit) {
+    // 只覆盖初始目标，不动 history.state 里 SAME VISIT 以后还要用的那些字段
+    restoreScroll(0);
+  } else if (restored !== null) {
     restoreScroll(restored);
     // 布局随后一两帧还会动（关于区把标签搬进 body）：再对齐一次，仍然是 instant
     requestAnimationFrame(() => {
       if (Math.abs(window.scrollY - restored) > 4) restoreScroll(restored);
     });
   }
-  /*
-   * NEW VISIT 且入场页还没进：在揭开遮盖之前先把底层页面摆到 Home 顶部。
-   *
-   * 从"上一趟停在 About"的地址栏重进时，浏览器可能先把上一个滚动位置恢复回来，
-   * 而入场页只是覆盖层 —— 遮盖一摘，它背后就会短暂露出上一趟 About 的画面，
-   * 一直等到 entry-gate 的 cleanup 才回 Home（太晚）。
-   * 这里只做一次预定位（instant），不删不改 entry-gate cleanup 里的那三次回顶兜底，
-   * 也不碰 hash / history.state。
-   *
-   * 只在 `entryGateUp` 为真时执行：SAME VISIT 刷新、前进后退、站内换页都不走这里，
-   * 它们各自的落点恢复与保存逻辑一行未动。
-   */
-  if (entryGateUp && window.scrollY !== 0) restoreScroll(0);
   /*
    * 落点对齐好了，可以把第一帧的遮盖摘掉（见 global.css 的 [data-scroll-pending] 与
    * BaseLayout.astro 里那段 is:inline 脚本）。浏览器是在这一刻之前画第一帧的，
