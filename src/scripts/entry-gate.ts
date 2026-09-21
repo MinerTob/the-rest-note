@@ -4,17 +4,21 @@ import { primeIdentityPiano } from './identity-audio';
 import { primeMiniLabPiano } from './minilab';
 import { visitSession } from './visit-session';
 
-function applySystemLanguage(gate: HTMLElement): void {
-  const language = navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
-  for (const element of gate.querySelectorAll<HTMLElement>('[data-entry-copy]')) {
-    element.textContent = element.dataset[language] ?? element.dataset.en ?? '';
-  }
-
-  const label = language === 'zh' ? '进入网站' : 'Enter website';
+/**
+ * 入场页文案固定中英双语（写在组件里，不再按 `navigator.language` 二选一），
+ * 这里只负责"可以出现了"和无障碍标签。
+ */
+function markGateReady(gate: HTMLElement): void {
+  const label = '进入网站 / Enter website';
   gate.setAttribute('aria-label', label);
   gate.querySelector<HTMLButtonElement>('[data-entry-button]')?.setAttribute('aria-label', label);
-  gate.dataset.language = language;
   gate.classList.add('is-ready');
+  /*
+   * 万一 BaseLayout 里那个首屏预判把 `data-entry` 写成了 open（它只敢在
+   * "确实同一趟、确实已经进过站"时写），而这里判定这次要拦人：把它撤掉，
+   * 入场页立刻就是那个不透明的首帧（CSS 里 :has 那条），不会再闪一下主页。
+   */
+  delete document.documentElement.dataset.entry;
 }
 
 function setPageLocked(gate: HTMLElement, locked: boolean): void {
@@ -48,7 +52,7 @@ export function initEntryGate(music: MusicManager): boolean {
     return false;
   }
 
-  applySystemLanguage(gate);
+  markGateReady(gate);
   setPageLocked(gate, true);
   const button = gate.querySelector<HTMLButtonElement>('[data-entry-button]');
   if (!button || gate.dataset.bound) return true;

@@ -58,6 +58,22 @@ const rss = rssHref ?? (lang === 'zh' ? '/rss.xml' : '/en/rss.xml');
       updatedTime={updatedTime}
     />
     <ClientRouter />
+    {/* 首屏预判（内联、在 body 解析之前跑一次）：同一次访问的刷新 / 前进后退直接当"不用入场页"，
+        免得为了它先画一帧入场页。判定故意比 visit-session 保守（只认"确实同一趟、确实已经进过站"），
+        拿不准就什么都不写，交给 entry-gate.ts 按同一套规矩决定。 */}
+    <script is:inline>
+      try {
+        var token = sessionStorage.getItem('rest-note.visit');
+        var passed = sessionStorage.getItem('rest-note.entry-passed') === '1';
+        var kind = (performance.getEntriesByType('navigation')[0] || {}).type || 'navigate';
+        var entry = history.state && history.state.restNoteVisit;
+        if (token && passed && entry === token && kind !== 'navigate') {
+          document.documentElement.dataset.entry = 'open';
+        }
+      } catch (e) {
+        /* 隐私模式 / 老浏览器：留给 JS 判定 */
+      }
+    </script>
   </head>
 
   <body class:list={{ 'copyright-only': copyrightOnly }}>

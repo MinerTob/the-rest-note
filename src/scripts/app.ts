@@ -18,6 +18,7 @@ import { initEntryGate } from './entry-gate';
 import { trackInputModality } from './input-modality';
 import { SCENE_ENTER, SCENE_THRESHOLDS, sceneCoverage, sceneDecision } from '@/lib/scene';
 import { stopNocturneTransport } from './nocturne-transport';
+import { visitSession } from './visit-session';
 import {
   isLanguageSwap,
   peekFamilyScroll,
@@ -253,6 +254,12 @@ document.addEventListener('astro:before-swap', (event) => {
 // 换页真的发生了：放开闸门，让这一页的 boot 跑一次（见 boot() 开头的说明）。
 document.addEventListener('astro:after-swap', () => {
   booted = false;
+  /*
+   * 站内换页：路由会把 `<html>` 的属性整体换成新文档的（新文档没有 data-entry），
+   * 这里先补回"这一趟已经进过站、不用入场页"的标记 —— 否则换页那一瞬会先画一帧入场页
+   * （CSS 见 EntryGate.astro：没有这个标记时入场页不透明、主页内容藏起来）。
+   */
+  if (visitSession().hasEntered()) document.documentElement.dataset.entry = 'open';
   /*
    * 回到这一页：**第一帧就直接落在离开时那个 scrollY 上**（instant）。
    * 放在这里是因为 router 换页时的 scrollTo(0, 0) 已经发生、而新页面的第一帧还没拍，

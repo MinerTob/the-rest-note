@@ -560,7 +560,12 @@ visitSession(): VisitSession;                  // 见 §5.15：这一趟的 id /
 - **点"进入"之后一定落在首页最顶上（`#home`）**：遮罩收起时把地址里遗留的锚点（浏览器恢复标签页时常见的 `#about` / `#blog`）去掉，并 `scrollTo(0, 0)`；因为 `html` 有 `scroll-behavior: smooth`，必须用 `behavior: 'instant'`，否则会当着他的面滑一大段。**要补三次**（立即 / 下一帧 / 260ms 后）：Safari 常在遮罩收起之后才把上次的滚动位置恢复回来，只滚一次会被它盖掉；后两次都跳过"有 `#锚点`"的情况 —— 那是用户自己点的站内跳转，不能抢。站内导航走客户端路由，不经过这里。
 - 同一个 click 处理器里还调两个"必须在用户手势里做"的动作：`requestMotionAccess()`（`identity-motion.ts`，申请"运动与方向"权限，见 §5.8）和 `primeIdentityPiano()`（`identity-audio.ts`，把"关于"那架钢琴的 AudioContext 建起来并开始预载采样，见 §5.14）。两者都只在真正需要它们的页面生效，桌面 / 不需要 / 已经做过时静默返回，不影响入场。
 - 锁定期间 body 加 `.entry-locked`，除 gate 和 `.ambient` 外的直接子元素设为 `inert`。
-- 文案跟随浏览器语言（`navigator.language` 是否 `zh` 开头），不是站点语言。
+- **文案固定中英双语**：上中文、下 English（`.entry-gate__alt` 那一行），**不再**按 `navigator.language` 二选一；`aria-label` 也是 `进入网站 / Enter website`。所以 `data-entry-copy` / `data-zh` / `data-en` 那套运行期换字已经删掉。
+- **首屏就应该是入场页（不能先闪一下主页）**：入场页的显示**不靠 JS**。
+  - `EntryGate.astro` 的 CSS 里：`html` 上没有 `data-entry="open"` 时（= 还没判定"这一趟不用拦"），入场页直接不透明（原来这里是 `opacity: 0`，等 JS 加 `.is-ready` 才淡入 —— 那 720ms 里主页是看得见的，就是"先闪主页再弹入场页"），同时把 `body > *`（除入场页与 `.ambient`）先 `visibility: hidden`。
+  - `data-entry="open"` 只由两处写：`BaseLayout.astro` 里 `<head>` 的内联脚本（同步、在 body 解析之前跑；只在"确实同一趟访问、确实已经进过站、并且是刷新/前进后退"时写），以及 `app.ts` 的 `astro:after-swap`（站内换页时补回，免得换页那一瞬先画一帧入场页）。判定规矩仍以 `visit-session.ts` 为准，内联脚本只是它的保守子集；`entry-gate.ts` 判定"要拦人"时会把 `data-entry` 删掉。
+  - 入场页被移除后主页自动露出来（CSS 用 `body:has(> [data-entry-gate])` 兜底），所以不存在"忘了摘标记 → 白屏"的风险；不支持 `:has()` 的浏览器退化成老行为（可能闪一下），不会白屏。
+  - 没有再让入场页容器做 `gate-arrive`（0→1 的淡入）：那会短暂露出主页。面板本身的 `gate-panel-arrive` 保留。
 - `app.ts` 里：`if (!initEntryGate(music)) music.init();` —— 有入场页时由入场页负责解锁音频。
 - 收尾去掉遗留锚点时用 `history.replaceState(history.state, ...)`：`history.state` 上有这一趟访问的 id（`restNoteVisit`）和 Astro 的 `index` / 滚动位置，传 `null` 会把它们抹掉，于是"带着 `#锚点` 进站 → 进站 → 刷新"会被当成新访问。
 
@@ -742,6 +747,7 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 | `[data-i18n-aria]` + `data-aria-zh` / `data-aria-en` | 同上 | `swapChrome(lang)` | 运行期换 aria-label |
 | `[data-lang-switch="zh\|en"]` | `Header.astro` | `initLangSwitch()` | 语言切换链接 |
 | `html[data-visit]` | `visit-session.ts`（`new` / `same`） | 只有排查时人读（脚本不读） | 这次文档加载被判成"新的一趟访问"还是"同一趟"——"为什么又弹入场页"先看它 |
+| `html[data-entry="open"]` | `BaseLayout.astro` 的内联脚本（刷新 / 前进后退且已进过站）、`app.ts` 的 `after-swap`（站内换页） | `EntryGate.astro` 的 CSS | "这一趟不用入场页"：没有它时入场页不透明、主页内容先藏起来（首屏不闪） |
 
 ### 主题 / 时钟 / 音乐
 
@@ -807,6 +813,18 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-22 · 入场页抢回首帧（不再先闪一下主页）+ 入场页文案固定中英双语
+
+- 需求：本人报"两个设备上首次打开网站时会先短暂显示主页，然后 Entry Gate 才出现"；要求首帧就是入场页、不能先播主页动画/音乐再被盖住；不要靠 app.ts / hydration 之后才隐藏主页；不需要入场页的那几种加载（刷新、站内导航、前进后退）也不许白屏或额外闪烁；visit 判定语义不变；顺手把入场页文案固定成"上中文、下 English"。
+- 根因：入场页的显示全靠 JS —— `.entry-gate` 初始 `opacity: 0`，等 `app.ts` 跑到 `initEntryGate()` 里加 `.is-ready` 才淡入（还有 720ms 的 `gate-arrive`），这中间主页完整可见、它的入场动画也已经开始跑了。
+- 改动（只碰入场页这条路）：
+  1. `EntryGate.astro`：CSS 增加 `html:not([data-entry='open']) body:has(> [data-entry-gate])` 两条 —— 入场页直接不透明、`body > *`（除入场页与 `.ambient`）先 `visibility: hidden`（不动布局，动画照旧在门后跑）；删掉容器那条 `gate-arrive` 淡入（面板的 `gate-panel-arrive` 保留）；文案改成固定双语（`.entry-gate__alt` 第二行），删掉 `data-entry-copy` / `data-zh` / `data-en`。
+  2. `BaseLayout.astro`：`<head>` 里加一段内联脚本（同步、body 解析之前跑），只在"确实同一趟访问 + 已经进过站 + 刷新/前进后退"时给 `<html>` 写 `data-entry="open"` —— 刷新时首帧直接是主页、不会闪入场页。判定是 `visit-session.ts` 的保守子集。
+  3. `app.ts`：`astro:after-swap` 里若这一趟已进过站就补写 `data-entry="open"`（路由换页会把 `<html>` 属性整体换掉）。`entry-gate.ts`：判定要拦人时删掉 `data-entry`（保证首帧就是不透明的入场页），`applySystemLanguage()` 简化成 `markGateReady()`（只设双语 aria-label 与 `is-ready`）。
+- 文件：`src/components/EntryGate.astro`、`src/layouts/BaseLayout.astro`、`src/scripts/entry-gate.ts`、`src/scripts/app.ts`（各一处）、`DEVELOPMENT.md`（§5.11 / §7 / 本条）。没碰 nocturne transport、scene-scroll、`visit-session` 的判定、`identity-player` / `piano`、手机端关于区逻辑。
+- 钩子/数据：新增 `html[data-entry="open"]`（样式 + 排查用）；删掉 `[data-entry-copy]` + `data-zh` / `data-en` 运行期换字；storage key 与 visit 判定语义不变。
+- 验证：`npm test` 103/103；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。无头 Chrome 实测（`.shots/gate-firstframe-probe.mjs`）：全新访问的**第一帧** `gate=1.00 / content=hidden`（入场页不透明、主页藏起来）；进站后刷新第一帧 `data-entry=open / content=visible`、入场页全程 `opacity 0` 直到被摘掉（没有闪入场页）；站内换语言之后 `content=visible`、入场页不在。文案实测：上=中文 tagline、下=英文 tagline。
 
 ### 2026-09-22 · 关于 ⇄ 自我介绍 真正无缝（一台常驻播放器）+ 返回时第一帧就回到原 scrollY
 

@@ -2,7 +2,7 @@
 import { SITE } from '@/lib/site';
 ---
 
-<div class="entry-gate" data-entry-gate role="dialog" aria-modal="true" aria-label="Enter website">
+<div class="entry-gate" data-entry-gate role="dialog" aria-modal="true" aria-label="进入网站 / Enter website">
   <div class="entry-gate__light entry-gate__light--a" aria-hidden="true"></div>
   <div class="entry-gate__light entry-gate__light--b" aria-hidden="true"></div>
   <div class="entry-gate__grain" aria-hidden="true"></div>
@@ -11,23 +11,23 @@ import { SITE } from '@/lib/site';
     <span class="entry-gate__mark" aria-hidden="true">{SITE.mark}</span>
     <p class="entry-gate__eyebrow">PERSONAL DIGITAL SPACE</p>
     <h1 class="entry-gate__title">{SITE.name}</h1>
-    <p
-      class="entry-gate__tagline"
-      data-entry-copy
-      data-zh={SITE.tagline.zh}
-      data-en={SITE.tagline.en}
-    >{SITE.tagline.en}</p>
+    {/* 文案固定中英双语：上中文、下 English（不再按 navigator.language 二选一） */}
+    <p class="entry-gate__tagline">
+      <span>{SITE.tagline.zh}</span>
+      <span class="entry-gate__alt">{SITE.tagline.en}</span>
+    </p>
 
-    <button class="entry-gate__button" type="button" data-entry-button aria-label="Enter website">
-      <span data-entry-copy data-zh="进入空间" data-en="Enter the space">Enter the space</span>
+    <button class="entry-gate__button" type="button" data-entry-button aria-label="进入网站 / Enter website">
+      <span class="entry-gate__cta">
+        <span>进入空间</span>
+        <span class="entry-gate__alt">Enter the space</span>
+      </span>
       <span class="entry-gate__arrow" aria-hidden="true">→</span>
     </button>
-    <p
-      class="entry-gate__hint"
-      data-entry-copy
-      data-zh="欢迎光临这片小天地"
-      data-en="Welcome to this little corner"
-    >Welcome to this little corner</p>
+    <p class="entry-gate__hint">
+      <span>欢迎光临这片小天地</span>
+      <span class="entry-gate__alt">Welcome to this little corner</span>
+    </p>
   </div>
 </div>
 
@@ -58,6 +58,37 @@ import { SITE } from '@/lib/site';
 
   .entry-gate.is-ready {
     opacity: 1;
+  }
+
+  /*
+   * 首屏不能靠 JS：需要入场页时，**第一帧就应该是入场页**。
+   *
+   * `html` 上没有 `data-entry="open"` 时（= 还没人判定"这一趟不用拦"）：
+   *   · 入场页立刻不透明（原来这里是 opacity: 0，等 JS 加 .is-ready 才淡入 ——
+   *     那 720ms 里主页是看得见的，就是本人说的"先闪一下主页"）；
+   *   · 主页那些直接子元素先藏起来（visibility，不动布局，动画照旧在门后跑）。
+   * `data-entry="open"` 由 BaseLayout 里的内联脚本（同一次访问的刷新 / 前进后退）
+   * 或 app.ts 的 after-swap（站内换页）写上；入场页一旦被移除，用 :has() 兜底自动露出来。
+   * 浏览器不支持 :has() 时这两条都不生效 —— 退化成老行为（可能闪一下），不会白屏。
+   */
+  :global(html:not([data-entry='open']) body:has(> [data-entry-gate]) > :not([data-entry-gate]):not(.ambient)) {
+    visibility: hidden;
+  }
+
+  :global(html:not([data-entry='open']) body:has(> [data-entry-gate]) .entry-gate:not(.is-leaving)) {
+    opacity: 1;
+  }
+
+  /* 双语第二行：换行、略小声，其余跟随原样式 */
+  .entry-gate__alt {
+    display: block;
+    font-size: 0.92em;
+    opacity: 0.82;
+  }
+
+  .entry-gate__cta {
+    display: block;
+    line-height: 1.4;
   }
 
   .entry-gate__grain {
@@ -190,10 +221,6 @@ import { SITE } from '@/lib/site';
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    .entry-gate.is-ready {
-      animation: gate-arrive 720ms var(--ease-out) both;
-    }
-
     .entry-gate__panel {
       animation: gate-panel-arrive 860ms var(--ease-out) 80ms both;
     }
@@ -215,11 +242,6 @@ import { SITE } from '@/lib/site';
     .entry-gate.is-leaving .entry-gate__panel {
       animation: gate-panel-leave 520ms var(--ease) both;
     }
-  }
-
-  @keyframes gate-arrive {
-    from { opacity: 0; }
-    to { opacity: 1; }
   }
 
   @keyframes gate-panel-arrive {
