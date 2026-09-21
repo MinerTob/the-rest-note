@@ -303,13 +303,13 @@ export function initIdentity(): void {
     frame = requestAnimationFrame(render);
   }
   /** 场景离开 / 按暂停：让播放器停，UI 立刻画最后一帧 */
-  function pause() {
-    transport.pause();
+  function pause(options: { byUser?: boolean } = {}) {
+    transport.pause(options);
     draw();
   }
-  function start() {
+  function start(options: { byUser?: boolean } = {}) {
     if (!sceneActive || !wantsPlayback) return;
-    transport.start();
+    transport.start(options);
   }
   /*
    * 订阅播放器的快照：状态、位置、循环数都从那里来。
@@ -334,10 +334,12 @@ export function initIdentity(): void {
     () => {
       if (transport.isPlaying()) {
         wantsPlayback = false;
-        pause();
+        // 用户自己按的暂停：记下来，自动恢复不许再把它接回去（见 nocturne-transport.ts）
+        pause({ byUser: true });
       } else {
         wantsPlayback = true;
-        start();
+        // 用户自己按的播放：清掉暂停记号，这次以他为准
+        start({ byUser: true });
       }
     },
     { signal },
@@ -361,7 +363,7 @@ export function initIdentity(): void {
       )
     )
       return;
-    if (wantsPlayback && !transport.isPlaying()) start();
+    if (wantsPlayback && !transport.isPlaying()) start({ byUser: true });
   };
   document.addEventListener("pointerdown", activate, { signal });
   document.addEventListener("keydown", activate, { signal });

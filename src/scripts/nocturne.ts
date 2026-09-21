@@ -59,7 +59,7 @@ export function initNocturne(): void {
       (event.target as Element | null)?.closest('[data-entry-gate]')
     )
       return;
-    if (!transport.isPlaying()) transport.start();
+    if (!transport.isPlaying()) transport.start({ byUser: true });
   };
   document.addEventListener('pointerdown', activate, { signal });
   document.addEventListener('keydown', activate, { signal });

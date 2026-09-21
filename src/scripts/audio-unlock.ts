@@ -67,8 +67,14 @@ let bound = false;
  * 解锁当前该响的音频。三件事各自幂等：建/唤醒那架琴的 AudioContext；
  * 让 MusicManager 按自己的意图恢复（尊重 userPaused 与 About 让位）；
  * 夜曲只在自己"想播"时才接上。
+ *
+ * `options.retryMusic === false`：**别在这一刻对 MP3 再发一枪**。
+ * SAME VISIT 的 boot 里 `music.init()` 自己就会 `attemptStart()`，紧接着这里再
+ * `retryIfIdle()` 就是同一 tick 连发两次自动启动 —— 两次并发 `el.play()` 会互相打断，
+ * 先失败的那次还把状态写回 ready（"响一下又停"的来源之一）。
+ * 手势那一路（`onGesture`）不带这个参数：那时才是真的"补一枪"。
  */
-function unlockAll(): void {
+function unlockAll(options: { retryMusic?: boolean } = {}): void {
   const global = getGlobal();
 
   // 琴：建 / 唤醒 AudioContext（手势之外调用也无害，只是可能仍是 suspended）
@@ -81,7 +87,7 @@ function unlockAll(): void {
   }
 
   // MP3：这一条自己判断 userPaused、About 让位与闸门
-  global.music?.retryIfIdle();
+  if (options.retryMusic !== false) global.music?.retryIfIdle();
 }
 
 /**
@@ -119,12 +125,16 @@ export function audioUnlock(): void {
  * boot 里调用一次：没有入场页这一趟（SAME VISIT 刷新 / 站内换页）先挂好听手势的
  * 解锁、再自己试一次自动恢复。`gated` 为真时什么都不做 —— 那一路由入场页自己负责，
  * 这样音频不会抢在用户"进入"之前出声。
+ *
+ * 这一趟的自动恢复**只发一枪**：`music.init()` 自己会 `attemptStart()`，
+ * 所以这里给 `unlockAll()` 传 `retryMusic: false`（琴与夜曲的恢复照旧）。
+ * 真正被浏览器拦下时也不用担心：第一次 pointerdown / keydown 会用默认参数再来一次。
  */
 export function initAudioUnlock(options: { gated: boolean }): void {
   if (options.gated) return;
   bindGestureUnlock();
-  // 先按"这一趟该不该响"发起一次（init 自己会认用户暂停：暂停过就只标状态、不出声），
-  // 再走一遍统一解锁；浏览器拒绝时它会安静地停在 ready
+  // 先按"这一趟该不该响"发起一次（init 自己会认用户暂停：暂停过就只标状态、不出声）
   getGlobal().music?.init();
-  unlockAll();
+  // 再走一遍统一解锁，但不要再对 MP3 补第二枪
+  unlockAll({ retryMusic: false });
 }

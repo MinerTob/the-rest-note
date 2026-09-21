@@ -103,6 +103,29 @@ export class MusicManager extends EventTarget {
   private pauseTimer = 0;
   /** 只让最后一次切换生效，被打断的那次直接作废 */
   private switchToken = 0;
+  /**
+   * 正在飞的"真正调 `el.play()`"事务个数。
+   *
+   * 为什么需要：自动恢复有好几个入口（`init()` 那一枪、`unlockAll()` → `retryIfIdle()`、
+   * `canplay` / `pageshow` / `visibilitychange`），它们以前各自直接 `attemptStart()`，
+   * 同一瞬间可以并发好几次 `el.play()`。并发的结果不是"多试一次"，而是**互相打架**：
+   * 后一次把前一次打断（AbortError），先失败的那次还会把状态写回 `ready`，
+   * 于是 UI 显示"暂停"而元素其实在响 —— 用户点一下播放键反而把它 pause 掉
+   * （"响一下马上停"，本人报的回归），并且那次 pause 把 `space.paused` 写成了 true，
+   * 之后每次刷新都不再自动恢复。
+   *
+   * 用计数而不是布尔：旧事务作废（被显式 `play()` 顶替）时仍要能安全收尾，
+   * 布尔会被卡死在 true，之后就再也不自动起播了。
+   */
+  private startInFlight = 0;
+  /**
+   * 最新一次启动事务的代号。
+   *
+   * 每次 `play()` / `attemptStart()` 都 `++startToken` 并记住自己的号；
+   * `await el.play()` 回来之后先确认"我还是最新的"，旧事务只许默默收场：
+   * 不许 `setState()`、不许改播放状态、不许覆盖用户那次显式 `play()` 的结果。
+   */
+  private startToken = 0;
   /** 后台预热另一套主题曲子的定时器 */
   private warmTimer = 0;
 
@@ -147,6 +170,8 @@ export class MusicManager extends EventTarget {
    * "要出声"，这里只恢复本来就应该播放的那一首。
    */
   retryIfIdle(): void {
+    // 已经有启动事务在飞：不再发第二枪（并发 el.play() 会互相打断，见 startInFlight）
+    if (this.startInFlight > 0) return;
     if (this.userPaused || this.inAbout || !this.autoStart || this.isPlaying()) return;
     void this.attemptStart();
   }
@@ -270,7 +295,7 @@ export class MusicManager extends EventTarget {
 
   /** 页面加载后调用：能自动播就播，不能就等第一次交互。 */
   init(): void {
-    if (this.inAbout || !this.autoStart || this.isPlaying()) return;
+    if (this.startInFlight > 0 || this.inAbout || !this.autoStart || this.isPlaying()) return;
     if (this.userPaused) {
       this.setState("paused");
       return;
@@ -278,25 +303,56 @@ export class MusicManager extends EventTarget {
     void this.attemptStart();
   }
 
+  /** 开一次启动事务：登记在飞、拿自己的号（号最新的那次说了算） */
+  private beginStart(): number {
+    this.startInFlight += 1;
+    return (this.startToken += 1);
+  }
+
+  /** 自己还是最新那次启动事务吗（不是就什么都别改） */
+  private isCurrentStart(token: number): boolean {
+    return token === this.startToken;
+  }
+
+  /** 收尾：还回在飞计数（用计数是为了让作废的事务也能安全退出） */
+  private endStart(): void {
+    this.startInFlight = Math.max(0, this.startInFlight - 1);
+  }
+
   /**
-   * 被浏览器拦下自动播放时**不再自己挂手势监听**：全局的手势解锁统一由
-   * `audio-unlock.ts` 负责，它会在第一次 pointerdown / keydown 时调 `retryIfIdle()`。
-   * 这里只是把状态标成 ready，等那只手落下来。
+   * 自动恢复的那一枪（`init()` / `retryIfIdle()` 共用）。
+   *
+   * 三个约束：
+   *   · **单飞**：已经在飞 / 用户暂停过 / 不让自动播 / 已经在响 / 在 About 让位期间，都不发；
+   *   · **可被顶替**：用户显式 `play()` 会 `++startToken`，这里 `await` 回来发现自己过期就
+   *     直接收场 —— 不 `setState()`、不改音量、不碰元素（那次用户操作说了算）；
+   *   · **失败只降级自己那一次**：被浏览器拦下 → `ready`（等下一次真实手势），
+   *     但过期事务的失败一个字都不许写。
+   *
+   * 被浏览器拦下时**不自己挂手势监听**：全局的手势解锁统一由 `audio-unlock.ts` 负责
+   * （它会在第一次 pointerdown / keydown 时调 `retryIfIdle()`），这里只把状态标成 ready。
    */
   private async attemptStart(): Promise<void> {
-    if (this.inAbout) return;
+    if (this.startInFlight > 0 || this.inAbout) return;
+    if (this.userPaused || !this.autoStart || this.isPlaying()) return;
+    const token = this.beginStart();
     const el = this.ensureElement();
     try {
       this.syncLive(el, this.trackId);
       await el.play();
-      if (this.inAbout || this.el !== el) {
+      // 换曲 / 进 About 之后这个元素本来就不该响了：先停掉它（与事务新旧无关）
+      if (this.el !== el || this.inAbout) {
         el.pause();
         return;
       }
+      if (!this.isCurrentStart(token)) return;
       this.setState("active");
       this.applyVolumeForStart();
     } catch {
+      if (!this.isCurrentStart(token)) return;
       this.setState("ready");
+    } finally {
+      this.endStart();
     }
   }
 
@@ -366,6 +422,13 @@ export class MusicManager extends EventTarget {
     return el;
   }
 
+  /**
+   * 用户明确要播（播放按钮 / 入场页那次点击）。
+   *
+   * **用户操作优先级最高**：这里 `++startToken` 之后，之前没跑完的自动恢复立刻过期 ——
+   * 它稍后 resolve / reject 都不许再 `setState()`、不许覆盖这一次的结果
+   * （这正是"MP3 响一下又停 / 状态被改回去"的来源）。
+   */
   async play(): Promise<void> {
     if (this.inAbout) return;
     this.userPaused = false;
@@ -374,25 +437,32 @@ export class MusicManager extends EventTarget {
     this.switchToken += 1;
     this.stopFades();
     const el = this.ensureElement();
+    // 抢到最新那次启动事务：正在飞的自动恢复就此作废（见 startToken 的说明）
+    const token = this.beginStart();
     try {
       this.syncLive(el, this.trackId);
       await el.play();
-      if (this.inAbout || this.el !== el) {
+      // 元素已经被换掉 / 进了 About：这一次不该响，停掉它（与事务新旧无关）
+      if (this.el !== el || this.inAbout) {
         el.pause();
         return;
       }
+      // 期间用户又点了一次（或换了曲）：让更新的那次说了算，这里不写状态
+      if (!this.isCurrentStart(token)) return;
       this.setState("active");
       this.applyVolumeForStart();
       // 播放稳定之后，后台把另一套主题的曲子也缓冲好（见 warmOtherTrack）
       this.warmOtherTrack();
     } catch {
       /*
-       * 被浏览器拦下（或那一次手势被系统弹窗吃掉）时挂上一次性监听，
-       * 等下一次交互自己再试 —— 之前这里只把状态标成 ready 就完了，
-       * 用户再按播放键也可能还是不出声，只能刷新页面（本人实测）。
-       * 现在不自己挂监听了：等页面第一次真实手势由 audio-unlock.ts 统一再来一次。
+       * 被浏览器拦下（或那一次手势被系统弹窗吃掉）时把状态标成 ready，等页面第一次
+       * 真实手势由 audio-unlock.ts 统一再来一次（这里不自己挂手势监听）。
+       * 过期事务的失败不许写 —— 那会把用户刚起来的那次改成 ready。
        */
+      if (!this.isCurrentStart(token)) return;
       this.setState("ready");
+    } finally {
+      this.endStart();
     }
   }
 
@@ -401,6 +471,8 @@ export class MusicManager extends EventTarget {
     writeBool(KEY.paused, true);
     const el = this.el;
     this.switchToken += 1;
+    // 也作废正在飞的启动事务：否则它 await 回来会把刚按下去的暂停又顶起来
+    this.startToken += 1;
     this.stopFades();
     if (!el) {
       this.setState("paused");
