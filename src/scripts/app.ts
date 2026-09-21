@@ -35,20 +35,67 @@ let pendingRestore: number | null = null;
 let pendingHash = '';
 
 /**
- * 路由自己记下的"刷新后该停在哪儿"。
+ * 硬加载（刷新 / 重新打开网址）后该停在哪儿。
  *
- * ClientRouter 每次硬加载都会 `history.replaceState({ index, scrollX, scrollY })`
- * 把**浏览器此刻的滚动位置**写进当前历史条目，并按这个值负责恢复落点
+ * 落点的决定权在 ClientRouter 手里：它每次硬加载都会把**浏览器此刻的滚动位置**
+ * 写进历史条目（`history.replaceState({ index, scrollX, scrollY })`，之后每次
+ * 滚动结束由 `scrollend` / popstate 更新），并以这个值恢复
  * （见 astro/dist/transitions/router.js：`if (history.state) scrollTo({ left, top })`）。
- * 也就是说"刷新后该停在哪儿"这个决定权在路由手里，我们不去替它决定 ——
- * 这里只是把它记下的值读出来，好让那次恢复是**瞬间**完成的（见 boot 里的用法）。
- * 只读：不写历史条目、不改地址、不碰 hash。
+ * 它那次调用**没带 behavior**，于是被 `html { scroll-behavior: smooth }` 接管 ——
+ * 这正是"刷新之后先看到开始页顶部、再滑回去"的来源。这里不去替它决定落点，
+ * 只把它的决定换成瞬间完成。只读：不写历史条目、不改地址、不碰 hash。
  */
-function routerSavedScrollY(): number | null {
+function routerSavedScrollY(): number {
   const state = history.state as { scrollY?: unknown } | null;
   const y = state?.scrollY;
-  return typeof y === 'number' && Number.isFinite(y) && y > 0 ? y : null;
+  return typeof y === 'number' && Number.isFinite(y) && y > 0 ? y : 0;
 }
+
+/**
+ * 顶栏点的那个 `#区块` 现在在文档里的位置。
+ *
+ * 只给"点导航栏跳过去、紧接着刷新"这一种情况兜底：那一下是同文档的锚点跳转，
+ * 历史条目上那个 `scrollY` 要等滚动结束（`scrollend`）才被路由更新；还没更新就刷新，
+ * 读到的还是上一次的位置（常常是 0）—— 于是刷新直接回开始页。
+ * `#锚点` 是地址栏里一直带着的（跳转后 `location.replaceState` 保留 hash），
+ * 按它测量比历史条目可靠。量不到（元素不在这一页 / HTML 还没解析）就返回 0，不猜。
+ */
+function hashTargetY(): number {
+  const id = window.location.hash.slice(1);
+  if (!id || document.readyState === 'loading') return 0;
+  let anchor: Element | null = null;
+  try {
+    anchor = document.getElementById(id) ?? document.querySelector(`[name="${CSS.escape(id)}"]`);
+  } catch {
+    return 0;
+  }
+  if (!anchor) return 0;
+  const y = Math.round(anchor.getBoundingClientRect().top + window.scrollY);
+  return y > 0 ? y : 0;
+}
+
+/** 刷新后该停在哪儿：优先路由记下的位置，它还没更新到锚点时用锚点兜底 */
+function restoreTarget(): number {
+  const saved = routerSavedScrollY();
+  return saved > 0 ? saved : hashTargetY();
+}
+
+/** 落到刷新前的那个位置（instant：html 上有 scroll-behavior: smooth，不能让第一帧滑过去） */
+function applyRestoreTarget(): void {
+  const target = restoreTarget();
+  if (target > 0 && Math.abs(window.scrollY - target) > 4) restoreScroll(target);
+}
+
+/*
+ * 硬加载：**在模块执行的这一刻就把落点定下来**（此时比 ClientRouter 的 `load`
+ * 监听更早，也在第一帧绘制之前），所以刷新后的第一帧就直接在原位置，
+ * 不会先闪一下开始页顶部再跳回来。`boot()` 里还会再对齐一次：那时关于区
+ * 把标签搬进 body、文档高度变了，需要按落好之后的几何再坐实一遍（都是 instant）。
+ *
+ * 站内换页（ClientRouter 不换文档）不经过这里 —— 那条路由 `after-swap` /
+ * `pendingRestore` 精确恢复，与"关于 ⇄ 自我介绍"的返回逻辑无关。
+ */
+applyRestoreTarget();
 
 /** 关于区这一刻算不算"在观看区域"（与 initJourney 的迟滞判据共用进入阈值） */
 function aboutOnScreen(journey: HTMLElement): boolean {
@@ -200,24 +247,17 @@ function boot(): void {
     });
   } else {
     /*
-     * 硬加载（刷新 / 重新打开网址）这一趟：路由恢复了落点，但它那次
-     * `scrollTo({ left, top })` **没带 behavior**，于是被 `html { scroll-behavior: smooth }`
-     * 接管成一段平滑滚动 —— 第 0 帧先渲染开始页顶部，再慢慢滑下去，看起来就是
-     * "刷新之后又跳回顶部"（而且这期间 `aboutOnScreen()` 读到的是顶部的几何，
-     * 背景 MP3 的状态也跟着判错）。
+     * 硬加载（刷新 / 重新打开网址）这一趟。模块执行时已经坐实过一次落点
+     * （见文件上方那次 applyRestoreTarget()），这里再对齐一次：一是布局到这一步
+     * 才定下来（关于区把标签搬进 body、文档高度会变），二是"点导航栏跳过去之后
+     * 紧接着刷新"时历史条目上的 `scrollY` 可能还没被路由更新到锚点位置，
+     * `restoreTarget()` 会用地址栏那个 `#锚点` 兜底 —— 没有这一步就会刷新回开始页。
      *
-     * 这里在 boot 里用同一个值再放一次，用 `behavior: 'instant'` 覆盖掉那段动画：
-     * 落点还是路由定的那个，只是第一帧就到位。放在 `initEntryGate()` / `music.init()`
-     * 之前，是为了让"这一刻算不算在关于区"用**落好之后的**几何来判断（页面优先、音乐跟随）。
-     *
-     * 站内换页那一趟不走这里（`restored !== null` 时走上面的精确恢复）。
-     * 带 `#锚点` 的刷新同样走这里：路由读的是同一个值，我们只是把它瞬间坐实，
-     * 不会覆盖浏览器的锚点定位（浏览器那次锚点滚动早就完成了）。
+     * 最后那一帧也是 instant：路由自己那次恢复没带 behavior，会被
+     * `html { scroll-behavior: smooth }` 变成动画，必须由我们把它按住。
      */
-    const saved = routerSavedScrollY();
-    if (saved !== null && Math.abs(window.scrollY - saved) > 4) {
-      restoreScroll(saved);
-    }
+    applyRestoreTarget();
+    requestAnimationFrame(() => applyRestoreTarget());
   }
   global.music.setAboutActive(aboutFamily && (!journey || aboutOnScreen(journey)));
   initMusicUI(global.music);
