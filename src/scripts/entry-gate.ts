@@ -5,8 +5,18 @@ import { primeMiniLabPiano } from './minilab';
 import { stopNocturneTransport } from './nocturne-transport';
 import { visitSession } from './visit-session';
 
-function applySystemLanguage(gate: HTMLElement): void {
-  const language = navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+/**
+ * 入场页的文案语言跟**当前这一页的页面语言**走，不看 `navigator.language`。
+ *
+ * `<html data-lang>` 是 `BaseLayout.astro` 按当前页面 `lang` 渲染出来的，也就是"这份文档
+ * 到底是哪一版"。NEW VISIT 的入口语言已经由 URL 定死（`BaseHead.astro` 把 `/en...`
+ * 归一化到 `/en/`、其余归到 `/`），所以这里再拿系统语言挑文案就会出现两边打架：
+ * 系统是中文的人打开 `/en/`，会看到英文首页配中文入场页（本人报的问题）。
+ *
+ * 路由 / 文档语言是唯一真相：`data-lang === 'en'` 就英文，其它一律中文。
+ */
+function applyPageLanguage(gate: HTMLElement): void {
+  const language = document.documentElement.dataset.lang === 'en' ? 'en' : 'zh';
   for (const element of gate.querySelectorAll<HTMLElement>('[data-entry-copy]')) {
     element.textContent = element.dataset[language] ?? element.dataset.en ?? '';
   }
@@ -49,7 +59,7 @@ export function initEntryGate(music: MusicManager): boolean {
     return false;
   }
 
-  applySystemLanguage(gate);
+  applyPageLanguage(gate);
   setPageLocked(gate, true);
   const button = gate.querySelector<HTMLButtonElement>('[data-entry-button]');
   if (!button || gate.dataset.bound) return true;

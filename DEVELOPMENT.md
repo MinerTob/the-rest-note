@@ -565,7 +565,7 @@ visitSession(): VisitSession;                  // 见 §5.15：这一趟的 id /
 - **点"进入"之后一定落在首页最顶上（`#home`）**：遮罩收起时把地址里遗留的锚点（浏览器恢复标签页时常见的 `#about` / `#blog`）去掉，并 `scrollTo(0, 0)`；因为 `html` 有 `scroll-behavior: smooth`，必须用 `behavior: 'instant'`，否则会当着他的面滑一大段。**要补三次**（立即 / 下一帧 / 260ms 后）：Safari 常在遮罩收起之后才把上次的滚动位置恢复回来，只滚一次会被它盖掉；后两次都跳过"有 `#锚点`"的情况 —— 那是用户自己点的站内跳转，不能抢。站内导航走客户端路由，不经过这里。
 - 同一个 click 处理器里还调两个"必须在用户手势里做"的动作：`requestMotionAccess()`（`identity-motion.ts`，申请"运动与方向"权限，见 §5.8）和 `primeIdentityPiano()`（`identity-audio.ts`，把"关于"那架钢琴的 AudioContext 建起来并开始预载采样，见 §5.14）。两者都只在真正需要它们的页面生效，桌面 / 不需要 / 已经做过时静默返回，不影响入场。
 - 锁定期间 body 加 `.entry-locked`，除 gate 和 `.ambient` 外的直接子元素设为 `inert`。
-- 文案跟随浏览器语言（`navigator.language` 是否 `zh` 开头），不是站点语言。
+- **文案语言跟当前文档的页面语言走，不看 `navigator.language`**（`applyPageLanguage()`）：读 `<html data-lang>`（`BaseLayout.astro` 按页面 `lang` 渲染），`'en'` → 英文，其它 → 中文；按现有 `[data-entry-copy]` + `data-zh` / `data-en` 换文字，`aria-label` 与 `gate.dataset.language` 同一个语言。系统语言是中文的人打开 `/en/`，看到的就是英文入场页 —— NEW VISIT 的入口语言已由 `BaseHead.astro` 按 URL 归一化（见 §5.15），两边必须同一个语言，谁都不许拿系统语言覆盖路由。入场页 HTML 里那段英文兜底文案在 `.is-ready` 之前不显示（`opacity: 0`），所以不存在"先闪一下英文再换中文"。
 - `app.ts` 里：`if (!initEntryGate(music)) music.init();` —— 有入场页时由入场页负责解锁音频。
 - 收尾去掉遗留锚点时用 `history.replaceState(history.state, ...)`：`history.state` 上有这一趟访问的 id（`restNoteVisit`）和 Astro 的 `index` / 滚动位置，传 `null` 会把它们抹掉，于是"带着 `#锚点` 进站 → 进站 → 刷新"会被当成新访问。
 
@@ -837,6 +837,17 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-22 · 统一 NEW VISIT 入口语言与 Entry Gate 页面语言
+
+- 需求：本人要求把 NEW VISIT 的"目标语言"做成**真正的页面语言语义**，而不是 pathname 字符串补丁：英文入口（`/en`、`/en/`、`/en/...`）canonical 到 `/en/`，入场页显示英文，Enter 后停在 `/en/`；中文入口（`/` 及第一段不是 `en` 的其它路径）canonical 到 `/`，入场页显示中文，进入后停在 `/`。用户系统语言不许覆盖 URL / 页面语言。只修两处：NEW VISIT 英文入口识别 + Entry Gate 文案语言来源；NEW/SAME 判定、`visit-session.ts`、`lib/visit.ts`、入场页动画与音频解锁、scroll restoration、Header、language switch、MIDI / AudioContext、MusicManager、About observer 都不许动。
+- 现状核对：第 1 处（`BaseHead.astro` 的语言判断）在上一条 `60dd625` 里已经是 segment 形式了 —— `var parts = location.pathname.split('/').filter(Boolean); var isEnglish = parts[0] === 'en'; var target = isEnglish ? '/en/' : '/';`，`/en`、`/en/`、`/en/blog/...`、`/en/about/intro/...` 全判英文，其余全判中文，本轮**没有再改它**（也没有别的字符串条件）。真正要修的是第 2 处。
+- 根因（第 2 处）：`entry-gate.ts` 的 `applySystemLanguage()` 用 `navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en'` 挑文案 —— 这是**系统语言**，和"这一页是哪一版"没有关系。于是"系统中文 + 打开 `/en/`"会得到英文首页配中文入场页；入口语言由 URL 决定之后，这两套来源必然打架（本人报的问题）。
+- 改动（只改 `src/scripts/entry-gate.ts` + 文档）：`applySystemLanguage()` → `applyPageLanguage()`，语言来源换成当前文档：`const language = document.documentElement.dataset.lang === 'en' ? 'en' : 'zh';`（`<html data-lang>` 由 `BaseLayout.astro:48` 按页面 `lang` 渲染）。`[data-entry-copy]` + `data-zh` / `data-en` 的换字逻辑、`aria-label`、`gate.dataset.language`、`is-ready`、点"进入"的整条链路（`markEntered()` / `stopNocturneTransport()` / `music.play()` / `audioUnlock()` / `requestMotionAccess()` / `primeMiniLabPiano()` / 收尾去锚点与拉回顶部）全部原样。
+- 结果（NEW VISIT）：`/en` → `/en/` + 英文入场页 → 英文首页；`/en/about/intro/` → `/en/` + 英文入场页 → 英文首页；`/about/intro/` → `/` + 中文入场页 → 中文首页。SAME VISIT（刷新子页 / 站内导航 / 前进后退 / 语言切换）仍然留在原路由，入场页那一趟也不会再冒出来（判据还是 `hasEntered()`，没动）。
+- 文件：`src/scripts/entry-gate.ts`、`DEVELOPMENT.md`（§5.11 / §5.15 已是最新 / 本条）。`src/components/BaseHead.astro` 本轮零改动。
+- 钩子/数据：无新增 / 删除 data-* 钩子、storage key、自定义事件（`[data-entry-gate]` / `[data-entry-button]` / `[data-entry-copy]` 与 `data-zh` / `data-en` 语义不变，`gate.dataset.language` 照旧反映当前语言）。
+- 验证：`npm run check` 109 个文件 0 错误 0 警告 0 提示；`npm run build` 19 页。按本人要求这轮不跑浏览器 / CDP / Playwright，`/en`、`/en/about/intro/`、`/about/intro/` 三条入口的实机行为由本人确认。
 
 ### 2026-09-22 · 修复 `/en` 无尾斜杠时被误判为中文入口
 
