@@ -3,7 +3,6 @@ import { IDENTITY_TRACK_SRC } from '@/lib/identity';
 import { NOCTURNE_TIMELINE, restartPosition, savePosition, savedPosition } from '@/lib/live-timeline';
 import { getGlobal } from './global';
 import { identityPiano, rampIdentityVolume } from './identity-audio';
-import { readSessionBool, writeSessionBool } from './storage';
 import type { PianoEngine } from './piano';
 
 /**
@@ -34,8 +33,6 @@ const TICK_MS = 25;
 const END_PAD = 0.8;
 /** 乐谱最多读几次（手机上被打断是常事） */
 const SCORE_ATTEMPTS = 3;
-/** "用户自己按过暂停"的记号（sessionStorage，跟着这一趟访问走） */
-const USER_PAUSED_KEY = 'space.nocturne-paused';
 
 export type NocturneState = 'paused' | 'loading' | 'waiting' | 'playing' | 'failed';
 
@@ -63,15 +60,6 @@ export class NocturneTransport {
   private ready = false;
   /** "想播"的意图：场景离开、按暂停都会清掉；切后台只是暂停时钟，不清它 */
   private desired = false;
-  /**
-   * **用户自己按过暂停**（只有 UI 那次"点暂停"会写，sessionStorage 记着）。
-   *
-   * 和 `desired` 的区别：场景离开（`setIdentityActive(false)` → `pause()`、离开这一族的
-   * `stop()`）只是清 desired，不算用户暂停；用户按了暂停则整条自动恢复链都不许再把它
-   * 接回来 —— 重进关于区、刷新页面、随便点一下页面都不行，直到他自己再点播放 / 重播
-   * （那两个是明确的"我要听"）。新的一趟访问（新标签页 / 新会话）自然重新开始。
-   */
-  private userPaused: boolean;
   /** 这一次开机有没有从 live-timeline 取过位置（第一次起播才取，之后用内存里的 offset） */
   private resumed = false;
   private offset = 0;
@@ -86,7 +74,6 @@ export class NocturneTransport {
   private readonly listeners = new Set<Listener>();
 
   constructor() {
-    this.userPaused = readSessionBool(USER_PAUSED_KEY, false);
     // 切到后台停下来、切回来接着弹；这里只停时钟，不丢"想播"的意图
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) this.suspend();
@@ -166,48 +153,20 @@ export class NocturneTransport {
     this.piano().setVolume(value);
   }
 
-  /**
-   * 开始 / 继续（真正出声要在用户手势里，这里只管"想播"并尝试）。
-   *
-   * `options.byUser`：这次是**用户自己**要听（播放按钮 / 页面手势 / 重播）。
-   * 只有它会清掉"用户按过暂停"的记号；自动恢复路径（进关于区、刷新 boot、
-   * 上下文醒来的重试、手势兜底）不带这个参数 —— 用户按过暂停就一律让路，
-   * 直到他自己再表达一次"要听"（§10 的日志里有原因）。
-   */
-  start(options: { byUser?: boolean } = {}): void {
-    if (options.byUser) this.clearUserPause();
-    if (this.userPaused) return;
+  /** 开始 / 继续（真正出声要在用户手势里，这里只管"想播"并尝试） */
+  start(): void {
     this.desired = true;
     void this.begin();
   }
 
   /** 停下并掐音（场景离开、按暂停）。desired 一起清掉。 */
-  pause(options: { byUser?: boolean } = {}): void {
-    // 只有"用户自己按暂停"才记这个记号；场景离开（setIdentityActive(false) / stop()）不算
-    if (options.byUser) this.markUserPause();
+  pause(): void {
     this.desired = false;
     this.suspend();
   }
 
-  /** 用户自己按过暂停没有（自动恢复路径据此让路） */
-  isUserPaused(): boolean {
-    return this.userPaused;
-  }
-
-  private markUserPause(): void {
-    this.userPaused = true;
-    writeSessionBool(USER_PAUSED_KEY, true);
-  }
-
-  private clearUserPause(): void {
-    if (!this.userPaused) return;
-    this.userPaused = false;
-    writeSessionBool(USER_PAUSED_KEY, false);
-  }
-
-  /** 从头演奏（"重播"按钮）：这是明确的"我要听"，顺带清掉暂停记号 */
+  /** 从头演奏（"重播"按钮） */
   restart(): void {
-    this.clearUserPause();
     this.suspend();
     this.offset = 0;
     this.cursor = 0;

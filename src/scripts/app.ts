@@ -329,24 +329,6 @@ function boot(): void {
   if (journey) initJourney(journey, global.music);
 
   /*
-   * SAME VISIT 刷新正好落在关于区时：**在 boot 阶段就把演奏意图立起来** ——
-   * `initIdentity()` → `setIdentityActive(true)` → `transport.start()` → `desired = true`
-   * → `begin()`（见 nocturne-transport.ts）。这一条**不再等 IntersectionObserver 的
-   * 第一次回调**：刷新时本来就在演奏的场景，不该拖到下一帧之后才建立"想播"的意图。
-   *
-   * 观察器那条路照旧（`initIdentity()` 有 `data-bound` 守卫、`setIdentityActive(true)` 幂等），
-   * 两条都走同一个 `aboutOnScreen()` 判据，所以不会打架、也不会重复建播放器。
-   * About 不在视口时什么都不做 —— 那时不该起 MIDI。
-   *
-   * 用户自己按过暂停时这里也起不来 —— `transport.start()` 自己会查"用户按过暂停"
-   * 的记号并给自动恢复让路（见 nocturne-transport.ts）。
-   */
-  if (journey && aboutOnScreen(journey)) {
-    initIdentity();
-    setIdentityActive(true);
-  }
-
-  /*
    * 音频解锁只有这一个入口（见 audio-unlock.ts）：
    *   · 没有入场页这一趟（SAME VISIT 刷新 / 站内换页）：先自己试自动恢复，
    *     被浏览器拦下就等着 —— 页面第一次 pointerdown / keydown 会统一再来一次；
