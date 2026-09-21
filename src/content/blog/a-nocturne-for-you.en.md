@@ -632,7 +632,7 @@ The AI is a pile of parameters and training data.
 
 Together, we spent the evening surrounding one computer.
 
-![A black-and-white comic joking that learning the fundamentals helps you know when AI is talking nonsense.](../../images/fat%20whale.png)
+![A black-and-white comic joking that learning the fundamentals helps you know when AI is talking nonsense.](../../images/fat%20whale_en.png)
 
 *Another way to summarize today's development process.*
 
