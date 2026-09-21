@@ -41,6 +41,98 @@ function absolute(path: string): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 
+{/*
+  NEW VISIT + Journey hash 的入口规范化 —— **必须在这里、同步执行**。
+  ------------------------------------------------------------------
+  这四个 hash（#home / #blog / #lab / #about）是 Header 在 Journey 首页上跳区块用的。
+  fragment 不会发给服务器（它不是请求的一部分），所以托管层做不了重定向；而浏览器会在
+  文档加载时自己按 hash 定位一次 —— 那一下会把"这一趟必须从 Home + 入场页全新进入"顶开
+  （先落到 Blog / Lab / About，进而带偏滚动、关于区 observer、夜曲）。
+
+  所以清理必须早于"浏览器解析到对应 section id、执行原生 fragment scroll"：
+  这段脚本是 <head> 里的同步脚本，不等 DOMContentLoaded / astro:page-load /
+  requestAnimationFrame，也不等 app.ts 的 boot()。
+
+  它是全站每个 HTML 页面都会跑的，但**只在这两个 pathname 上生效**：'/' 与 '/en/'；
+  hash 也必须严格等于那四个之一。文章直链（/blog/...、/en/blog/...、任何 #heading）、
+  /lab/... 独立页、图片与 /_astro/... 静态资源、以后新增的 hash —— 一律提前 return，不碰。
+
+  NEW/SAME 判定照抄 src/lib/visit.ts 的 visitBoundary() 语义（这里不能引模块代码）：
+  没有 session token → NEW；navigate → NEW；reload → history.state.restNoteVisit ===
+  session token 才算 SAME，否则 NEW；back_forward → SAME；拿不到 / 认不出 type → NEW。
+  storage / history / performance 的读取都用 try/catch 包住。
+
+  清理动作只有 history.replaceState：只去掉 hash，不动 pathname / search / history.state，
+  不 reload、不走 location.replace、不新增历史条目、不写 sessionStorage、不建新的 visit token。
+*/}
+<script is:inline>
+  (function () {
+    /*
+     * 先在"这张页面值不值得管"上提前退出：不是 Journey 首页、或 hash 不在那四个里，
+     * 后面一个字都不做（文章锚点、静态资源、独立页面都靠这两行保护）。
+     */
+    var isJourneyRoot = location.pathname === '/' || location.pathname === '/en/';
+    if (!isJourneyRoot) return;
+    if (!['#home', '#blog', '#lab', '#about'].includes(location.hash)) return;
+
+    var SESSION_KEY = 'rest-note.visit';
+    var STATE_KEY = 'restNoteVisit';
+
+    var sessionToken = null;
+    try {
+      sessionToken = window.sessionStorage.getItem(SESSION_KEY);
+    } catch (error) {
+      /* 隐私模式 / 存储被禁：读不到就当没有 → 新的一趟 */
+      sessionToken = null;
+    }
+
+    var entryToken = null;
+    try {
+      var state = window.history.state;
+      if (state && typeof state === 'object') {
+        var stamped = state[STATE_KEY];
+        if (typeof stamped === 'string' && stamped.length > 0) entryToken = stamped;
+      }
+    } catch (error) {
+      entryToken = null;
+    }
+
+    var navigation = 'unknown';
+    try {
+      var entry = performance.getEntriesByType('navigation')[0];
+      if (
+        entry &&
+        (entry.type === 'navigate' || entry.type === 'reload' || entry.type === 'back_forward')
+      ) {
+        navigation = entry.type;
+      }
+    } catch (error) {
+      navigation = 'unknown';
+    }
+
+    /* 与 lib/visit.ts 的 visitBoundary() 逐条对应：只有能确定是同一趟才不放行清理。 */
+    var isNewVisit;
+    if (!sessionToken) isNewVisit = true;
+    else if (navigation === 'navigate') isNewVisit = true;
+    else if (navigation === 'reload') isNewVisit = entryToken !== sessionToken;
+    else if (navigation === 'back_forward') isNewVisit = false;
+    else isNewVisit = true;
+
+    /* SAME VISIT 一律保留 hash：点 Header 跳 #about、普通刷新留在当前区块、前进后退都还要用它。 */
+    if (!isNewVisit) return;
+
+    try {
+      window.history.replaceState(
+        window.history.state,
+        '',
+        window.location.pathname + window.location.search,
+      );
+    } catch (error) {
+      /* 极端环境（file:// / 沙盒 iframe）下 replaceState 会抛：留着 hash 也比炸掉 <head> 强 */
+    }
+  })();
+</script>
+
 {/* 在首次绘制之前把主题写到 <html> 上，避免切页/刷新时闪一下默认主题。 */}
 <script is:inline>
   (function () {

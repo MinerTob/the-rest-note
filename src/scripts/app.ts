@@ -36,12 +36,6 @@ let pendingRestore: number | null = null;
 /** 恢复落点时从路由手里拿掉的 `#锚点`，位置放好后再接回地址栏 */
 let pendingHash = '';
 
-/**
- * Journey 首页上 Header 跳区块用的四个锚点（`JourneyPage.astro` 里那四个 section 的 id）。
- * 只认这四个已知值：其它 hash（文章里的锚点、将来新增的区块）不许顺手吞掉。
- */
-const JOURNEY_HASHES: readonly string[] = ['#home', '#blog', '#lab', '#about'];
-
 /** 关于区这一刻算不算"在观看区域"（与 initJourney 的迟滞判据共用进入阈值） */
 function aboutOnScreen(journey: HTMLElement): boolean {
   const section = journey.querySelector<HTMLElement>('[data-journey-section="about"]');
@@ -301,32 +295,6 @@ function boot(): void {
    *     各自的恢复机制，这也是"决定初始目标"而不是"事后纠正位置"。
    */
   const isNewVisit = visitSession().isNew;
-  /*
-   * NEW VISIT 的入口规范化：Journey 首页 + `#home` / `#blog` / `#lab` / `#about`。
-   *
-   * 这四个 hash 是 Header 在长页上跳区块用的。fragment **不会**发给服务器（它不是请求的一部分），
-   * 所以静态托管层做不了重定向，只能在客户端处理；而浏览器自己会在文档加载时按 hash 定位一次，
-   * 于是"这一趟必须从 Home 全新进入"（Home 顶部 + 入场页）会被那一下顶开 ——
-   * 先落到 Blog / Lab / About，顺带把关于区的 observer、夜曲、滚动恢复全带偏。
-   *
-   * 所以：这一趟判定为 NEW VISIT、当前文档又是 Journey 首页时，只把 hash 从地址栏抹掉。
-   * `replaceState` 原样带上 `history.state`（那上面有 visit-session 盖的章与 Astro 的
-   * index / 滚动位置），URL 只留 pathname + search：不 reload、不换 path、不留新的历史条目。
-   * 抹掉之后照旧走下面的 `restoreScroll(0)`，初始位置仍然由我们决定。
-   *
-   * **SAME VISIT 一个字都不动**：点 Header 跳 `#about`、普通刷新留在当前区块、前进后退、
-   * scene-scroll 的落点恢复、Header 蓝杠都还要靠这个 hash。
-   *
-   * 判定用 `journey`（`[data-journey]` 只在这两个首页文档上渲染，见 `JourneyPage.astro`）
-   * 而不是去比 pathname：客户端脚本引不了 `lib/pages.ts` 的路由表（那份文件带着 astro:content）。
-   */
-  if (isNewVisit && journey && JOURNEY_HASHES.includes(window.location.hash)) {
-    window.history.replaceState(
-      window.history.state,
-      '',
-      window.location.pathname + window.location.search,
-    );
-  }
   const restored = isNewVisit
     ? null
     : (pendingRestore ?? takeFamilyScroll(window.location.pathname));
