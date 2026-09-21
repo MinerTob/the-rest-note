@@ -20,8 +20,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ENTER_PATH, decideEntry, isHtmlPagePath } from './entry-router.ts';
+import { ENTER_PATH, decideEntry, isFreshExternalNavigation, isHtmlPagePath } from './entry-router.ts';
 import {
+  clearEnteredCookie,
   enteredCookie,
   isSecureRequest,
   newVisitToken,
@@ -100,6 +101,12 @@ function resolveInsideDist(pathname: string): string | null {
   const candidate = resolve(DIST_ROOT, `.${relative}`);
   if (candidate !== DIST_ROOT && !candidate.startsWith(DIST_ROOT + sep)) return null;
   return candidate;
+}
+
+/** 取一个请求头（同名多值时取第一个；没有就是 undefined） */
+function headerValue(req: IncomingMessage, name: string): string | undefined {
+  const value = req.headers[name];
+  return Array.isArray(value) ? value[0] : value;
 }
 
 async function isFile(path: string): Promise<boolean> {
@@ -236,14 +243,43 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   const secure = isSecureRequest(req);
   const cookies = readEntryCookies(req.headers.cookie);
-  const decision = decideEntry({ method, pathname, entered: cookies.entered });
+
+  /*
+   * 服务端的 NEW VISIT 边界（Fetch Metadata）：地址栏输入 / 书签 / 外链 / 同站其它 origin
+   * 进来时，`Sec-Fetch-Site` 是 `none` / `cross-site` / `same-site`，而且 mode/dest 是
+   * navigate/document —— 这是一次**新的访问**，服务端必须跟着走一遍边界：
+   * 换一个新的 `rest_note_visit`、把 `rest_note_entered` **真正删掉**，并且这一次的入口判定
+   * 强制当成"还没进门"。
+   *
+   * 刷新、站内导航、ClientRouter 的换页请求都是 `same-origin`，头缺失 / 认不出来时也一律
+   * 不动 —— 否则"已进门的子页刷新"会被打回首页。见 entry-router.ts 的
+   * `isFreshExternalNavigation()`。
+   *
+   * 只在"站内 HTML 页面"上认这件事：地址栏输入 `/rss.xml` 之类也是 document 导航，但那不是
+   * 站内页面入口，不该顺手清掉这一趟的 entered。
+   */
+  const freshNavigation =
+    isHtmlPagePath(pathname) &&
+    isFreshExternalNavigation({
+      method,
+      mode: headerValue(req, 'sec-fetch-mode'),
+      dest: headerValue(req, 'sec-fetch-dest'),
+      site: headerValue(req, 'sec-fetch-site'),
+    });
+  const effectiveEntered = freshNavigation ? false : cookies.entered;
+
+  const decision = decideEntry({ method, pathname, entered: effectiveEntered });
 
   /*
    * 服务端访问 id：HTML 页面与 /api/enter 上补发，静态资源不掺和（省掉每条资源一个 Set-Cookie）。
    * 值只有随机 token，HttpOnly，session 级（浏览器会话结束就没了）—— 见 visit-cookie.ts。
    */
   const setCookies: string[] = [];
-  if (!cookies.visit && (isHtmlPagePath(pathname) || pathname === ENTER_PATH)) {
+  if (freshNavigation) {
+    // 新的访问边界：轮换 token + 删掉 entered（顺序无所谓，两条都在同一个响应里写回）
+    setCookies.push(visitCookie(newVisitToken(), secure));
+    setCookies.push(clearEnteredCookie(secure));
+  } else if (!cookies.visit && (isHtmlPagePath(pathname) || pathname === ENTER_PATH)) {
     setCookies.push(visitCookie(newVisitToken(), secure));
   }
 

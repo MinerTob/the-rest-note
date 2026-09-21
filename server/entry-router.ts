@@ -41,6 +41,41 @@ export function isLanguageHomePath(pathname: string): boolean {
   return parts[0] === 'en' ? parts.length === 1 : parts.length === 0;
 }
 
+/**
+ * 这次请求是不是一次**真正的新外部导航**（= 服务端视角的 NEW VISIT）
+ *
+ * 只看 Fetch Metadata（`Sec-Fetch-Mode` / `Sec-Fetch-Dest` / `Sec-Fetch-Site`），
+ * 不依赖前端 `PerformanceNavigationTiming`：
+ *
+ *   · `Sec-Fetch-Site: none`       地址栏输入 / 书签（没有发起方）→ NEW
+ *   · `Sec-Fetch-Site: cross-site` 从别的网站点进来 → NEW
+ *   · `Sec-Fetch-Site: same-site`  从同一站点的其它 origin / 子域进来 → 也算外部入口 NEW
+ *   · `Sec-Fetch-Site: same-origin`当前站点内部导航 / 刷新 → **不在这里强制 NEW**
+ *   · 头缺失 / 认不出来（老浏览器、代理抹头）→ 不强制 NEW，保留 cookie，
+ *     交给客户端 visit-session 兜底
+ *
+ * 只有"顶层文档导航"才算：`GET`/`HEAD` + `mode: navigate` + `dest: document`。
+ * 于是 `/_astro/*.js`、CSS、图片、字体、`*.mp3`、`*.mid`、`POST /api/enter`、
+ * `/health` 这些请求天然落不进来（它们的 mode/dest 不是 navigate/document）。
+ */
+export function isFreshExternalNavigation(input: {
+  method: string;
+  mode?: string;
+  dest?: string;
+  site?: string;
+}): boolean {
+  const method = input.method.toUpperCase();
+
+  const isDocumentNavigation =
+    (method === 'GET' || method === 'HEAD') &&
+    input.mode === 'navigate' &&
+    input.dest === 'document';
+
+  if (!isDocumentNavigation) return false;
+
+  return input.site === 'none' || input.site === 'cross-site' || input.site === 'same-site';
+}
+
 export type EntryDecision =
   /** `POST /api/enter`：盖 `rest_note_entered=1` 然后 204 */
   | { kind: 'enter' }

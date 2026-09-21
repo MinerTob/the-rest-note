@@ -756,6 +756,12 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 - **`#fragment` 服务端看不见**：`/#about`、`/en/#about` 在服务器眼里只是 `/`，所以首页那四个 Journey hash 的早期清理仍然由 `BaseHead.astro` 在客户端做（见 §5.15）。
 - **`POST /api/enter`**：浏览器点"进入空间"时（同一次点击、不 await）打过来，网关回 `204 No Content` 并写 `rest_note_entered=1`；不返回页面、不管音频。别的方法 → `405`。
 - **启动**：`PORT` 读 `process.env.PORT`（本地默认 3000），监听 `0.0.0.0`；Node 直接跑 TypeScript（`node --experimental-strip-types`），所以没有构建步骤、没有框架依赖（不用 Express）。`SIGTERM` 时 `server.close()` 后退出。
+- **服务端的 NEW VISIT 边界（Fetch Metadata）**：`rest_note_entered` 是 session cookie，会一直跟着浏览器会话，所以"点过 Entry Gate 之后在地址栏重新输入子页"这类**新的外部导航**必须由服务端认出来并重置。网关读 `Sec-Fetch-Mode` / `Sec-Fetch-Dest` / `Sec-Fetch-Site`，交给 `isFreshExternalNavigation()`（§5.18 顶部签名）：
+  - `mode: navigate` + `dest: document` + `GET`/`HEAD` 才算"顶层文档导航"（`/_astro/*`、CSS/JS、图片、字体、`*.mp3`、`*.mid`、`POST /api/enter`、`/health` 天然不匹配）；
+  - `site: none`（地址栏 / 书签）/ `cross-site`（外链）/ `same-site`（同站其它 origin、子域）→ **freshNavigation = true**。此时：换一个新的 `rest_note_visit`、**真正删掉** `rest_note_entered`（`Max-Age=0`，不是只在内存里当 false）、`effectiveEntered = false` 再交给 `decideEntry()`；所以子路由照旧 302 回本语言首页，首页则显示 Entry Gate；
+  - `site: same-origin`（当前页刷新、站内导航、ClientRouter 请求）与**头缺失 / 认不出来**（老浏览器、代理抹头）→ 不强制 NEW，cookie 原样保留，由客户端 visit-session 兜底。**这一条是"已进门的子页刷新不被送回首页"的关键**。
+  - 只在 `isHtmlPagePath()` 上认：地址栏输入 `/rss.xml` 之类那也 document 导航，但不是站内页面入口，不动访问状态。
+  - 前端 `BaseHead.astro` **不恢复** `location.replace('/' | '/en/')`：pathname redirect 完全由 Node 执行，客户端只留 `#home` / `#blog` / `#lab` / `#about` 这四条服务端永远看不到的 fragment cleanup。
 - **`GET /health`（Render 健康检查）**：在 `handleRequest` 的**最前面**处理，早于 cookie 读取、Entry Gate 判定与静态分发 —— 它不读也不写任何 cookie（`rest_note_visit` / `rest_note_entered` 都不会被创建）、不参与 302、不读 `dist/`、不改任何访问状态。`GET` / `HEAD` → `200` + `Content-Type: text/plain; charset=utf-8` + `Cache-Control: no-store`，body 固定 `ok`；其它方法 → `405`（`Allow: GET, HEAD`）。
 - **Render Blueprint**：仓库根目录的 `render.yaml` 声明这个 Web Service（`runtime: node`、Free plan、`branch: main`、`buildCommand: npm ci && npm run build`、`startCommand: npm run start:server`、`healthCheckPath: /health`、`autoDeployTrigger: commit`）；没有 disk / 数据库 / 写死的 PORT / 多余环境变量，Node 版本沿 `package.json` 的 `engines`（`>=22.12.0 <25.0.0`），不在 `render.yaml` 里重复设 `NODE_VERSION`。
 - 手动新建服务时的等价配置：Build Command `npm install && npm run build`，Start Command `npm run start:server`。
@@ -885,6 +891,20 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-22 · 用 Fetch Metadata 修复服务端 NEW VISIT 入口判定
+
+- 需求：本人报"已经点过 Entry Gate 之后，`rest_note_entered=1` 会一直跟着浏览器 session；之后在 Edge / Chrome 地址栏重新输入 `/about/intro/`、`/en/about/intro/`，服务器仍看到 entered=true、直接放行子页，不再回首页"——这是**服务端访问边界缺失**，不是前端 redirect 问题。要求：真正的新的外部 HTTP 导航（地址栏 / 书签 / 外链，以及同站其它 origin）必须算 NEW VISIT（换 `rest_note_visit`、清 `rest_note_entered`、子路由 302 回本语言首页、首页显示 Entry Gate）；SAME VISIT（当前页刷新 / 站内导航 / ClientRouter / `/api/enter` / 静态资源）不许清 entered；不许依赖前端 `PerformanceNavigationTiming` 替服务器做判断；不许恢复 `BaseHead.astro` 的 `location.replace`；不许碰音频、Entry Gate 音频调用顺序、scroll、Header。
+- 根因：`rest_note_entered` 是 session cookie，只在"这一趟浏览器会话"结束时才消失。上一版网关的入口判定只读 cookie（`decideEntry({ entered: cookies.entered })`），没有任何"这一次请求是不是新的外部导航"的信号 —— 于是同一会话里再从地址栏打开子页，服务器眼里和"站内点进来的 SAME VISIT"完全一样，302 分支永远不走。客户端那套 `visitBoundary()` 判得再准也管不到 HTTP 层（那时 HTML 已经发出去了）。
+- 改动（只改 `server/` 三个文件 + 文档）：
+  1. **`server/entry-router.ts`**：新增纯函数 `isFreshExternalNavigation({ method, mode, dest, site })` —— `GET`/`HEAD` + `Sec-Fetch-Mode: navigate` + `Sec-Fetch-Dest: document` 才算顶层文档导航，再看 `Sec-Fetch-Site`：`none` / `cross-site` / `same-site` → `true`；`same-origin` → `false`；头缺失 / 认不出来 → `false`（不强制 NEW，保留 cookie 让客户端兜底）。
+  2. **`server/visit-cookie.ts`**：新增 `clearEnteredCookie(secure)` → `rest_note_entered=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`（HTTPS 仍加 `Secure`）。**必须真的让浏览器删掉**：只在服务端把 entered 当 false 用，302 之后的下一跳还会带着旧 `entered=1` 回来。
+  3. **`server/index.ts`**：新增 `headerValue()` 取请求头；`freshNavigation = isHtmlPagePath(pathname) && isFreshExternalNavigation({...})`；`effectiveEntered = freshNavigation ? false : cookies.entered` 交给 `decideEntry()`；`freshNavigation` 时无条件 `Set-Cookie` 两条 —— 新的 `rest_note_visit`（轮换 token，不看旧 cookie 是否存在）与 `clearEnteredCookie()`。`/health` 仍然在最前面返回，压根不读 cookie、不参与这一切。
+- 结果（`/en/about/intro/` 为例）：地址栏输入 → `Sec-Fetch-Site: none` + navigate/document → freshNavigation → 302 `/en/` 的响应上同时写回"新 token + entered 删除" → 浏览器请求 `/en/`（这次是 redirect 的后续，entered 已为空）→ 英文首页 + 英文 Entry Gate → 点 Enter → `POST /api/enter` → `rest_note_entered=1` → 之后站内去 `/en/about/intro/` 正常放行。
+- 明确没碰：Entry Gate session 语义（客户端 `visitSession()` / `visitBoundary()` 一行未动）、`/api/enter`、静态文件服务与防 traversal、`BaseHead.astro`（不恢复 `location.replace`，只留四条 fragment cleanup）、MusicManager、audio-unlock、NocturneTransport、PianoEngine、live-timeline、identity-player、Entry Gate 音频调用顺序、scroll、Header。
+- 文件：`server/entry-router.ts`、`server/visit-cookie.ts`、`server/index.ts`、`DEVELOPMENT.md`（§5.18 / 本条）。
+- 钩子/数据：无新增 / 删除 data-* 钩子、storage key、自定义事件；cookie 名字与属性不变，只是新增了"新外部导航时把 `rest_note_entered` 删掉"这一条写路径。
+- 验证：`npm run check` 112 个文件 0 错误 0 警告 0 提示；`npm run build` 19 页；`node --experimental-strip-types --check` 对三个 server 文件 3/3 通过。按要求没起服务、没做本地交互测试、没跑浏览器 / CDP / Playwright。
 
 ### 2026-09-22 · 增加 Render Web Service Blueprint 与健康检查
 
