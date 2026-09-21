@@ -241,6 +241,19 @@ function boot(): void {
     });
   }
   /*
+   * NEW VISIT 且入场页还没进：在揭开遮盖之前先把底层页面摆到 Home 顶部。
+   *
+   * 从"上一趟停在 About"的地址栏重进时，浏览器可能先把上一个滚动位置恢复回来，
+   * 而入场页只是覆盖层 —— 遮盖一摘，它背后就会短暂露出上一趟 About 的画面，
+   * 一直等到 entry-gate 的 cleanup 才回 Home（太晚）。
+   * 这里只做一次预定位（instant），不删不改 entry-gate cleanup 里的那三次回顶兜底，
+   * 也不碰 hash / history.state。
+   *
+   * 只在 `entryGateUp` 为真时执行：SAME VISIT 刷新、前进后退、站内换页都不走这里，
+   * 它们各自的落点恢复与保存逻辑一行未动。
+   */
+  if (entryGateUp && window.scrollY !== 0) restoreScroll(0);
+  /*
    * 落点对齐好了，可以把第一帧的遮盖摘掉（见 global.css 的 [data-scroll-pending] 与
    * BaseLayout.astro 里那段 is:inline 脚本）。浏览器是在这一刻之前画第一帧的，
    * 所以摘掉之后画出来的就已经是正确位置 —— 不会再闪一下 Home 顶部。
