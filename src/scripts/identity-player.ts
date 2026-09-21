@@ -405,13 +405,7 @@ export function initIdentity(): void {
         cursor = notes.findIndex((n) => n.start >= from);
       } else {
         offset = savedPosition(TIMELINE, duration());
-        /*
-         * 从记忆位置接着放时**跳过已经开始过的音**（用 `start >= offset`，不是 `end > offset`）。
-         * 原来那种写法会把"已经开始、还在响"的那几个音重新排进同一瞬间
-         * （调度时用的是 `Math.max(note.start, now)`），于是听起来是几秒糊在一起的卡顿 ——
-         * 手机上来回滚动（离开这一区又回来）会反复触发，本人实测。
-         */
-        cursor = notes.findIndex((n) => n.start >= offset);
+        cursor = notes.findIndex((n) => n.end > offset);
       }
       root.dataset.loops = String(loop);
       music?.setDucked(true);
@@ -500,8 +494,7 @@ export function initIdentity(): void {
       pause();
       offset = Math.max(0, Math.min(duration(), (Number(progress.value) / 1000) * duration()));
       savePosition(TIMELINE, offset);
-      // 同上：拖进度条时也只排还没开始的音，别把跨过这个点的旧音一起补出来
-      cursor = notes.findIndex((note) => note.start >= offset);
+      cursor = notes.findIndex((note) => note.end > offset);
       if (cursor < 0) cursor = 0;
       draw();
       wantsPlayback = wasPlaying;
