@@ -70,6 +70,20 @@ export function initEntryGate(music: MusicManager): boolean {
     visit.markEntered();
 
     /*
+     * 同一时刻告诉服务端网关"这个 session 已经进过门"（它会给 HttpOnly cookie
+     * `rest_note_entered=1`，之后子路由才不会被 302 回首页，见 server/）。
+     *
+     * **只发不等**：`void fetch(...)` 绝不 await —— 下面那串动作（`music.play()` /
+     * `audioUnlock()`）必须留在这一次点击的**同步可信手势**里。一旦 await，iOS 就丢了
+     * trusted user activation，音频解锁会失败（这是硬约束）。网络失败也无所谓：
+     * 本地 sessionStorage 那套仍然管用，进站不受影响。
+     */
+    void fetch('/api/enter', {
+      method: 'POST',
+      credentials: 'same-origin',
+    }).catch(() => {});
+
+    /*
      * 进来之前先把夜曲的播放意图收掉。
      *
      * 在 About / 关于区那一页"地址栏重新输入网址"时，文档带着上一个位置加载，

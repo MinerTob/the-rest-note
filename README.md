@@ -67,7 +67,7 @@
 | 测试 | `node --test`（纯逻辑单测，不跑浏览器） |
 | 大文件 | Git LFS（音频 / 图片 / 视频 / 压缩包） |
 
-没有 React / Vue / Svelte，没有 CSS 框架，没有后端。交互全部是「需要时加载的原生 TS」：组件只输出 HTML 和 `data-*` 钩子，`src/scripts/` 里的代码在客户端接管。
+没有 React / Vue / Svelte，没有 CSS 框架，没有后端框架。交互全部是「需要时加载的原生 TS」：组件只输出 HTML 和 `data-*` 钩子，`src/scripts/` 里的代码在客户端接管。（生产环境有一个极薄的 Node 入口网关 `server/`，只做 HTTP 入口与 Entry Gate 的 cookie，见「部署」。）
 
 ## 启动 / 构建
 
@@ -81,10 +81,11 @@ npm run dev       # 开发服务器 → http://localhost:4321
 其他命令：
 
 ```bash
-npm run build     # 构建静态站点到 dist/
-npm run preview   # 预览 dist/ 里的构建结果
-npm run check     # Astro 类型 / 模板诊断
-npm test          # 纯逻辑单元测试（音名映射、旋律识别、主题与曲目映射、音量渐变、联系方式与身份标签）
+npm run build        # 构建静态站点到 dist/
+npm run start:server # 生产：Node 入口网关（读 dist/，见「部署」）
+npm run preview      # 预览 dist/ 里的构建结果
+npm run check        # Astro 类型 / 模板诊断
+npm test             # 纯逻辑单元测试（音名映射、旋律识别、主题与曲目映射、音量渐变、联系方式与身份标签）
 ```
 
 停止开发服务器：在项目目录执行 `npx astro dev stop`（或直接 Ctrl+C 掉那个终端）。
@@ -115,13 +116,26 @@ npm test          # 纯逻辑单元测试（音名映射、旋律识别、主题
 | --- | --- |
 | Cloudflare Pages | build command `npm run build`，输出目录 `dist` |
 | Netlify | 同上，`dist` |
-| Render | Static Site：build command `npm ci && npm run build`，publish directory `dist` |
+| Render | Static Site：build command `npm ci && npm run build`，publish directory `dist`（**丢掉入口网关**，见下） |
 | GitHub Pages | 需要把产物发到 Pages 分支或用 Action；`site` 要填对，否则子路径部署时资源会 404 |
 | 自己的服务器 | 把 `dist/` 拷过去即可，无需 Node 运行时 |
 
+### Render Web Service（静态前端 + 极薄 Node 网关）
+
+上面那张表是"纯静态"的部署方式：所有入口规则都只能在浏览器里做（NEW VISIT 的子路由要先渲染再跳走）。想让 **HTTP 层**就挡住"没进门就直接打开子页面"，用 Web Service：
+
+| 项 | 值 |
+| --- | --- |
+| Environment | Node |
+| Build Command | `npm install && npm run build` |
+| Start Command | `npm run start:server` |
+| Health / 端口 | 服务读 `process.env.PORT`，监听 `0.0.0.0` |
+
+`server/index.ts` 只做四件事：HTTP 入口判断、未进门时把子路由 302 到 `/` 或 `/en/`、Entry Gate 的服务端 session cookie、从 `dist/` 分发静态文件（`_astro/*`、图片、CSS、JS、sitemap、RSS、favicon、robots 都是普通静态响应，永不参与重定向）。它**不是** Astro SSR，也不碰任何前端逻辑（MIDI / AudioContext / scene / scroll 都还在浏览器里）。入口脚本用 Node 直接跑 TypeScript（`node --experimental-strip-types`），没有构建步骤、没有框架依赖。
+
 > **Node 版本是硬性要求。** Astro 7 需要 **Node ≥ 22.12.0**：仓库根目录的 `.node-version`（`22.22.0`）和 `package.json` 里的 `engines` 都写了这一点。托管平台如果默认给更老的 Node（Render 上，2024 年创建的服务默认是 20.15.1），构建会在 `astro build` 那一步直接拒绝运行，报 `Node.js vX is not supported by Astro!`。平台设置里找不到 Node 版本选项时，加一个环境变量 `NODE_VERSION=22.22.0` 即可（Render 的优先级是 `NODE_VERSION` > `.node-version` > `.nvmrc` > `engines`）。
 
-站点没有任何服务端逻辑，也不需要 `.env` —— 唯一可能用到的环境变量就是上面那个 `NODE_VERSION`。
+站点没有数据库、没有服务端渲染，也不需要 `.env` —— 唯一可能用到的环境变量就是上面那个 `NODE_VERSION`（Web Service 方式还会用到平台注入的 `PORT`）。用 `npm run start:server` 时服务端会写两个 HttpOnly cookie（`rest_note_visit` / `rest_note_entered`），浏览器端不需要任何配置。
 
 ## 目录结构
 
