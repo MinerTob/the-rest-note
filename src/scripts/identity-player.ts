@@ -1,13 +1,8 @@
 import { navigate } from 'astro:transitions/client';
 import { createIdentityPhysics, type IdentityLayout } from './identity-physics';
 import { attachIdentityMotion } from './identity-motion';
-import {
-  HANDOVER_AHEAD,
-  handOverIdentityPiano,
-  identityPiano,
-  rampIdentityVolume,
-  takeIdentityHandover,
-} from './identity-audio';
+import { createNocturnePlayback } from './identity-playback';
+import { identityPiano, rampIdentityVolume } from './identity-audio';
 import {
   parseMidi,
   identityRevealPlan,
@@ -16,19 +11,20 @@ import {
 } from "@/lib/identity-midi";
 import { IDENTITY_TRACK_SRC } from "@/lib/identity";
 import { getGlobal } from "./global";
-import { savedPosition, savePosition, restartPosition } from "@/lib/live-timeline";
 import { takeLanguageSwap } from './lang';
 
 const SOURCE = IDENTITY_TRACK_SRC;
 const TIMELINE = "identity:nocturne";
-// Give a freshly started/resumed mobile AudioContext time to fill its render
-// quantum before the first note. Without this, the first sources begin at
-// currentTime and can flutter while the audio thread wakes up, even though the
-// visual waterfall remains smooth. Cross-page handovers are already primed.
-const AUDIO_START_LEAD = 0.14;
-const SCHEDULE_AHEAD = 0.4;
+/**
+ * 这一页只管"看得见的那一半"：瀑布流、标签物理、播放控件、进度条、主题曲让位。
+ *
+ * 出声的那一半（手势解锁 / 位置与进度记忆 / 起跑余量 / 暂停恢复）全在
+ * `identity-playback.ts` —— 三条被踩过的坑写在那个文件头（起跑余量放 origin、
+ * 只排还没开始的音且 elapsed=0、位置只走 live-timeline）。改这里之前先读它。
+ */
 const FIRST = 21,
   LAST = 108,
+  /** 瀑布流画多长的一段（秒）。音频的前瞻不在这一页，见 identity-playback.ts 的 LOOKAHEAD */
   LEAD = 2.4;
 const black = (m: number) => [1, 3, 6, 8, 10].includes(m % 12);
 const keyPositions = (() => {
@@ -131,34 +127,33 @@ export function initIdentity(): void {
   const tags = [...root.querySelectorAll<HTMLElement>("[data-identity-tag]")];
   // 这架琴是 About / 自我介绍 / 首页关于区共用的：从别处接手时，声音已经在响了
   const piano = identityPiano();
-  let handover = takeIdentityHandover();
-  const adopted = handover !== null;
   let cancelVolumeRamp: () => void = () => {};
-  if (adopted) cancelVolumeRamp = rampIdentityVolume(piano, Number(volume.value), 600);
+  /*
+   * 上一页那架琴还在跑（三个"关于"页面共用同一个实例）：音量从**当前**值滑过来，
+   * 别先归零再淡入 —— 那一下归零就是"换页时听起来断了一截"的来源。
+   */
+  if (piano.isRunning) cancelVolumeRamp = rampIdentityVolume(piano, Number(volume.value), 600);
   else piano.setVolume(Number(volume.value));
+  const music = getGlobal().music;
   const abort = new AbortController(),
     signal = abort.signal;
-  let score: MidiScore, plan: ReturnType<typeof identityRevealPlan>;
+  let score: MidiScore | undefined,
+    plan: ReturnType<typeof identityRevealPlan> | undefined;
   let disposed = false,
-    loading = false,
     seeking = false,
     wantsPlayback = true,
-    playing = false,
-    offset = 0,
-    origin = 0,
     loop = 0,
     frame = 0,
-    timer = 0,
-    cursor = 0,
+    tickPosition = 0,
     sceneActive = true,
     needsAnimation = true;
-  let lastPositionSave = 0;
   let width = 720,
     height = 300,
     tint = "#5588bb",
     ink = "#243244",
     darkInk = "#bcd9ef";
-  let notes: MidiNote[] = [];
+  // 播放模块直接读这个数组（只读、不复制），所以谱子读完后 push 进去，别重新赋值
+  const notes: MidiNote[] = [];
   const physics = createIdentityPhysics(root, tags, writeLayout, (el) => {
     const href = el.dataset.identityLink;
     if (!href) return;
@@ -177,46 +172,98 @@ export function initIdentity(): void {
   // 还没上场的继续按乐谱排队 —— 歌走到哪一颗音，才放出哪一个标签。
   needsAnimation = true;
   if (takeLanguageSwap()) physics.markPlaced();
+
+  /**
+   * 统一的"叫醒播放"入口：这一区在屏幕上、用户想听、谱子也读好了，才叫播放模块接手。
+   * 音频还没被手势解锁时它会停在 `waiting`，等下一次手势（`arm()` + `enter()`）再试 ——
+   * 这正是手机端"第一次滑到关于区没声音"的那条路。
+   */
+  const startPlayback = () => {
+    if (disposed || !score || !sceneActive || !wantsPlayback || document.hidden) return;
+    void playback.enter();
+  };
   piano.addEventListener(
     "piano:context",
     () => {
-      if (piano.isRunning && wantsPlayback && !playing && !loading && !disposed)
-        void start();
+      // 上下文从 interrupted / suspended 醒过来（iOS 随时可能发生）：接着放
+      if (piano.isRunning) startPlayback();
     },
     { signal },
   );
   /**
    * 采样还在下载时不要"报错让人刷新"，等它加载完自己接上。
    * 场景：用户进站后立刻往下滑到关于区 —— 那一刻采样可能还没齐，
-   * 原来的 start() 会走到 catch 显示"请刷新重试"，而不会自己再试一次。
+   * 早先的版本会显示"请刷新重试"，而不会自己再试一次。
+   *
+   * 这里**不要求** `getLoadedRatio() >= 1`：缺的那几个音本来就会用最近的采样顶替，
+   * 而"必须一个不差"会把任何一个采样下载失败变成永远等下去（见 §10）。
    */
   piano.addEventListener(
     "piano:state",
     () => {
-      if (
-        piano.getState() === "ready" &&
-        piano.getLoadedRatio() >= 1 &&
-        piano.isRunning &&
-        wantsPlayback &&
-        sceneActive &&
-        !playing &&
-        !loading &&
-        !disposed
-      )
-        void start();
+      if (piano.getState() === "ready" && piano.isRunning) startPlayback();
     },
     { signal },
   );
-  const music = getGlobal().music;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
-  const time = () =>
-    playing ? Math.max(0, piano.currentTime - origin) : offset;
-  const duration = () => score.duration + 0.8;
+  const duration = () => (score ? score.duration + 0.8 : 0);
   const label = () => {
+    const playing = playback.playing;
     play.setAttribute('aria-label', playing ? (zh ? '暂停' : 'Pause') : (zh ? '播放' : 'Play'));
     play.setAttribute("aria-pressed", String(playing));
-    root.dataset.state = playing ? "playing" : "paused";
+    // 图标只认 'playing'；'waiting' 是"想放但音频还没被手势解锁"，CSS 不加图标
+    root.dataset.state = playing ? "playing" : playback.state === "waiting" ? "waiting" : "paused";
   };
+  /*
+   * 出声的那一半交给 identity-playback.ts：解锁（arm）、位置与进度记忆、
+   * 起跑余量、进/出这一区的暂停恢复都在那边。这一页只读它的 `state` 和 `pos()`
+   * 来画瀑布流、放标签、写读数 —— 不再自己维护 offset / origin / cursor / timer。
+   */
+  const playback = createNocturnePlayback({
+    engine: piano,
+    timeline: TIMELINE,
+    notes,
+    duration,
+    onState: (state) => {
+      label();
+      // 主题曲让位：夜曲在放的时候背景音乐一直是静音（见 §5.5）
+      music?.setDucked(state === "playing");
+      if (state === "playing") {
+        status.textContent = zh
+          ? "肖邦 · 降 E 大调夜曲 Op.9 No.2 · 循环演奏"
+          : "Chopin · Nocturne in E-flat major, Op.9 No.2 · Looping";
+        if (!frame) frame = requestAnimationFrame(render);
+      } else {
+        cancelAnimationFrame(frame);
+        frame = 0;
+        draw();
+        if (state === "waiting")
+          status.textContent = zh
+            ? "点击或按键，即可接入钢琴演奏。"
+            : "Click or press a key to join the piano performance.";
+      }
+    },
+    onTick: (position) => {
+      // 播放模块撞到曲尾会自己从头再来（位置变小 = 又一遍）
+      if (position < tickPosition) {
+        loop += 1;
+        root.dataset.loops = String(loop);
+      }
+      tickPosition = position;
+      if (!plan) return;
+      // 标签跟着乐句出场：歌走到哪一颗音，才放出哪一个标签（第一遍）
+      if (loop === 0 && needsAnimation)
+        plan.triggers.forEach((n, i) => {
+          if (position >= n.start) reveal(i, n);
+        });
+      // 乐谱截止时刻或已经进第二遍：还没上场的直接补齐，别让它们永远缺席
+      if (needsAnimation && (loop > 0 || position >= plan.deadline)) {
+        plan.triggers.forEach((n, i) => reveal(i, n));
+        needsAnimation = false;
+        root.dataset.settled = "true";
+      }
+    },
+  });
   function colors() {
     const s = getComputedStyle(root);
     tint = s.getPropertyValue("--accent-2").trim();
@@ -235,7 +282,7 @@ export function initIdentity(): void {
   }
   function draw() {
     ctx!.clearRect(0, 0, width, height);
-    const t = time(),
+    const t = playback.pos(),
       hit = height - 66,
       unit = width / 52;
     const active = new Set<number>();
@@ -305,176 +352,23 @@ export function initIdentity(): void {
     const key = keyPositions[n.midi - FIRST];
     physics.reveal(index, { x: Math.max(stage.left + 30, Math.min(stage.right - 30, c.left + (key.x + key.width / 2) * width / 52)), y: c.top + scrollY + height - 66 });
   }
-  function tick() {
-    if (!playing) return;
-    const t = time();
-    if (t >= duration()) {
-      piano.allNotesOff();
-      origin = piano.currentTime;
-      offset = 0;
-      cursor = 0;
-      loop += 1;
-      savePosition(TIMELINE, 0);
-      lastPositionSave = 0;
-      root.dataset.loops = String(loop);
-    }
-    const now = time();
-    if (now - lastPositionSave >= 0.5) {
-      savePosition(TIMELINE, now);
-      lastPositionSave = now;
-    }
-    // Schedule ahead on the audio clock; animation frames never trigger sound.
-    schedule(SCHEDULE_AHEAD);
-    if (loop === 0 && needsAnimation)
-      plan.triggers.forEach((n, i) => {
-        if (now >= n.start) reveal(i, n);
-      });
-    if (needsAnimation && (loop > 0 || now >= plan.deadline)) {
-      plan.triggers.forEach((n, i) => reveal(i, n));
-      needsAnimation = false;
-      root.dataset.settled = "true";
-    }
-  }
+  /**
+   * 只画不动声音：出声（排程、进度写回、循环）全在 identity-playback.ts 里，
+   * 动画帧永远不触发声音（这条规矩从旧版沿用下来，别再挪回去）。
+   */
   function render() {
-    if (!playing) return;
+    if (!playback.playing) return;
     draw();
     frame = requestAnimationFrame(render);
-  }
-  /**
-   * 把接下来 ahead 秒内的音排进音频时钟。
-   * 平时 ahead 只有 0.15 秒；换页交棒时会用大得多的值先排一小段，
-   * 于是换页那几百毫秒里声音照样在走（见 identity-audio.ts 的 HANDOVER_AHEAD）。
-   */
-  function schedule(ahead: number) {
-    const now = time();
-    while (cursor < notes.length && notes[cursor].start < now + ahead) {
-      const n = notes[cursor++];
-      if (n.end > now)
-        piano.scheduleNote(
-          n.midi,
-          n.velocity,
-          origin + Math.max(n.start, now),
-          origin + n.end,
-          Math.max(0, now - n.start),
-        );
-    }
-  }
-  /**
-   * keepRinging = true 时不掐音：留给下一个"关于"页面接着响（无缝换页用）。
-   * 平时（暂停按钮、离开这一族页面）就是原来的行为，立刻收声。
-   */
-  function pause(keepRinging = false) {
-    if (!playing) return;
-    offset = time();
-    savePosition(TIMELINE, offset);
-    playing = false;
-    clearInterval(timer);
-    cancelAnimationFrame(frame);
-    timer = 0;
-    frame = 0;
-    if (!keepRinging) piano.allNotesOff();
-
-    music?.setDucked(false);
-    label();
-    draw();
-  }
-  async function start() {
-    if (playing || loading || disposed || !score || !sceneActive) return;
-    loading = true;
-    play.disabled = true;
-    piano.ensure();
-    try {
-      await piano.preload();
-      if (disposed || !sceneActive || !wantsPlayback || document.hidden) return;
-      /*
-       * 只要还没彻底失败就开始弹 —— **不要**等"采样一个不差"。
-       * 缺的那几个音本来就会用最近的采样顶替（`bufferFor()` 的退让逻辑），
-       * 而"必须全部加载完"这个条件会把**任何一个采样没下载成功**变成永远等下去：
-       * 表现就是"文件都下好了、按播放还是不出声，刷新几次才好"（本人实测的那种）。
-       */
-      if (piano.getState() === "failed") throw new Error("Samples unavailable");
-      if (!piano.isRunning) {
-        label();
-        root.dataset.state = "waiting";
-        status.textContent = zh
-          ? "点击或按键，即可接入钢琴演奏。"
-          : "Click or press a key to join the piano performance.";
-        return;
-      }
-      // 接手上一页的交棒点（换页不断音）；没有就按 live-timeline 的记忆继续
-      /*
-       * 起跑余量：刚被手势唤醒的音频线程需要一点时间才稳，所以这一区里
-       * 让音乐从"现在 + 0.14 秒"开始（写进 origin，而不是去动播放位置）。
-       *
-       * 关键区分（我上一版就在这里搞错了）：
-       *   · 从头开始播：position = 0，cursor 落在第一个音上 → **第一个音照常响**，
-       *     只是整条时间轴晚了 0.14 秒；
-       *   · 从记忆位置接续：position 是记忆里的秒数，`start >= position` 会跳过
-       *     "跨过接续点、刚才已经响过"的那两三个音 —— 不重敲它们，就没有那一下颤动。
-       * 跨页接手时前一段音频已经排好了，不需要余量（startLead = 0）。
-       */
-      let startLead = AUDIO_START_LEAD;
-      if (adopted && handover !== null) {
-        // 交棒时那一段（position → scheduledUntil）已经由上一页排好、正在响，
-        // 所以这里只排它之后的音：既不重复，也不会把时间轴往前推。
-        const from = handover.from;
-        offset = handover.position;
-        handover = null;
-        cursor = notes.findIndex((n) => n.start >= from);
-        startLead = 0;
-      } else {
-        /*
-         * 从记忆位置接着放：**把起跑余量算进位置里**，而不是去挪时间轴。
-         *
-         * 这两件事必须分清：
-         *   · 起跑余量（AUDIO_START_LEAD）是给"刚醒来的音频线程"留的空档，本来就该跳过；
-         *   · 时间轴映射（origin）必须严格等于 currentTime - offset，不能把余量塞进去 ——
-         *     塞进去就等于"记忆的进度"和"真实听到的位置"错开 0.14 秒，刷新回来会接不上。
-         *
-         * `start >= offset`（而不是 `end > offset`）：跨过接续点、本来还在响的那两三个音
-         * 会被跳过 —— 它们已经从采样中间响过一遍了，再排一次就是在同一瞬间重敲几个没有
-         * 音头的音，听感正是"颤动/卡顿"（本人手机实测）。跳过它们的代价只是这 0.14 秒里
-         * 少两三个音，比糊一坨好得多。
-         */
-        offset = savedPosition(TIMELINE, duration());
-        cursor = notes.findIndex((n) => n.start >= offset);
-      }
-      root.dataset.loops = String(loop);
-      music?.setDucked(true);
-      if (cursor < 0) cursor = 0;
-      origin = piano.currentTime + startLead - offset;
-      playing = true;
-      restart.disabled = false;
-      progress.disabled = false;
-      label();
-      status.textContent = zh
-        ? "肖邦 · 降 E 大调夜曲 Op.9 No.2 · 循环演奏"
-        : "Chopin · Nocturne in E-flat major, Op.9 No.2 · Looping";
-      tick();
-      timer = window.setInterval(tick, 25);
-      render();
-    } catch {
-      // 还没加载完（不是真的失败）就别吓唬人：等 piano:state 变 ready 会自己接上
-      status.textContent =
-        piano.getState() === "failed"
-          ? zh
-            ? "钢琴采样未能完整加载，请刷新后重试。"
-            : "Piano samples could not load. Please reload and try again."
-          : zh
-            ? "钢琴采样加载中…"
-            : "Loading the piano samples…";
-      label();
-    } finally {
-      loading = false;
-      if (!disposed) play.disabled = false;
-    }
   }
   play.addEventListener(
     "click",
     () => {
-      wantsPlayback = !playing;
-      if (playing) pause();
-      else void start();
+      if (!score) return;
+      // 播放键本身就是一次合法手势：先把 AudioContext 叫起来，再交给播放模块切换
+      playback.arm();
+      wantsPlayback = !playback.playing;
+      playback.toggle();
     },
     { signal },
   );
@@ -485,7 +379,9 @@ export function initIdentity(): void {
       )
     )
       return;
-    if (wantsPlayback && !playing) void start();
+    // 用户手势是唤醒音频的唯一时机（iOS 只认手势）：下滑/按键/wheel 都顺手叫一次
+    playback.arm();
+    startPlayback();
   };
   document.addEventListener("pointerdown", activate, { signal });
   document.addEventListener("keydown", activate, { signal });
@@ -493,17 +389,17 @@ export function initIdentity(): void {
   restart.addEventListener(
     "click",
     () => {
-      pause();
-      restartPosition(TIMELINE);
+      if (!score) return;
+      playback.arm();
       wantsPlayback = true;
-      offset = 0;
       loop = 0;
-      cursor = 0;
+      tickPosition = 0;
       needsAnimation = true;
       clearLayout();
       delete root.dataset.settled;
       physics.reset();
-      void start();
+      // 清进度 + 从头来（播放模块负责把 0 写回 live-timeline）
+      playback.restart();
     },
     { signal },
   );
@@ -522,15 +418,9 @@ export function initIdentity(): void {
     () => {
       if (!score) return;
       seeking = true;
-      const wasPlaying = playing || (loading && wantsPlayback);
-      pause();
-      offset = Math.max(0, Math.min(duration(), (Number(progress.value) / 1000) * duration()));
-      savePosition(TIMELINE, offset);
-      cursor = notes.findIndex((note) => note.end > offset);
-      if (cursor < 0) cursor = 0;
+      // 拖动时"正在放"的接着从新位置放、"停着"的只记住新位置（模块自己分这两种情况）
+      playback.seek((Number(progress.value) / 1000) * duration());
       draw();
-      wantsPlayback = wasPlaying;
-      if (wasPlaying) void start();
     },
     { signal },
   );
@@ -550,25 +440,31 @@ export function initIdentity(): void {
   document.addEventListener(
     "visibilitychange",
     () => {
-      if (document.hidden) pause();
-      else if (sceneActive && wantsPlayback) void start();
+      // 切走停手（进度写在 live-timeline 里），切回来接着弹
+      if (document.hidden) playback.leave();
+      else startPlayback();
     },
     { signal },
   );
   /*
    * 手机端"第一次滑到关于区没声音"的兜底：那一次往往只是音频还没被手势解锁
-   * （上下文还在 suspended / interrupted），于是 start() 只能停在"点击或按键"。
+   * （上下文还在 suspended / interrupted），于是播放模块只能停在"点击或按键"。
    * 解锁不一定发生在同一个手势里，所以这里挂一个"只要没在放、且这一区还在屏幕上，
-   * 任何一次点击/触摸都再试一次"的兜底 —— 成了就不再调（playing 为真时 start() 自己早退）。
+   * 任何一次点击/触摸都再试一次"的兜底 —— 成了就不再调（`enter()` 自己会早退）。
+   *
+   * 注意要 `arm()`：这一次 pointerdown 就是那个来之不易的手势，得在它里面把
+   * AudioContext 叫醒；不叫醒的话下一次 `enter()` 还是只能停在 waiting。
    */
   document.addEventListener(
     "pointerdown",
     () => {
-      if (!playing && sceneActive && wantsPlayback && !loading && !disposed) void start();
+      if (playback.playing) return;
+      playback.arm();
+      startPlayback();
     },
     { capture: true, signal },
   );
-  window.addEventListener("pagehide", () => pause(), { signal });
+  window.addEventListener("pagehide", () => playback.leave(), { signal });
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(canvas);
   const themeObserver = new MutationObserver(() => {
@@ -598,7 +494,9 @@ export function initIdentity(): void {
         if (disposed) return;
         score = parseMidi(new Uint8Array(data));
         plan = identityRevealPlan(score, tags.length);
-        notes = score.notes.filter((n) => n.midi >= FIRST && n.midi <= LAST);
+        // 播放模块拿的是同一个数组（只读），所以这里 push 而不是重新赋值
+        notes.length = 0;
+        notes.push(...score.notes.filter((n) => n.midi >= FIRST && n.midi <= LAST));
         root.dataset.ready = "true";
         root.dataset.deadline = String(plan.deadline);
         root.dataset.deadlineTick = String(plan.endTick);
@@ -609,7 +507,7 @@ export function initIdentity(): void {
         progress.disabled = false;
         label();
         draw();
-        if (sceneActive) void start();
+        startPlayback();
       })
       .catch(() => {
         if (disposed || signal.aborted) return;
@@ -627,16 +525,17 @@ export function initIdentity(): void {
   loadScore();
   disposeCurrent = () => {
     disposed = true;
-    // 交棒：先把接下来这一小段排进音频时钟，再停下来（不掐音），
-    // 于是换页过程中声音是连续的；下一个页面从交棒位置接着往下排。
-    // 真的离开"关于"这一族页面时，app.ts 会调 releaseIdentityPiano() 收掉这架琴。
-    if (playing) {
-      const at = time();
-      schedule(HANDOVER_AHEAD);
-      pause(true);
-      handOverIdentityPiano(at, at + HANDOVER_AHEAD);
-    }
+    /*
+     * 停手：播放模块会把"此刻听到的位置"写回 live-timeline、掐掉还在响的音。
+     * 换页后（About ⇄ 首页关于区）那边从同一条 live-timeline 的记忆接着弹，
+     * 不再走"交棒预排"那一条路（那套的坑见 identity-playback.ts 文件头）。
+     * 另外真的离开"关于"这一族页面时，app.ts 会在 astro:before-swap 里
+     * 调 releaseIdentityPiano() 收掉这架琴（三个页面共用一个实例）。
+     */
+    playback.dispose();
     cancelVolumeRamp();
+    cancelAnimationFrame(frame);
+    frame = 0;
     // 离开这一页之前把"此刻"的落点写下来（不是上一次静止时的旧快照）：
     // 换页时标签多半还躺着没睡，旧快照会缺几条，下次回到这一页就会整排重抛。
     writeLayout(physics.snapshot());
@@ -651,7 +550,8 @@ export function initIdentity(): void {
   };
   setActiveCurrent = (active) => {
     sceneActive = active;
-    if (active && wantsPlayback) void start();
-    if (!active) pause();
+    // 滚进这一区 → 想听就接着从记忆位置放；滚走 → 停手但把进度留下
+    if (active) startPlayback();
+    else playback.leave();
   };
 }
