@@ -660,6 +660,11 @@ visitBoundary({ navigation, sessionToken, entryToken }): 'new' | 'same';
 1. **每次 boot 都要补盖一次章**：Astro 的客户端路由换页时是 `history.pushState({ index, scrollX, scrollY })`，会把条目上原有的字段整个换掉。不补盖的话，"站内换页之后再刷新"会被当成新的一趟，凭空多一次入场页。
 2. **`history.replaceState` 一律带 `history.state` 走**：入场页收尾去掉遗留 `#锚点` 时传 `null`，会把章和 Astro 的滚动位置一起抹掉（见 §5.11）。
 
+**NEW VISIT 的入口规范化（Journey hash，只做这一件事）**：在 `app.ts` 里拿到 `isNewVisit` 之后、NEW VISIT 的初始滚动定位（`restoreScroll(0)`）之前，如果这一趟是 NEW VISIT、当前文档是 Journey 首页（有 `[data-journey]`）且 `location.hash` 正好是 `#home` / `#blog` / `#lab` / `#about`，就用 `history.replaceState(history.state, '', pathname + search)` **只把 hash 从地址栏抹掉** —— 不 reload、不换 path、不留新历史条目。
+- 为什么在客户端做：**fragment 不会发给服务器**，静态托管层没法针对 `#hash` 做重定向（不加 301/302、不加 `_redirects`）。而浏览器会在文档加载时自己按 hash 定位一次，"这一趟必须从 Home + 入场页全新进入"会被那一下顶开，还可能顺着带偏关于区 observer / 夜曲 / 滚动恢复。
+- 为什么只认这四个：它们是 Header 在长页上跳区块用的 id（`JourneyPage.astro` 那四个 section），别的 hash（文章锚点等）不吞。
+- **SAME VISIT 一个字都不动**：点 Header 跳 `#about`、普通刷新留在当前区块、前进后退、scene-scroll 落点恢复、Header 蓝杠都还要靠它（`visitSession()` 的判定规则本身没改）。
+
 ### 5.16 长页场景激活（关于区什么时候算"在观看区域"）
 
 **文件**：`src/lib/scene.ts`（纯逻辑）、`src/scripts/app.ts` 的 `initJourney()`、有单测 `tests/scene.test.mjs`
@@ -813,6 +818,19 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-22 · NEW VISIT 带 Journey hash 的入口规范化（只抹 `#home/#blog/#lab/#about`）
+
+- 需求：本人报"直接在地址栏输入 `https://the-rest-note.onrender.com/#home|#blog|#lab|#about`"时，浏览器自带的 fragment 定位会参与初始页面状态，可能绕过 / 干扰"NEW VISIT 必须从 Home + Entry Gate 开始"的语义，并进一步影响滚动、About scene、MIDI。要求只在客户端处理（fragment 不发给服务器，不许改托管层、不许加 301/302 / `_redirects`）：NEW VISIT 且当前是 Journey 首页且 hash 属于那四个时，用 `history.replaceState()` 只去掉 hash；SAME VISIT 一律不动；只做这一件事。
+- 根因：`app.ts` 的 NEW VISIT 分支只把初始滚动目标定成 `restoreScroll(0)`，但地址栏里那次遗留 `#about` 之类的 fragment 是**浏览器**在文档加载时自己定位的：它会先把页面滚到那个区块（进而让关于区 observer 判定 active、拉起夜曲与身份物理），等我们的 `restoreScroll(0)` 跑完，URL 里那个 hash 还在 —— 后续布局抖动 / 会话恢复时还会被再锚一次。服务器侧无解：`#hash` 根本不进 HTTP 请求。
+- 改动（只改 `src/scripts/app.ts` + 文档）：
+  1. 模块级新增 `JOURNEY_HASHES = ['#home', '#blog', '#lab', '#about']` —— 只认这四个已知 id。
+  2. `boot()` 里拿到 `const isNewVisit = visitSession().isNew;` 之后、`restoreScroll(0)` 之前插入规范化：`isNewVisit && journey && JOURNEY_HASHES.includes(location.hash)` 时 `history.replaceState(history.state, '', location.pathname + location.search)`。
+  3. 判定"当前是不是 Journey 首页"用已有的 `journey`（`document.querySelector('[data-journey]')`）而不是比 pathname：`[data-journey]` 只在 `JourneyPage.astro` 渲染，等价于"/ 与 /en/"，而客户端脚本引不了 `lib/pages.ts`（那份文件带 `astro:content`）。
+- 边界（明确没动）：不改 `visitSession()` 的判定规则、不改 Entry Gate（它自己那次"进站抹遗留锚点"保持原样）、不改音频 / About observer / SAME VISIT 的 `restoreScroll` / scene-scroll / Header 蓝杠 / 语言切换；不是 reload、不走 `location.replace`、不产生新历史条目，`pathname` / `search` / `history.state`（访问章 + Astro 的 index / scrollY）原样保留。
+- 文件：`src/scripts/app.ts`、`DEVELOPMENT.md`（§5.15 / 本条）。
+- 钩子/数据：无新增 / 删除 data-* 钩子、storage key、自定义事件。
+- 验证：`npm run check` 109 个文件 0 错误 0 警告 0 提示；`npm run build` 19 页。按本人要求这轮不跑浏览器 / CDP / Playwright，地址栏输入四种 hash 的实机行为由本人确认。
 
 ### 2026-09-22 · AudioContext 被系统打断后 NocturneTransport 的假 playing / 自动接回
 
