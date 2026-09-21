@@ -131,6 +131,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 焦点圈（仅键盘） | `src/scripts/input-modality.ts`、`src/styles/global.css` | `trackInputModality()` | `html[data-input]` |
 | LCD 时钟 | `src/components/LcdClock.astro`、`src/scripts/clock.ts` | `initClock()` | `[data-clock]`、`[data-clock-time]`、`[data-clock-date]` |
 | 背景音乐播放器 | `src/components/MusicSystem.astro`、`src/scripts/music-manager.ts`、`music-ui.ts`、`src/lib/music.ts` | `MusicManager`、`initMusicUI()` | `[data-music]`、`[data-music-toggle/-progress/-volume/-state/-title/-subtitle/-time]` |
+| 音频解锁（全站唯一入口） | `src/scripts/audio-unlock.ts` | `initAudioUnlock({ gated })`、`audioUnlock()`、内部 `unlockAll()` / `isExplicitAudioControlGesture()` | 手势 `pointerdown` / `keydown`（document capture，`passive`）；**显式播放控件除外**：`[data-music-toggle]`、`[data-identity-play]` |
 | 播放进度记忆 | `src/lib/live-timeline.ts` | `savedPosition()` / `savePosition()` / `restartPosition()` | sessionStorage `space.position.v1.<id>` |
 | MiniLab 25 键 | `src/components/MiniLab.astro`、`src/scripts/minilab.ts`、`notes.ts` | `initMiniLab()`、`MiniLabController` | `[data-minilab*]`、`[data-midi]`、`data-word-*` |
 | 钢琴采样引擎 | `src/scripts/piano.ts`、`src/lib/piano.ts` | `PianoEngine`、`nearestSample()`、`playbackRateFor()`、`samplesForRange()` | 事件 `piano:state` / `piano:context` / `piano:progress` |
@@ -343,6 +344,10 @@ function initMusicUI(music: MusicManager): void;
   - `canplay`（文件已就绪而元素还停着）、`visibilitychange`（切回这个标签页）、`pageshow`（从 bfcache 回来）各自会 `retryIfIdle()` 再试一次 —— 这三条都是"自己叫醒自己"，不需要别的系统伸手。
 - **第一次起播不从 0 淡入**（`applyVolumeForStart()`）：元素刚建出来时 volume 是 0，老写法要淡入 `AUDIO.fadeInMs`（2.4 秒），曲子开头那一下会被压到几乎听不见的音量里（timeline 在走、声音没有 —— 本人报的"第一拍没播出来 / 像还没加载好 timeline 就先走了"）。现在**本次文档的第一次**直接摆到目标音量（缓存的曲子立刻就响），之后（暂停再继续、切回放过的曲子）保持原来的淡入。暂停/继续与进度保存逻辑不变。
 - 音量渐变用 `requestAnimationFrame`（`ramp()`），进度两头都 `clamp01`；`prefers-reduced-motion` 时直接跳到目标音量（不渐变）。
+- **音频解锁只有 `src/scripts/audio-unlock.ts` 一个入口**（MP3 + 夜曲共用）：`pointerdown` / `keydown` 在 document capture 阶段调 `unlockAll()`（`primeIdentityPiano()` + "想播就 `transport.start()`" + `music.retryIfIdle()`）。
+  - **但显式播放控件要排除**：手势 `target.closest('[data-music-toggle], [data-identity-play]')` 命中时这一层**不**解锁。`pointerdown` 永远早于 `click`，抢先把音频恢复成"正在播放"的话，随后播放器自己的 `click` toggle 会看到"已经在播"并把它 pause 掉 —— 表现为 SAME VISIT 刷新后"第一次点播放没反应、第二次才正常"（MP3 与 MIDI 同一症状，本人报的回归）。
+  - 那两个按钮自己那条 click 链就够：MP3 是 `music.toggle()` → `music.play()`；夜曲是 `transport.start()` → `begin()` → `piano.ensure()`（在第一个 `await` 之前），都还在这次 click 的用户激活链里。
+  - **不要改成 bubble 监听**：`pointerdown` 即使冒泡也仍在 `click` 之前，竞争照旧；**也不要排除整个 button**：页面空白处、别的按钮上的 pointerdown / keydown 仍然要走全局解锁（刷新后被拦下的音频，用户随便点一下就能恢复）。
 - 曲目定义在 `src/lib/music.ts`：`TRACKS`、`DEFAULT_TRACK_ID`、`AUDIO`（音量常量）、`getTrack()`；纯函数 `clamp01()` / `easeOutQuad()` / `volumeAt()`（有单测 `tests/audio.test.mjs`）。
 - 进度记忆在 `src/lib/live-timeline.ts`：`savedPosition(id, duration)` / `savePosition(id, position)` / `restartPosition(id)`，存 sessionStorage `space.position.v1.<id>`，只记"真正播放过"的位置。
 - 切主题会触发 `crossfadeTo()`（主题 ↔ 曲目绑定见 `src/lib/themes.ts` 的 `THEME_TRACK`）。
@@ -891,6 +896,17 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-22 · 修复全局音频解锁抢占播放按钮首次点击
+
+- 需求：本人报一个前端音频共享回归 —— SAME VISIT 刷新后如果音频没有立即恢复，**第一次点"播放"没效果，第二次才正常**；MP3（MusicManager）与 MIDI（Nocturne）症状完全相同。只修"全局 unlock 与显式播放控件的竞争"这一件事。
+- 根因：`src/scripts/audio-unlock.ts` 的 `bindGestureUnlock()` 在 document **capture** 阶段听 `pointerdown` / `keydown`，而 `pointerdown` 永远早于 `click`。第一次点显式播放按钮时的顺序是：`pointerdown`（capture）→ `unlockAll()` 按各自意图把音频恢复成 playing → `click` 才进到播放器自己的 toggle → toggle 看到"已经在播" → 又把它 pause 掉。净效果就是第一击≈没变化。受影响的正是 `[data-music-toggle]`（MP3）与 `[data-identity-play]`（夜曲）。
+- 改动（只改 `src/scripts/audio-unlock.ts`）：新增 `EXPLICIT_AUDIO_CONTROL = '[data-music-toggle], [data-identity-play]'` 与 `isExplicitAudioControlGesture(event)`（`event.target instanceof Element && target.closest(...)`）；`bindGestureUnlock()` 的 `onGesture` 收到 Event 后**命中显式播放控件就直接 return**，其余手势照旧 `unlockAll()`。`capture: true` / `passive: true` 保持不变（改成 bubble 没用：`pointerdown` 冒泡也仍在 `click` 之前）。
+  - 为什么那两个按钮不需要别人代劳：MP3 的 `click` → `music.toggle()` → `music.play()` → `HTMLAudioElement.play()`；夜曲的 `click` → `transport.start()` → `begin()` → `piano.ensure()`（在 `begin()` 第一个 `await` 之前就执行）—— 都仍在这次 click 的可信用户激活链里。
+- 明确没碰：`identity-player.ts` 自己那套 `[data-identity-play] / [data-identity-restart] / [data-identity-progress] / [data-identity-volume]` 的 activate 排除（本轮冲突与它无关）、`MusicManager.toggle()`、`NocturneTransport.start()/pause()`、刷新恢复语义（不改 `userPaused` / `desired` / localStorage / sessionStorage / live-timeline）、服务器 cookie 与 Fetch Metadata、Entry Gate、其它任何音频文件。
+- 文件：`src/scripts/audio-unlock.ts`、`DEVELOPMENT.md`（§3 / §5.5 / 本条）。
+- 钩子/数据：没有新增 / 删除 data-* 钩子、storage key、自定义事件；只是让全局手势解锁**识别**既有的两个播放控件钩子（`[data-music-toggle]` / `[data-identity-play]`）并让位。
+- 验证：`npm run check` 112 个文件 0 错误 0 警告 0 提示；`npm run build` 19 页。按要求没动 `server/`、没跑浏览器自动化（无 Playwright / CDP），三台设备的实机确认留给你。
 
 ### 2026-09-22 · 用 Fetch Metadata 修复服务端 NEW VISIT 入口判定
 
