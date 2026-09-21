@@ -660,18 +660,23 @@ visitBoundary({ navigation, sessionToken, entryToken }): 'new' | 'same';
 1. **每次 boot 都要补盖一次章**：Astro 的客户端路由换页时是 `history.pushState({ index, scrollX, scrollY })`，会把条目上原有的字段整个换掉。不补盖的话，"站内换页之后再刷新"会被当成新的一趟，凭空多一次入场页。
 2. **`history.replaceState` 一律带 `history.state` 走**：入场页收尾去掉遗留 `#锚点` 时传 `null`，会把章和 Astro 的滚动位置一起抹掉（见 §5.11）。
 
-**NEW VISIT 的入口规范化（Journey hash）：在 `<head>` 里做，只做这一件事**
-`src/components/BaseHead.astro` 里有一段 `is:inline` 同步脚本（紧跟 viewport meta、在主题脚本之前），全站每个 HTML 页面都会跑，但**只有三个条件同时成立**才动手：
-1. `location.pathname === '/'` 或 `'/en/'`（Journey 首页这两个 pathname）；
-2. `location.hash` 严格等于 `#home` / `#blog` / `#lab` / `#about` 之一；
-3. 这一趟判定为 NEW VISIT（判定照抄 `lib/visit.ts` 的 `visitBoundary()`：没有 session token → NEW；`navigate` → NEW；`reload` → `history.state.restNoteVisit === session token` 才算 SAME，否则 NEW；`back_forward` → SAME；拿不到 / 认不出 type → NEW。`sessionStorage` / `history.state` / `performance` 的读取都包在 try/catch 里）。
+**NEW VISIT 的入口归一化：任何站内 HTML 页面的 NEW VISIT 都先落到本语言首页（在 `<head>` 里做）**
 
-成立时只做一次 `history.replaceState(history.state, '', location.pathname + location.search)`：**只去掉 hash**，不动 pathname / search / `history.state`，不 reload、不走 `location.replace`、不新增历史条目、不写 sessionStorage、不建新的 visit token。
+语义（本人定的最终版）：**NEW VISIT 不许直接落在子页面**。中文一律进 `/`，英文（`/en/` 及其下）一律进 `/en/`；在首页显示 Entry Gate，用户点过"进入空间"之后就停在首页，**不再跳回原来的子页**。
 
-- **为什么必须在 `<head>` 里同步做**：fragment 不会发给服务器（它不是请求的一部分），托管层没法针对 `#hash` 做重定向（不加 301/302、不加 `_redirects`）；而浏览器会在**解析到对应 section id 时自己执行原生 fragment 定位**。放在 `app.ts` 的 `boot()` 里已经太晚 —— 那一下定位已经发生，关于区 observer、夜曲、身份物理都会被带起来。所以清理必须早于原生定位：不等 DOMContentLoaded / `astro:page-load` / `requestAnimationFrame` / `boot()`。
-- **哪些 URL 一定不受影响**：`/blog/...` 与 `/en/blog/...` 文章直链、文章内部的任何 `#heading`、`/lab/...` 独立页、图片与 `/_astro/...` 静态资源、以后新增的其它 hash —— 第一、二条判定就会提前 return。**只认那四个已知 id**，不顺手吞别的 hash。
-- **SAME VISIT 一律保留 hash**：点 Header 跳 `#about`、普通刷新留在当前区块、前进 / 后退、scene-scroll 的落点恢复、Header 蓝杠都还要靠它（`visitSession()` / `visitBoundary()` 的正式判定逻辑本身没改）。
-- **只有这一处**：早期脚本负责"阻止浏览器原生 fragment 初始定位"，`app.ts` 里不再有第二份 NEW/SAME 判定（同日那一版放在 `boot()` 里的兜底已删）。`boot()` 里 NEW VISIT 的 `restoreScroll(0)` 照旧（它是初始位置的决定者，不是 hash 的清理者）。
+`src/components/BaseHead.astro` 里有一段 `is:inline` 同步脚本（紧跟 viewport meta、在主题脚本之前），全站每个 HTML 页面都会跑：
+
+1. 先判 NEW / SAME（照抄 `lib/visit.ts` 的 `visitBoundary()`）：没有 session token → NEW；`navigate` → NEW；`reload` → `history.state.restNoteVisit === session token` 才算 SAME，否则 NEW；`back_forward` → SAME；拿不到 / 认不出 type → NEW。`sessionStorage` / `history.state` / `performance` 的读取都包在 try/catch 里。
+2. **SAME VISIT 立即早退**，一个字节都不改：刷新子页就留在子页、站内点击文章 / About → Intro / 返回 / 前进后退 / 语言切换都照旧。
+3. NEW VISIT 时算 canonical 入口：`location.pathname === '/en/' || startsWith('/en/')` → `'/en/'`，否则 `'/'`。
+   - `pathname !== target`（子页直链）→ `location.replace(target)`：**replace 不留子页的历史条目**，query / hash 都不继承（默认不把 query 带到首页），也不用 `pushState`、不把原 pathname 存起来准备"进入后跳回"。
+   - `pathname === target`（已经在首页）→ 只把 `#home` / `#blog` / `#lab` / `#about` 这四个 Journey hash 从地址栏抹掉：`history.replaceState(history.state, '', location.pathname + location.search)`，不动 pathname / search / `history.state`。
+4. 动作只有这两种：不写 sessionStorage、不建新的 visit token、不碰 Entry Gate / 音频。
+
+- **为什么必须放在 `<head>` 里同步做**：①fragment 不发给服务器，托管层没法针对 `#hash` 做重定向（不加 301/302、不加 `_redirects`）；②子页直链必须在**正文 DOM 解析之前**换掉，否则会先闪一下文章 / 关于页，而且浏览器可能已经按 URL 里的 hash 做过原生 fragment 定位（关于区 observer、夜曲、身份物理都会被带起来）。所以都不等 DOMContentLoaded / `astro:page-load` / `requestAnimationFrame` / `app.ts` 的 `boot()`。
+- **静态资源不写任何判断**：`/_astro/`、图片、favicon、sitemap、`rss.xml`、`robots.txt` 根本不经过 `BaseHead.astro`（`rss.xml` 是 `src/pages/rss.xml.ts` 的 API 路由、sitemap 由集成生成），所以脚本里没有、也不需要资源白名单。
+- **只有这一处判定**：`app.ts` 里既没有重定向逻辑也没有第二份 NEW/SAME 判定（同日那两版都删了，避免漂移）；`boot()` 里 NEW VISIT 的 `restoreScroll(0)`、SAME VISIT 的落点恢复都照旧。
+- **重定向后的那一趟仍是 NEW**：`location.replace()` 报的导航类型是 `navigate`（即使报成 `reload`，新条目的 `state` 是空的、章对不上，也判 NEW），而目标首页自己算出来的 target 就是自己，所以不会再跳、也不会来回死循环 —— Entry Gate 正常在首页出现。
 
 ### 5.16 长页场景激活（关于区什么时候算"在观看区域"）
 
@@ -827,7 +832,25 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 
 ## 10. 功能日志（规定动作）
 
+### 2026-09-22 · NEW VISIT 统一归一化到对应语言首页
+
+- 需求：本人确定最终语义 —— **任何"站内 HTML 页面"的 NEW VISIT 都不允许直接落在子页面**：中文所有站内路由 → `/`，英文（`/en/...`）→ `/en/`，然后正常显示 Entry Gate；用户点过"进入空间"以后就停在首页，**不再跳回原始子页**。示例：`/blog/a-nocturne-for-you/`、`/about/`、`/about/intro/`、`/lab/...` → `/`；`/en/blog/...`、`/en/about/intro/` → `/en/`。SAME VISIT 一律不受影响（站内点击文章、About → Intro、返回、前进后退、刷新当前页、语言切换都留在原页面）。仍然不许服务器 301/302、不许改 Render 配置、不许加 `_redirects`；不许叠第三套判断；`app.ts` 不许再新增重定向逻辑。
+- 根因（为什么必须提前到 `<head>`）：①fragment 与"当前是子页"这件事在托管层都无从下手（fragment 根本不进 HTTP 请求，静态托管的 rewrite 也只能把请求打到同一个 HTML）；②放在 `app.ts` 的 `boot()` 里太晚 —— 浏览器在解析到 section id 时已经执行过原生 fragment 定位（关于区 observer、夜曲、身份物理都被带起来），而且子页正文已经先渲染过一帧。
+- 改动（只改 `src/components/BaseHead.astro` + 文档）：
+  1. 把上一版"只在 `'/'` / `'/en/'` 且 hash 是那四个时才清 hash"的 early normalizer **升级为统一规则**（原地替换，没有第二、第三套判断）：先判 NEW/SAME（照抄 `lib/visit.ts` 的 `visitBoundary()`：无 session token → NEW；`navigate` → NEW；`reload` → `history.state.restNoteVisit === session token` 才 SAME，否则 NEW；`back_forward` → SAME；拿不到 / 认不出 type → NEW；`sessionStorage` / `history.state` / `performance` 的读取各自 try/catch）。
+  2. **SAME VISIT 立即早退**：刷新子页、站内点击文章、About → Intro、返回、前进/后退、语言切换（ClientRouter 的 `navigate()`，本来就不产生文档加载）都留在原路由，hash 也不动。
+  3. NEW VISIT：`location.pathname === '/en/' || startsWith('/en/')` → target `'/en/'`，否则 `'/'`。`pathname !== target` → `location.replace(target)`（replace 不留子页历史条目、不继承 query/hash、不用 `pushState`、不把原 pathname 存起来准备"进入后跳回"）；`pathname === target` → 只把 `#home` / `#blog` / `#lab` / `#about` 从地址栏抹掉（`history.replaceState(history.state, '', pathname + search)`，保留现有 search）。
+  4. 静态资源不写任何判断：`/_astro/`、图片、favicon、sitemap、`rss.xml`（`src/pages/rss.xml.ts` 的 API 路由）、`robots.txt` 都不经过 `BaseHead.astro`，脚本里没有也不需要白名单。
+- 为什么子页直链会被 replace 到首页：脚本在 `<head>` 里、正文还没解析就执行，`location.replace()` 把当前这条子页历史条目**换成**目标首页（不新增条目、不留子页），页面于是以 `navigate` 类型重新加载 `/` 或 `/en/`；那一趟仍然判为 NEW（类型是 `navigate`；即使被报成 `reload`，replace 出来的新条目 `state` 为空、章对不上也是 NEW），而首页自己算出的 target 就是自己 → 不会再跳、不会死循环，Entry Gate 正常出现。
+- 为什么 SAME VISIT 刷新 / 站内导航不受影响：判定为 SAME 时脚本在做任何动作之前就 `return` —— 刷新子页（`reload` + 条目上的章一致）、ClientRouter 站内导航（不产生文档加载，脚本根本不跑）、前进后退（`back_forward`）、语言切换（同上）全都留在原路由，`visitSession()` / `visitBoundary()` 的正式逻辑与 `app.ts` 的 scroll restoration 一行未动。
+- 明确没碰：`visit-session.ts` 的 token 创建、`visitBoundary()`、Entry Gate 动画/按钮、scroll restoration、Header（点击导航与蓝杠）、language switch、MIDI / AudioContext、About observer、live-timeline、scene-scroll、MusicManager。
+- 文件：`src/components/BaseHead.astro`、`DEVELOPMENT.md`（§5.15 / 本条）。`app.ts` 本轮零改动（它已经没有任何重定向 / NEW-SAME 判定）。
+- 钩子/数据：无新增 / 删除 data-* 钩子、storage key、自定义事件（脚本只读 `rest-note.visit` 与 `history.state.restNoteVisit`，一个字节都不写）。
+- 验证：`npm run check` 109 个文件 0 错误 0 警告 0 提示；`npm run build` 19 页。按本人要求这轮不跑浏览器 / CDP / Playwright，四种直链的实机行为由本人确认。
+
 ### 2026-09-22 · 将 NEW VISIT Journey hash 规范化提前到 `<head>`（不删 `app.ts` 的 NEW VISIT / restoreScroll(0) 逻辑）
+
+> **同日后续（已被取代）**：这一版只处理"已在 Journey 首页 + 那四个 hash"，且 SAME VISIT 之外的子页仍然直接落在子页上。现在 `<head>` 里那段脚本已升级为"NEW VISIT 统一归一化到对应语言首页"，见上一条。
 
 - 需求：本人要求把上一版（`e07d8fd`）放在 `app.ts` `boot()` 里的 Journey hash 规范化，改成"**全站部署、局部生效**"的 early normalizer：`src/components/BaseHead.astro` 的 `<head>` 里一段同步 `is:inline` 脚本，必须在浏览器解析到对应 section id、执行原生 fragment scroll **之前**跑完（不等 DOMContentLoaded / `astro:page-load` / `requestAnimationFrame` / `app.ts` 的 boot）。不许服务器 301/302、不许改 Render 配置、不许加 `_redirects`；不许保留两套可能漂移的 NEW/SAME 判定。
 - 根因（为什么 `boot()` 里太晚）：`app.ts` 是模块脚本，而 `boot()` 还要等到 DOMContentLoaded / `astro:page-load`，这时浏览器**已经**按 URL 里的 `#about` 之类做过一次原生 fragment 定位了 —— 那一下足以把关于区 observer 判成 active、拉起夜曲与身份物理，之后我们再 `restoreScroll(0)` 只是补救；而且 URL 里的 hash 还在，会话恢复 / 布局抖动时会被再锚一次。服务器侧无解：fragment 不进 HTTP 请求。
