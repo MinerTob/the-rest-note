@@ -611,6 +611,7 @@ visitSession(): VisitSession;                  // 见 §5.15：这一趟的 id /
   - 实测（无头 Chrome + 真实 AudioContext）：首页关于区 → 自我介绍页 → 返回，`AudioContext` 新建计数全程不变（一直是入场时那 2 个：夜曲 + MiniLab）、时间线 9.88s → 11.43s → 15.08s 一路向前、返回后 `data-state=playing`、`data-scene=active`。
   - `initNocturne()` 在 boot 里调用，`disposeNocturne()` 在 `astro:before-swap` 里调用；缺采样或缺用户手势时只把状态标成 `waiting`，等下一次点击再开始。
   - 切到后台会暂停、切回来接着弹（与 About 页一致）；主题曲的让位由 `app.ts` 的 `setAboutActive(true)` 负责（见 §5.5）。
+  - **`playing` 跟着 AudioContext 走，不跟着 UI 走**：`piano:context` 监听有两个方向 —— 上下文变成 `running` 时，若 `desired && !playing` 就 `begin()`；上下文**离开** `running`（iOS 音频会话被打断 / `suspended` / `interrupted`）时若还在 `playing` 就 `suspend()`：存位置、掐音、`playing = false`、通知 UI，**`desired` 保留**。上下文回来时上面那一支再 `begin()`，从存下的 offset 接着弹。**系统打断不等于用户暂停**：只有 `pause()`（点暂停）与离开这一族（`stop()`）才清 `desired`。少了这条反方向同步，`isPlaying()` 会一直是 `true` —— UI 显示在播、位置冻在不再前进的 `currentTime` 上、`audio-unlock.ts` 的 `desired && !isPlaying()` 也不成立，连真实手势都接不回来（"幽灵演奏"，详见 §10）。
 - 状态钩子：`[data-nocturne-ready]`（乐谱解析完成）、`[data-nocturne-state="waiting|playing|paused"]` —— 排查"这一页怎么没声音"先看这两个。
 - 单测：这一页是排版 + 内容 + 浏览器行为，只有常量层面的单测（`tests/identity.test.mjs` 里的音量断言）；改动后在浏览器里核对分节标题、图片、返回按钮与夜曲即可（`npm run build` 会校验内容集合字段）。
 
@@ -812,6 +813,19 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-22 · AudioContext 被系统打断后 NocturneTransport 的假 playing / 自动接回
+
+- 需求：本人报当天第 3、4 个音频问题，按同一条状态链处理。**现象 A**：从 Header 点 About、平滑滚动进入关于区后 MIDI 有时不真正出声；**现象 B**："幽灵演奏"——播放按钮显示暂停态（UI 认为 `playing`）、时间已经走到 0:06、琴键/瀑布流停在某一帧不再推进、实际没有声音。要求真正修 transport 的运行状态同步，不许只改 UI、不许在 `identity-player.ts` 里改按钮状态，也不许给 Header → About 加"直接 start MIDI"的新路径。
+- 根因：`NocturneTransport` 自己有一份 `playing`，而"能不能出声"取决于 `PianoEngine.isRunning`（AudioContext 是否 `running`）。`piano:context` 监听过去只处理**一个方向**（`isRunning === true` 时若 `desired && !playing` 就 `begin()`）：iOS / Safari 把 AudioContext 从 `running` 变成 `suspended` / `interrupted` 时，没人把 `playing` 同步回 `false`。于是 ①`isPlaying()` 一直返回 `true`，UI 继续显示"正在播放"；②`position()` 走的是冻住的 `piano().currentTime - origin`，视觉停在某一帧；③`audio-unlock.ts` 那句 `if (transport?.isDesired() && !transport.isPlaying()) transport.start()` 永远不成立，后续真实手势也不会把播放接回来 —— 这既是"幽灵演奏"，也是现象 A 里"进了 About 却没声"的那条链。
+- 改动（只改 `src/scripts/nocturne-transport.ts` + 文档）：
+  1. `piano()` 里的 `piano:context` 监听补齐**反方向**：`piano.isRunning === false` 且 `this.playing === true` 时调 `this.suspend()` —— 它本来就是这个语义：存下此刻位置（`offset` + `savePosition()`）、清掉排程 timer、`allNotesOff()`、`playing = false`、`notify()`（UI 退出假 playing），而 **`desired` 不动**（`suspend()` 从不碰它，只有 `pause()` / 离开场景才清）。
+  2. 没有新造第二套状态机，也没有新增 `suspend()` 的调用语义分支：系统打断与切后台 / 主动暂停共用同一个 `suspend()`，只在注释里写清"这一路不清 desired"。
+  3. 上下文回到 `running` 时，原来那一支 `isRunning === true` 分支看到 `desired === true && playing === false && !loading` → `begin()`；`begin()` 里 `resumeOffset()` 用的是 `suspend()` 刚存下的 `offset`（`resumed` 已经是 `true`，不再去读 `live-timeline`），所以**从打断处接着弹，不从头开始**。
+- 明确没动的语义：用户点暂停（`pause()`）与离开 About 场景（`stop()` → `pause()`）仍然清 `desired`；系统 `suspended` / `interrupted` / iOS 音频会话被打断只让 `playing = false` 并保留 `desired`。Header → About 那条链（`pointerdown` → audio-unlock → `primeIdentityPiano()` → `ensure/resume`；`click` → 平滑滚动；场景 active → `initIdentity()` → `setIdentityActive(true)` → `transport.start()`）一行未改，也没有新增任何"点 About 就 start MIDI"的路径。
+- 文件：`src/scripts/nocturne-transport.ts`、`DEVELOPMENT.md`（§5.14 / 本条）。没碰 `app.ts` 的 Header 蓝杠、`sceneCoverage` / `sceneDecision` 阈值、About IntersectionObserver、Entry Gate、`visit-session` / NEW VISIT、滚动恢复、语言切换、MusicManager、live-timeline 的 NEW VISIT reset、`identity-player.ts` 的 UI 架构、PianoEngine 的采样下载策略、autoplay 绕过。
+- 钩子/数据：无新增 / 删除 data-* 钩子、storage key、自定义事件（仍是既有的 `piano:context` / `piano:state`）。
+- 验证：`npm run check` 109 个文件 0 错误 0 警告 0 提示；`npm run build` 19 页。按本人要求这轮不跑浏览器 / CDP / Playwright，真机（iOS 音频会话打断 → 恢复）由本人确认。
 
 ### 2026-09-22 · Header 两处状态修正：导航蓝杠按视口观察线判定 + 界面语言以 URL/document 为准
 

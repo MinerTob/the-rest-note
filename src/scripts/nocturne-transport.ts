@@ -233,7 +233,24 @@ export class NocturneTransport {
       this.pianoRef = piano;
       // 上下文晚一点才醒（iOS 上 resume 常常不在手势里）：醒了就接着弹
       piano.addEventListener('piano:context', () => {
-        if (piano.isRunning && this.desired && !this.playing && !this.loading) void this.begin();
+        if (piano.isRunning) {
+          if (this.desired && !this.playing && !this.loading) void this.begin();
+          return;
+        }
+        /*
+         * 反方向：**系统**把 AudioContext 从 running 拿走（iOS 音频会话被打断、
+         * 权限框、切后台、别的 App 抢音频）。这不是用户按了暂停 —— 所以走 suspend()：
+         * 存下此刻位置、掐掉排进时钟的音、`playing = false`，**desired 留着**。
+         *
+         * 少了这一步，`playing` 会永远停在 true：UI 一直显示"正在播放"、位置冻在
+         * 不再前进的 `currentTime` 上（琴键/瀑布流停在某一帧），而 audio-unlock 那句
+         * `isDesired() && !isPlaying()` 也永远不成立 —— 后续真实手势也不会接回来，
+         * 就是"幽灵演奏"。
+         *
+         * 上下文回到 running 时上面那一支会 `begin()`，`resumeOffset()` 从刚存的
+         * offset 接着弹，不从头开始。
+         */
+        if (this.playing) this.suspend();
       });
       piano.addEventListener('piano:state', () => {
         if (piano.getState() === 'ready' && piano.isRunning && this.desired && !this.playing && !this.loading)
@@ -317,7 +334,13 @@ export class NocturneTransport {
     return this.offset;
   }
 
-  /** 停下来但保留 offset / desired（切后台、交页面时用） */
+  /**
+   * 停下来但保留 offset / desired。
+   * 调用方有两类，语义都是"先停下、位置留着"：
+   *   · 用户 / 页面主动（`pause()` 会在此之前清掉 desired、切后台、`start()` 里的接管）；
+   *   · **系统拿走了 AudioContext**（`piano:context` 发现 `isRunning === false`）——
+   *     这一路不清 desired，等上下文回到 running 再 `begin()` 接着弹。
+   */
   private suspend(): void {
     const wasPlaying = this.playing;
     if (wasPlaying) {
