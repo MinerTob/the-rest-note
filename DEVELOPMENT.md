@@ -818,12 +818,13 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 - 需求：本人自己写好中英双语正文，要求按 README「写内容」那一节的方式上传成一篇博客（中英各一份、文件名配对），不改代码。
 - 改动（只加内容 + 本条日志）：
   1. 新增 `src/content/blog/a-nocturne-for-you.zh.md` 与 `src/content/blog/a-nocturne-for-you.en.md`：文件名同 slug（`a-nocturne-for-you`），frontmatter `lang` 与后缀一致，`pubDate: 2026-09-22`，`tags: ["Notes", "Dev"]`。
-  2. 正文一字未改，只在两端各自补上 frontmatter：中文 `title: 为你弹奏肖邦的夜曲`，英文 `title: A Nocturne for You`；`description` 各写一句概括（中文「一次 NEW VISIT，一声不该响的夜曲，和两个『曾经正确的决定』。」/ 英文对应句）。
+  2. 正文一字未改，只在两端各自补上 frontmatter：中文 `title: 为你弹奏肖邦的夜曲`，英文 `title: A Nocturne for You`；`description` 各写一句概括。
   3. 两篇 slug 相同 → 右上角语言切换会停在「同一篇」（`getTranslation()` 按 slug 配对，见 §5.2 / §5.4）。
-- 背景（这篇写的就是这轮修的两个 Bug，细节见下面几条日志）：①Entry Gate 显示期间 About / Intro 的 document 级 `activate` 会抢跑夜曲（`ce051f1` 加 `entry-locked` 闸门拦事件穿透）；②NEW VISIT 的初始落点改由 `visitSession().isNew` 决定为 Home（`8dc8ded`，替代 `0fe79fa` 那次事后 `scrollTo(0)` 补丁）。
+  4. 同日后续：本人补了完整扩写版（多出「浏览器：你说自动播放？我说不行」「音频重新进站了，时间线却没有」「先遮住它，还是重新定义它？」等整节，正文分十三节），按**同一个 slug 覆盖更新**这两份文件（没有新增第二篇同名文章），`description` 相应改成"史山"那一层意思。
+- 背景（这篇写的就是这轮修的几个 Bug，细节见下面几条日志）：①NEW VISIT 时音频时间线归零（`a2d7c64`）；②Entry Gate 显示期间 About / Intro 的 document 级 `activate` 会抢跑夜曲（`ce051f1` 加 `entry-locked` 闸门拦事件穿透）；③NEW VISIT 的初始落点改由 `visitSession().isNew` 决定为 Home（`8dc8ded`，替代 `0fe79fa` 那次事后 `scrollTo(0)` 补丁）。
 - 文件：**新增** `src/content/blog/a-nocturne-for-you.zh.md`、`src/content/blog/a-nocturne-for-you.en.md`；`DEVELOPMENT.md`（本条）。没有改任何代码 / 样式 / 配置。
 - 钩子/数据：无新增 data-* / storage key / 事件；沿用既有 blog 集合 schema（`title` / `description` / `pubDate` / `lang` / `tags[]`）。
-- 验证：`npm run check` 0 错误 0 警告 0 提示；`npm run build` 19 页（原 17 页 + 中英各一篇）。
+- 验证：`npm run check` 0 错误 0 警告 0 提示；`npm run build` 19 页（原 17 页 + 中英各一篇），生成 `/blog/a-nocturne-for-you/` 与 `/en/blog/a-nocturne-for-you/` 且两页互链正确。
 
 ### 2026-09-22 · 主页 MP3：刷新后自己恢复 + 第一次起播不再把开头吃掉
 
