@@ -11,6 +11,8 @@ import type { PianoEngine } from './piano';
  *   3. 起跑余量        —— 刚醒来的音频线程要一个渲染周期才稳（LEAD），
  *                        它算在**位置**里，绝不塞进时间轴映射
  *   4. 暂停 / 恢复     —— 只有两个来源：用户按键、进/出关于区
+ *   5. 换页交棒        —— 离开这一页时先把接下来一小段排满、**不掐音**再交出去，
+ *                        下一个"关于"族页面从"已经排到哪"之后接着排（可选，见 handover）
  *
  * 它不认识 DOM、不认识瀑布流、不认识标签物理；外面通过 onState 和 pos() 读它。
  */
@@ -27,6 +29,21 @@ type Options = {
   duration: () => number;
   onState?: (state: NocturneState) => void;
   onTick?: (position: number) => void;
+  /**
+   * 跨页交棒（可选）：进这一页时接手上一页的交棒点，离开这一页时把"听到哪、
+   * 已经排到哪"交给下一个页面。不给就不参与交棒（换页时正常收声）。
+   *
+   * 交给外面的两个函数之所以不写死在这里：换算规则（`position` 与 `from` 必须分开）
+   * 和交棒记录存在哪儿都属于页面那一层，纯逻辑部分在 `lib/handover.ts`（有单测）。
+   */
+  handover?: {
+    /** 接手上一页的交棒点；没有、或已经过期就返回 null */
+    take: () => { position: number; from: number } | null;
+    /** 交出：position 是此刻听到的位置，scheduledUntil 是已经排到的位置 */
+    give: (position: number, scheduledUntil: number) => void;
+    /** 交棒前先往前排多久的音（秒）—— 换页那几百毫秒就靠它不断音 */
+    ahead: number;
+  };
 };
 
 /** 起跑余量：刚醒来（或被打断后醒来）的音频线程先跑一个渲染周期，避免头几个音发颤 */
@@ -36,7 +53,7 @@ const LOOKAHEAD = 0.4;
 const TICK_MS = 25;
 
 export function createNocturnePlayback(options: Options) {
-  const { engine, timeline, notes, duration, onState, onTick } = options;
+  const { engine, timeline, notes, duration, onState, onTick, handover: handoverBridge } = options;
 
   let state: NocturneState = 'idle';
   /** 用户想不想听（滑走或按暂停都会让它变成 false，滑回来/再按恢复） */
@@ -47,6 +64,8 @@ export function createNocturnePlayback(options: Options) {
   let lastPos = 0;
   let timer = 0;
   let loading = false;
+  /** 上一页交来的接续点：只在这一次开口时用一次（换页时才有） */
+  let handover = handoverBridge?.take() ?? null;
 
   const setState = (next: NocturneState) => {
     if (state === next) return;
@@ -61,10 +80,10 @@ export function createNocturnePlayback(options: Options) {
   const pos = (): number =>
     state === 'playing' ? Math.max(0, engine.currentTime - origin) : lastPos;
 
-  /** 把 now 之后 LOOKAHEAD 秒内的音符排进音频时钟 */
-  const schedule = () => {
+  /** 把 now 之后 ahead 秒内的音符排进音频时钟 */
+  const schedule = (ahead = LOOKAHEAD) => {
     const now = pos();
-    while (cursor < notes.length && notes[cursor].start < now + LOOKAHEAD) {
+    while (cursor < notes.length && notes[cursor].start < now + ahead) {
       const note = notes[cursor++];
       if (note.end <= now) continue;
       /*
@@ -105,13 +124,24 @@ export function createNocturnePlayback(options: Options) {
    * 起跑余量放在 **origin** 里（`origin = currentTime + LEAD - from`），不是加在 from 上：
    * 加在 from 上会把"开头第一个音"直接跳过去（本人踩过）。放在 origin 里的效果是
    * 整条时间轴顺延 LEAD，音符之间的相对关系、位置读数、以及第一个音都完好。
+   *
+   * `adopt` 非空 = 接手上一页正在响的那一段（只在换页时发生）：
+   *   · **不掐音**（上一页已经把 position → from 那一段排进音频时钟了，正在响）；
+   *   · **不重排那一段**，cursor 从 `from` 之后开始；
+   *   · 不需要起跑余量（音频线程本来就是热的）；
+   *   · 时间轴映射用 `position`（真实听到的位置）、排程起点用 `from` —— 这两个数必须分开，
+   *     拿 `from` 当"现在在哪"，时间轴就会往前跳那 0.45 秒（本人实测的"音乐向前位移一段"）。
    */
-  const begin = (from: number) => {
-    engine.allNotesOff();
-    cursor = notes.findIndex((note) => note.start >= from);
+  const begin = (from: number, adopt: { position: number; from: number } | null = null) => {
+    const at = adopt ? adopt.position : from;
+    if (adopt) cursor = notes.findIndex((note) => note.start >= adopt.from);
+    else {
+      engine.allNotesOff();
+      cursor = notes.findIndex((note) => note.start >= from);
+    }
     if (cursor < 0) cursor = notes.length;
-    lastPos = from;
-    origin = engine.currentTime + LEAD - from;
+    lastPos = at;
+    origin = engine.currentTime + (adopt ? 0 : LEAD) - at;
     setState('playing');
     window.clearInterval(timer);
     timer = window.setInterval(tick, TICK_MS);
@@ -146,7 +176,11 @@ export function createNocturnePlayback(options: Options) {
         setState('waiting');
         return;
       }
-      begin(savedPosition(timeline, duration()));
+      // 换页交接（关于 ⇄ 关于我）：接手上手那一小段，不从记忆位置重新弹一遍
+      const adopted = handover;
+      handover = null;
+      if (adopted) begin(adopted.position, adopted);
+      else begin(savedPosition(timeline, duration()));
     } finally {
       loading = false;
     }
@@ -201,9 +235,21 @@ export function createNocturnePlayback(options: Options) {
     dispose(): void {
       window.clearInterval(timer);
       timer = 0;
-      if (state === 'playing') lastPos = pos();
+      const wasPlaying = state === 'playing';
+      lastPos = wasPlaying ? pos() : lastPos;
       savePosition(timeline, lastPos);
-      engine.allNotesOff();
+      if (wasPlaying && handoverBridge) {
+        /*
+         * 换页交棒：先把接下来 `ahead` 秒的音排进音频时钟（它们会继续响），
+         * 再交出"听到哪 + 排到哪"。所以这一支里**故意不 allNotesOff** ——
+         * 换页那几百毫秒不断音，下一个页面从 scheduledUntil 之后接着排。
+         * 真的离开"关于"这一族时，app.ts 会调 releaseIdentityPiano() 把那架琴整个关掉。
+         */
+        schedule(handoverBridge.ahead);
+        handoverBridge.give(lastPos, lastPos + handoverBridge.ahead);
+      } else {
+        engine.allNotesOff();
+      }
       setState('paused');
     },
   };

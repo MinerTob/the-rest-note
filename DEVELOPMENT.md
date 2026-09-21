@@ -135,7 +135,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 彩蛋（隐藏曲目） | `src/lib/easter-eggs.ts`、`src/lib/sequences.ts`、`src/scripts/easter-eggs.ts` | `EASTER_EGGS`、`HOLD_TO_ARM` / `isArmChord()`（入口和弦）、`createSequenceDetector()`、`createSequenceSession()`、`EasterEggManager`（`toggleHint()` / `holdNote()` / `releaseNote()`） | `[data-note]`（琴键）、事件 `minilab:note` / `minilab:release` / `egg:hint` / `egg:accept` / `egg:miss` |
 | About 身份实验场 | `src/components/IdentityStage.astro`、`src/scripts/identity-player.ts`、`identity-physics.ts`、`identity-playback.ts`（出声的那一半）、`src/lib/identity.ts`、`identity-midi.ts` | `createIdentityPhysics()`（`reveal()` / `restore()` / `placeMissing()` / `snapshot()`，内部 `makeBody()` 管尺寸自愈）、`initIdentity()`、`disposeIdentity()`、`setIdentityActive()`、`identityRevealPlan()`、`createNocturnePlayback()`（`arm()` / `enter()` / `leave()` / `toggle()` / `restart()` / `seek()` / `pos()`） | `[data-identity*]`、`[data-identity-tag][data-revealed]`、cookie `rest-note-identity-v3-<visit>` |
 | 手机摇晃彩蛋（标签跟着晃） | `src/scripts/identity-motion.ts`、`src/lib/shake.ts`、`src/scripts/identity-physics.ts`（`shove()`）、`src/scripts/entry-gate.ts`（入场时申请权限） | `requestMotionAccess()`、`attachIdentityMotion()`、`createShakeDetector()` | `[data-identity]`、`[data-entry-button]`（申请运动权限的那次手势）；传感器事件 `devicemotion`；`getGlobal().motionAccess` |
-| 夜曲共用的那架琴（关于 ⇄ 关于我） | `src/scripts/identity-audio.ts`、`src/scripts/identity-playback.ts`、`src/scripts/identity-player.ts`、`src/scripts/nocturne.ts`、`src/scripts/app.ts` | `identityPiano()`（三处共用的实例）、`releaseIdentityPiano()`、`rampIdentityVolume()`；只有自我介绍页那一侧还在用 `handOverIdentityPiano()` / `takeIdentityHandover()` / `HANDOVER_AHEAD` | `getGlobal().identityPiano` / `.identityHandover`；无 DOM 钩子 |
+| 夜曲跨页不断音（关于 ⇄ 关于我） | `src/scripts/identity-audio.ts`、`src/scripts/identity-playback.ts`（About 侧交给它的 `handover` 选项）、`src/scripts/identity-player.ts`、`src/scripts/nocturne.ts`、`src/scripts/app.ts` | `identityPiano()`（三处共用的实例）、`handOverIdentityPiano()` / `takeIdentityHandover()` / `HANDOVER_AHEAD`、`releaseIdentityPiano()`、`rampIdentityVolume()` | `getGlobal().identityPiano` / `.identityHandover`；无 DOM 钩子 |
 | 自我介绍页（第十个标签的去处） | `src/views/IntroPage.astro`、`src/pages/about/intro/index.astro`、`src/content/pages/intro.zh.md` / `intro.en.md`、`src/lib/pages.ts` | `getPage('intro', lang)`、`render(entry)`、`introRoutes` | `[data-identity-link]`（写在 About 页的标签上） |
 | 联系方式 / 复制 | `src/components/ContactTiles.astro`、`ContactPanel*.astro`、`src/scripts/contact.ts`、`src/lib/contact.ts` | `initContact()`、`CONTACT`、`isInteractive()` | `[data-contact]`、`[data-contact-row]`、`[data-contact-copy]` |
 | 系统提示 LCD | `src/components/SystemMessage.astro`、`src/scripts/system-message.ts` | `initSystemMessages()` | `[data-system-message]`、window 事件 `space:message` |
@@ -527,6 +527,7 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
   1. **起跑余量放 `origin`**（`origin = currentTime + LEAD - from`），不是加在播放位置上 —— 加在位置上会把开头第一个音直接跳过去；
   2. **只排"还没开始"的音，且 `elapsed = 0`**：接续点之前已经响过的音不重排（重排 = 同一瞬间重敲几个没有音头的音，手机上的"颤动"就是这个）；
   3. **位置只走 live-timeline**（`space.position.v1.identity:nocturne`），进度写回只此一条路。
+- **换页交棒也是模块的一部分（可选）**：`createNocturnePlayback({ handover: { take, give, ahead } })` —— 进这一页时 `take()` 接上一页的续点、`dispose()` 时先往前排 `ahead` 秒再 `give()`（**故意不掐音**，见 §5.14）。不传这个选项就退化成"换页正常收声"。`position`（听到哪）与 `from`（排到哪）必须分开，换算在 `lib/handover.ts`（有单测）。
 - 手机端"第一次滑到关于区就有声音"靠三层：入场页那次点击里 `primeIdentityPiano()` 先把 AudioContext 建起来（iOS 只认手势）；这一区里的每一次 `pointerdown` / `keydown` / `wheel` 都会 `arm()` + `enter()` 再试一次（上下文可能被系统打断成 `interrupted`）；`piano:context` / `piano:state` 一有动静就自己接上。`waiting` 状态就是"想放但音频还没被手势解锁"，此时页面提示"点击或按键，即可接入钢琴演奏"。
 - 音乐靠现有 `PianoEngine.scheduleNote()` 播 MIDI，不另做一套音频链路；排程只发生在 `identity-playback.ts` 的定时器里，**动画帧永远不出声**。
 - 单测：`tests/identity.test.mjs`、`tests/identity-midi.test.mjs`（真实 MIDI 文件解析）。
@@ -615,13 +616,14 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - **左上角有一个返回按钮**（中文只写`返回`，英文写 `Back to About`；中文里"关于"两个字是多余的，英文语法需要宾语，所以只改中文）：`a.letter-page__back` 和页脚那个"回到关于"都指向 **`localizePath('/', lang) + '#about'`**，也就是首页那串拼接页里的关于区，**不是独立的 `/about/` 页**。本人要求：从这一页回去要落回"整串页面"里的关于区（他进这一页多半是从那里点的第十个标签）。实测点返回后：URL `/#about`（英文 `/en/#about`）、关于区停在屏幕上 78、`body > [data-identity-arena]` 存在、十个标签都在且能拖。
 - **背景音乐：这一页接着放 About 页的夜曲，而且是"不断音"的接法**（不放主题曲）。`src/scripts/nocturne.ts` 用 `PianoEngine` + `parseMidi()` 复刻 About 的演奏，和 `identity-player.ts` 共用 `live-timeline` 的同一个 id（`identity:nocturne`）；音量用 `IDENTITY_INTRO_VOLUME`（0.7，比演奏模式的 0.85 克制）。
 - **跨页共用同一架琴（`src/scripts/identity-audio.ts`）—— "关于 ⇄ 关于我"听起来是一口气弹下来的。** 以前两页各自 `new PianoEngine()`：换页时旧页面 `dispose()`（`allNotesOff` + 关掉 AudioContext）、新页面重新解码采样、再从 0 淡入，听感上就是"停一下再从头接上"。现在引擎挂在 `getGlobal().identityPiano` 上（About / 自我介绍 / 首页关于区共用同一个实例）：
-  1. **交棒现在只有自我介绍页那一侧还在用**：`nocturne.ts` 离开时仍然先把接下来 `HANDOVER_AHEAD`（0.45 秒）的音排进音频时钟，再 `pause(keepRinging = true)`（**不** `allNotesOff`），并 `handOverIdentityPiano(听到的位置, 听到的位置 + HANDOVER_AHEAD)`；
-  2. **但 About / 首页关于区那一侧已经不发、也不接交棒了**：`identity-player.ts` 现在只用 `identity-playback.ts`，进区/出区分别是 `enter()` / `leave()`，位置一律从 `live-timeline` 的记忆接续（`leave()` 会先把"此刻"写回去）。所以现在"关于 ⇄ 关于我"是**从同一秒接着弹、换页那一下有一小段空隙**，不再是无缝预排。接手方的换算规则仍然是纯函数 `lib/handover.ts` 的 `resumeFromHandover()`（有单测）：`position`（现在应该在哪 = 交棒位置 + 已经过去的时间）与 `from`（从这个位置之后的音才要自己排）**必须分开**，把"已经排到哪"当成"现在在哪"，时间轴就会往前跳 0.45 秒（本人实测的"音乐会向前位移一段"，见 §10）。**这一条是下一次要决定的：要么把交棒并进 `identity-playback.ts`，要么两边都撤掉** —— 现在是不对称状态。
+  1. **离开时交棒（两边对称，都由 `handOverIdentityPiano()` 写记录）**：先把接下来 `HANDOVER_AHEAD`（0.45 秒）的音排进音频时钟，**故意不 `allNotesOff`**，再交出"听到哪 + 排到哪"。About / 首页关于区那一侧在 `identity-playback.ts` 的 `dispose()` 里（配了 `handover` 才走这条路）；自我介绍页那一侧是它自己的那份实现（`nocturne.ts` 的 `pause(keepRinging = true)`）。**注意 `dispose()` 的交棒路只在"离开这一页"时走**：在关于区里滑走用的是 `leave()`（掐音、把进度写回 live-timeline），换页才吐交棒。
+  2. **接手方** `takeIdentityHandover()` 拿到两个数：`position`（现在应该在哪 = 交棒位置 + 已经过去的时间）与 `from`（从这个位置之后的音才要自己排）。About 这一侧整段交给模块：`createNocturnePlayback({ handover })` → `enter()` 里走 `begin(position, { position, from })` —— **不掐音、不重排已经排过的那一段**、cursor 从 `from` 之后开始、也不需要起跑余量（音频线程本来就是热的）。**这两个位置必须分开**，把"已经排到哪"当成"现在在哪"，时间轴就会往前跳 0.45 秒（本人实测的"音乐会向前位移一段"，见 §10）。换算本身是纯函数：`lib/handover.ts` 的 `resumeFromHandover()`，有单测。拿不到交棒（直接打开这一页、或记录过期超过 4 秒）就按 `live-timeline` 的记忆继续。
   3. **音量不归零**：`rampIdentityVolume()` 从当前音量滑到这一页的目标音量（About 用滑杆值、自我介绍用 `IDENTITY_INTRO_VOLUME`，滑 600 / 700ms）；手动拖滑杆会取消滑行；
   4. **只在真的离开这一族时才收**：下一张页面里没有 `[data-identity]` / `[data-nocturne]` 时，`app.ts` 在 `astro:before-swap` 里调 `releaseIdentityPiano()` 停声并关掉 AudioContext。
   实测（Playwright + 真实 AudioContext，见 §10 那条）：`/about/` → `/about/intro/` → 返回 `/#about`，`AudioContext` 始终是同一个实例（新建计数全程 0）、采样不重新解码、音量在 0.85 ↔ 0.7 之间滑行（从不归零）、演奏位置接着走（About 的 3.5 秒进到自我介绍的 5.5 秒），去 `/blog/` 时这架琴被释放。
   - `initNocturne()` 在 boot 里调用，`disposeNocturne()` 在 `astro:before-swap` 里调用；缺采样或缺用户手势时只把状态标成 `waiting`，等下一次点击再开始。
   - 切到后台会暂停、切回来接着弹（与 About 页一致）；主题曲的让位由 `app.ts` 的 `setAboutActive(true)` 负责（见 §5.5）。
+  - **这一页的播放器还是它自己那份老实现**（`nocturne.ts` 里的 `start()` / `pause()` / `schedule()`），和 `identity-playback.ts` 是两份代码。两边的**交棒格式、`live-timeline` id、音量目标**都对齐，所以换页听起来是一口气弹下来的；但"起跑余量 / 只排还没开始的音"这些坑这一页是**各自**修过的。想收成一份的话，下一步就是把 `nocturne.ts` 也换成 `createNocturnePlayback()`（它的 `enter()` / `leave()` / `dispose()` 语义已经够用）。
 - 状态钩子：`[data-nocturne-ready]`（乐谱解析完成）、`[data-nocturne-state="waiting|playing|paused"]` —— 排查"这一页怎么没声音"先看这两个。
 - 单测：这一页是排版 + 内容 + 浏览器行为，只有常量层面的单测（`tests/identity.test.mjs` 里的音量断言）；改动后在浏览器里核对分节标题、图片、返回按钮与夜曲即可（`npm run build` 会校验内容集合字段）。
 
@@ -742,12 +744,24 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 
 ## 10. 功能日志（规定动作）
 
+### 2026-09-21 · 夜曲播放器（第三步）：把跨页交棒并进 identity-playback.ts
+
+- 需求：上一步只把出声那一路接进新模块，顺手删掉了 About 这一侧的"换页交棒"，代价是"关于 ⇄ 关于我"换页时有一小段空隙。本人拍板：**把跨页无缝搬进新模块**，恢复一口气弹下来的听感。
+- 文件：`src/scripts/identity-playback.ts`（新增可选的 `handover` 选项、`begin(from, adopt)`、`dispose()` 的交棒分支）、`src/scripts/identity-player.ts`（只是多传一个 `handover: { take, give, ahead }`）、`DEVELOPMENT.md`。
+- 函数：`createNocturnePlayback()` 的 Options 多一项 `handover?: { take(): { position, from } | null; give(position, scheduledUntil); ahead }`；`begin(from, adopt = null)` 接手时**不掐音、不重排 `from` 之前那一段**、不需要起跑余量，时间轴映射照旧用 `position`；`dispose()` 在"本来正在放 + 配了交棒"时先 `schedule(ahead)` 再 `give(pos, pos + ahead)`（**这一支故意不 `allNotesOff`**），其余情况（没配交棒 / 当时没在放）照旧收声。`identity-player.ts` 没有新增导出。
+- 钩子/数据：无新增 `data-*` / storage key / 自定义事件；交棒记录仍是 `getGlobal().identityHandover`（形状与换算在 `lib/handover.ts`，TTL 4 秒）。
+- 验证：`npm test` 88/88；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。同一套无头 Chrome + 手机视口（393×852）脚本扩到 **27 项，全过**，跨页那一段是重点：
+  - 在关于区拖到 2:01，点第十个标签进 `/about/intro/`：入场页没有重现、`identityPiano` 还是同一架琴（站内路由）、`AudioBufferSource.stop()` 的"立刻掐音"计数 **32 → 32**（一个音都没被掐掉）、交棒记录 `["接手/清掉","给 121.81→122.26","接手/清掉"]`（写进去 121.81、预排到 122.26，下一页接手后清掉），自我介绍页从 121s 接到 123.9s；
+  - 点"返回"回 `/#about`：同样 **32 → 32**，交棒记录多出 `给 124.41→124.86` + 接手，位置从 123.9s 接到 127.44s；
+  - 来回两趟期间每 50ms 采一次音量（150 个采样）：最低 **0.7**、最高 **0.85** —— 在 About 的 0.85 与自我介绍的 0.7 之间滑行，**没有归零再淡入**；
+  - 原来那三条目标（第一次滑到关于区就有声音、滑走再回来不颤动、刷新保留进度）以及控件、主题曲让位依旧全过，控制台 0 错误。
+
 ### 2026-09-21 · 夜曲播放器（第二步）：About 演奏改用 identity-playback.ts
 
 - 需求：把已经写好并推送的 `src/scripts/identity-playback.ts` 接进 `src/scripts/identity-player.ts`，删掉里面那套旧的播放逻辑（`schedule` / `begin` / `pause` / `start` / 交棒 / `offset` / `origin` / `cursor` / `timer`），行为保持不变；盯住三条目标：手机端第一次滑到关于区就有声音、滑走再回来不颤动、刷新保留进度。
 - 文件：`src/scripts/identity-player.ts`（播放那一路重写，-242/+142 行）、`DEVELOPMENT.md`。
 - 函数：削掉模块内的 `start()` / `pause()` / `schedule()` / `tick()` / `time()` 以及 `offset` / `origin` / `cursor` / `timer` / `loading` / `playing` 这些状态，改成**一个** `createNocturnePlayback({ engine, timeline, notes, duration, onState, onTick })` 实例；新增内部函数 `startPlayback()`（"这一区在屏幕上 + 用户想听 + 谱子读好了"三条都成立才 `enter()`）。播放键 → `arm()` + `toggle()`、重播键 → `restart()`、进度条 → `seek()`、`setIdentityActive()` → `enter()` / `leave()`、`visibilitychange` / `pagehide` → `leave()`、销毁 → `dispose()`；`label()` 改成读 `playback.playing` / `playback.state`（`data-state` 仍是 `playing` / `waiting` / `paused`）；`notes` 改成往同一个数组里 `push`（播放模块持有这个引用，不能整份重新赋值）。
-- 钩子/数据：无新增 `data-*` / storage key / 自定义事件；进度仍写 `space.position.v1.identity:nocturne`，只是改由 `identity-playback.ts` 统一读写（`identity-player.ts` 不再 import `live-timeline`）。**跨页交棒从 About 这一侧撤掉了**：About / 首页关于区不再 `handOverIdentityPiano()`，换页按 live-timeline 记忆接续；自我介绍页那一侧的交棒（`takeIdentityHandover()`）暂时"没人接"，见 §5.14 第 1-2 条 —— 这是下一步要决定的事（并进 playback 或两边都撤）。
+- 钩子/数据：无新增 `data-*` / storage key / 自定义事件；进度仍写 `space.position.v1.identity:nocturne`，只是改由 `identity-playback.ts` 统一读写（`identity-player.ts` 不再 import `live-timeline`）。**跨页交棒从 About 这一侧撤掉了**：About / 首页关于区不再 `handOverIdentityPiano()`，换页按 live-timeline 记忆接续；自我介绍页那一侧的交棒（`takeIdentityHandover()`）暂时"没人接"，见 §5.14 第 1-2 条。（**已经定案**：下一步就把交棒并进了 `identity-playback.ts`，见上面那条日志。）
 - 验证：`npm test` 88/88；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。真机链路用无头 Chrome + CDP 实测（393×852 手机视口 + 触摸模拟；脚本 `identity-live-check.mjs`，`18/18 项通过`）：
   1. **第一次滑到关于区就有声音**：入场点击之后不再点任何东西、只 `scrollTo` 到底 → `[data-identity][data-state=playing]`、`PianoEngine.scheduleNote()` 16 次、`AudioBufferSource.start()` 16 次，`elapsed` 全为 0（真带音头）；
   2. **滑走再回来不颤动**：滑走 → `paused` 且 1.5 秒内不再排新音、进度停在 3.83s；滑回来 → 从 3.83s 接着放（不是 0:00），回来后新排的 8 个音 `elapsed` 全为 0、起点全部晚于 `currentTime`（旧版的"颤动"就是重排了已经响过的音）；

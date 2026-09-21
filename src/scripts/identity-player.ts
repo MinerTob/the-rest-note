@@ -2,7 +2,13 @@ import { navigate } from 'astro:transitions/client';
 import { createIdentityPhysics, type IdentityLayout } from './identity-physics';
 import { attachIdentityMotion } from './identity-motion';
 import { createNocturnePlayback } from './identity-playback';
-import { identityPiano, rampIdentityVolume } from './identity-audio';
+import {
+  HANDOVER_AHEAD,
+  handOverIdentityPiano,
+  identityPiano,
+  rampIdentityVolume,
+  takeIdentityHandover,
+} from './identity-audio';
 import {
   parseMidi,
   identityRevealPlan,
@@ -224,6 +230,16 @@ export function initIdentity(): void {
     timeline: TIMELINE,
     notes,
     duration,
+    /*
+     * 换页交棒（关于 ⇄ 关于我）：离开这一页时把"听到哪 / 排到哪"交给下一张
+     * "关于"族页面，接手时从那一段之后接着排 —— 换页那几百毫秒声音不断。
+     * 换算与"两个位置必须分开"的坑见 lib/handover.ts 与 identity-playback.ts 的 begin()。
+     */
+    handover: {
+      take: takeIdentityHandover,
+      give: handOverIdentityPiano,
+      ahead: HANDOVER_AHEAD,
+    },
     onState: (state) => {
       label();
       // 主题曲让位：夜曲在放的时候背景音乐一直是静音（见 §5.5）
@@ -526,11 +542,11 @@ export function initIdentity(): void {
   disposeCurrent = () => {
     disposed = true;
     /*
-     * 停手：播放模块会把"此刻听到的位置"写回 live-timeline、掐掉还在响的音。
-     * 换页后（About ⇄ 首页关于区）那边从同一条 live-timeline 的记忆接着弹，
-     * 不再走"交棒预排"那一条路（那套的坑见 identity-playback.ts 文件头）。
-     * 另外真的离开"关于"这一族页面时，app.ts 会在 astro:before-swap 里
-     * 调 releaseIdentityPiano() 收掉这架琴（三个页面共用一个实例）。
+     * 停手：播放模块把"此刻听到的位置"写回 live-timeline，并在配了交棒时
+     * 先往前排一小段、**不掐音**就把接续点交给下一张"关于"族页面（换页不断音）；
+     * 没配交棒、或者当时并没有在放，就正常收声。
+     * 真的离开"关于"这一族页面时，app.ts 会在 astro:before-swap 里
+     * 调 releaseIdentityPiano() 收掉这架琴并清掉交棒记录（三个页面共用一个实例）。
      */
     playback.dispose();
     cancelVolumeRamp();
