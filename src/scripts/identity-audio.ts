@@ -78,13 +78,14 @@ export function primeIdentityPianoOnFirstGesture(): void {
    * 干净的手势才恢复（本人实测："文件都下好了，点播放就是不出声，刷新一下就好了"）。
    * 所以一直挂着，直到上下文真的在跑为止。
    */
-  const prime = () => {
-    primeIdentityPiano();
-    if (identityPiano().isRunning) {
-      document.removeEventListener('pointerdown', prime, { capture: true });
-      document.removeEventListener('keydown', prime, { capture: true });
-    }
-  };
+  /*
+   * 一直挂着，**不要在"跑起来了"之后就摘掉**。
+   * iOS 随时可能把它再次打断（权限框、切后台、别的 App 抢音频会话都会），
+   * 摘掉之后就没有下一个手势来唤醒它了 —— 表现就是"第一次拖到关于区永远没声音"
+   * （本人实测：音频明明能 unlocked，但那一次之后再也回不来了）。
+   * ensure() 本身是幂等的，多按几次钢琴不会有任何副作用。
+   */
+  const prime = () => primeIdentityPiano();
   document.addEventListener('pointerdown', prime, { capture: true });
   document.addEventListener('keydown', prime, { capture: true });
 }
