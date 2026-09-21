@@ -116,10 +116,16 @@ function absolute(path: string): string {
     if (!isNewVisit) return;
 
     /*
-     * 本语言的 canonical 入口：/en/ 下面的一律进 /en/，其余进 /。
-     * 两个首页自己也算在内（'/' → '/'、'/en/' → '/en/'），所以再判一次 NEW 也不会来回跳。
+     * 本语言的 canonical 入口：按 pathname 的**第一个 segment** 判语言 ——
+     * 只看第一个非空段是不是 'en'，所以 '/en'（无尾斜杠）、'/en/'、'/en/blog/...'、
+     * '/en/about/intro/...' 全都算英文；'/'、'/blog/...'、'/about/...' 都算中文。
+     *
+     * 不要退回 "=== '/en/' || startsWith('/en/')" 那种写法，也不要再补第三个字符串条件：
+     * '/en' 既不等于 '/en/' 也不 startsWith('/en/')，会被误判成中文入口（本人报的 bug）。
+     * 段判断天然覆盖这三种写法，pathname 后面的部分怎么变都不影响语言。
      */
-    var isEnglish = location.pathname === '/en/' || location.pathname.startsWith('/en/');
+    var parts = location.pathname.split('/').filter(Boolean);
+    var isEnglish = parts[0] === 'en';
     var target = isEnglish ? '/en/' : '/';
 
     /* 子页：直接 replace 到首页。不带 query、不带 hash，也不留子页的历史条目。 */

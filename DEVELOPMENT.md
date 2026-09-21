@@ -668,7 +668,13 @@ visitBoundary({ navigation, sessionToken, entryToken }): 'new' | 'same';
 
 1. 先判 NEW / SAME（照抄 `lib/visit.ts` 的 `visitBoundary()`）：没有 session token → NEW；`navigate` → NEW；`reload` → `history.state.restNoteVisit === session token` 才算 SAME，否则 NEW；`back_forward` → SAME；拿不到 / 认不出 type → NEW。`sessionStorage` / `history.state` / `performance` 的读取都包在 try/catch 里。
 2. **SAME VISIT 立即早退**，一个字节都不改：刷新子页就留在子页、站内点击文章 / About → Intro / 返回 / 前进后退 / 语言切换都照旧。
-3. NEW VISIT 时算 canonical 入口：`location.pathname === '/en/' || startsWith('/en/')` → `'/en/'`，否则 `'/'`。
+3. NEW VISIT 时算 canonical 入口：**按 pathname 的第一个 segment 判语言** ——
+   ```js
+   var parts = location.pathname.split('/').filter(Boolean);
+   var isEnglish = parts[0] === 'en';
+   var target = isEnglish ? '/en/' : '/';
+   ```
+   所以 `/en`（无尾斜杠）、`/en/`、`/en/blog/...`、`/en/about/intro/...` 全是英文 → `/en/`；`/`、`/blog/...`、`/about/...` 全是中文 → `/`。**不要写回 `=== '/en/' || startsWith('/en/')`，也不要再补第三个字符串条件**：`/en` 既不等于 `/en/` 也不 `startsWith('/en/')`，会被误判成中文入口（本人报的 bug）。
    - `pathname !== target`（子页直链）→ `location.replace(target)`：**replace 不留子页的历史条目**，query / hash 都不继承（默认不把 query 带到首页），也不用 `pushState`、不把原 pathname 存起来准备"进入后跳回"。
    - `pathname === target`（已经在首页）→ 只把 `#home` / `#blog` / `#lab` / `#about` 这四个 Journey hash 从地址栏抹掉：`history.replaceState(history.state, '', location.pathname + location.search)`，不动 pathname / search / `history.state`。
 4. 动作只有这两种：不写 sessionStorage、不建新的 visit token、不碰 Entry Gate / 音频。
@@ -831,6 +837,21 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-22 · 修复 `/en` 无尾斜杠时被误判为中文入口
+
+- 需求：本人报 NEW VISIT 打开 `/en`（无尾斜杠）时被错误重定向到中文首页；要求只修这一处语言路由识别，不要用"再补一个 `location.pathname === '/en'`"的办法，改成按 pathname 的第一个 segment 判语言；NEW/SAME 判定、Entry Gate、`location.replace` 规则、Journey hash 清理、language switch、Header、音频、scroll restoration、`visit-session.ts`、`lib/visit.ts` 都不许动。
+- 根因：`BaseHead.astro` 那段 early normalizer 里写的是 `location.pathname === '/en/' || location.pathname.startsWith('/en/')` —— `'/en' !== '/en/'` 且 `'/en'.startsWith('/en/') === false`，于是 `/en` 算成中文，`target` 取 `'/'`，NEW VISIT 被 `location.replace('/')` 送到中文版首页。
+- 修法：语言判断换成"第一个非空 segment 是不是 `en`"：
+  ```js
+  var parts = location.pathname.split('/').filter(Boolean);
+  var isEnglish = parts[0] === 'en';
+  var target = isEnglish ? '/en/' : '/';
+  ```
+  一次覆盖 `/en`、`/en/`、`/en/blog/...`、`/en/about/intro/...`（全 → `/en/`）；`/`、`/blog/...`、`/about/...` 仍 → `/`。没有新增字符串条件，也没有碰脚本里其它任何一行（NEW/SAME 判定、`location.replace(target)` 整体规则、首页四个 Journey hash 清理都原样）。
+- 文件：`src/components/BaseHead.astro`、`DEVELOPMENT.md`（§5.15 / 本条）。
+- 钩子/数据：无新增 / 删除 data-* 钩子、storage key、自定义事件。
+- 验证：`npm run check` 109 个文件 0 错误 0 警告 0 提示；`npm run build` 19 页。按本人要求这轮不跑浏览器 / CDP / Playwright，`/en` 与 `/en/...` 的实机行为由本人确认。
 
 ### 2026-09-22 · NEW VISIT 统一归一化到对应语言首页
 
