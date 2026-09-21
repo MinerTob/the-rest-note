@@ -16,8 +16,11 @@ import { logConsoleNote } from './console-note';
 import { MusicManager } from './music-manager';
 import { initEntryGate } from './entry-gate';
 import { trackInputModality } from './input-modality';
+import { SCENE_THRESHOLDS, sceneCoverage, sceneDecision } from '@/lib/scene';
 
 let disposeJourney: (() => void) | undefined;
+/** 本次"页面加载"有没有 boot 过。防止同一次加载里 boot 跑两遍（见文件末尾）。 */
+let booted = false;
 
 function initJourney(root: HTMLElement, music: MusicManager): void {
   disposeJourney?.();
@@ -39,11 +42,31 @@ function initJourney(root: HTMLElement, music: MusicManager): void {
   }, { rootMargin: '-34% 0px -52% 0px', threshold: [0, 0.01, 0.25, 0.5] });
   sections.forEach((section) => sectionObserver.observe(section));
 
+  /*
+   * "关于"这一条的激活判定：**迟滞**，不是单个阈值。
+   *
+   * 以前是 `entry.intersectionRatio >= 0.35` 同时管进和出，判据又是"露出 ÷ 区块高度"：
+   * 手机地址栏收起/展开会让视口高度变 60–120px，同一个滚动位置上这个比值能跳 0.02–0.15，
+   * 卡在 0.35 附近时就 pause → allNotesOff → start → schedule 反复横跳 ——
+   * 本人看到的就是"第一次滚到底没声、回来之后前几秒明显断续"。
+   *
+   * 现在：判据换成覆盖度（露出 ÷ min(区块, 视口)），进出用两个不同阈值
+   * （0.55 / 0.25，中间 0.30 是迟滞带），视口抖动落在带子里就什么也不做。
+   * 纯逻辑与实测数据见 lib/scene.ts 与 tests/scene.test.mjs。
+   * 这里没有 setTimeout / debounce —— 不抖是因为判据本身稳，不是因为拖时间。
+   */
   const aboutObserver = about ? new IntersectionObserver(([entry]) => {
-    const active = entry.isIntersecting && entry.intersectionRatio >= 0.35;
-    if (active === aboutActive) return;
-    aboutActive = active;
-    if (active) {
+    const coverage = sceneCoverage({
+      viewportHeight: entry.rootBounds?.height ?? window.innerHeight,
+      top: entry.boundingClientRect.top,
+      bottom: entry.boundingClientRect.bottom,
+    });
+    const next = sceneDecision(aboutActive, coverage);
+    if (next === aboutActive) return;
+    aboutActive = next;
+    // 排查读数（和 data-motion / data-nocturne-at 同一个习惯）：active / idle
+    if (about) about.dataset.scene = next ? 'active' : 'idle';
+    if (next) {
       music.setAboutActive(true);
       initIdentity();
       setIdentityActive(true);
@@ -51,13 +74,21 @@ function initJourney(root: HTMLElement, music: MusicManager): void {
       setIdentityActive(false);
       music.setAboutActive(false);
     }
-  }, { threshold: [0, 0.35, 0.6] }) : undefined;
+  }, { threshold: [...SCENE_THRESHOLDS] }) : undefined;
   if (about && aboutObserver) aboutObserver.observe(about);
 
   disposeJourney = () => {
     sectionObserver.disconnect();
     aboutObserver?.disconnect();
-    if (aboutActive) disposeIdentity();
+    /*
+     * 无条件收掉这一页的播放器。以前写成 `if (aboutActive) disposeIdentity()`：
+     * "滚进关于区 → 再滚回上面（aboutActive 变 false）→ 点别的页面"这条路上，
+     * 播放器不会被 dispose，它挂在 document 上的 pointerdown / wheel 监听、
+     * ResizeObserver、物理引擎都会活到下一页去（旧生命周期和新页面交叉）。
+     * disposeIdentity() 本身是幂等的，没初始化过就当没发生。
+     */
+    disposeIdentity();
+    if (about) delete about.dataset.scene;
     disposeJourney = undefined;
   };
 }
@@ -72,6 +103,24 @@ function initJourney(root: HTMLElement, music: MusicManager): void {
  * 状态在最前面，读状态的系统在后面。
  */
 function boot(): void {
+  /*
+   * 同一次"页面加载"只准 boot 一次。
+   *
+   * ClientRouter 在**初始硬加载**上也会发 `astro:page-load`（router.js 里
+   * `addEventListener('load', onPageLoad)`），而这里原来在 DOMContentLoaded（或脚本
+   * 一执行完）还会自己 boot 一次 —— 于是刷新时 boot 会跑两遍：
+   *
+   *   boot #1 → initJourney → 观察器 → initIdentity → 建播放器、开始读谱/预载采样
+   *   boot #2 → disposeJourney → disposeIdentity → abort 掉正在飞的请求、拆掉物理引擎
+   *            → 再 initJourney → 再建一个播放器
+   *
+   * 中间那次 dispose 会掐掉刚起来的那一套（本人报的"刷新之后夜曲进不了可播放状态"
+   * 就是从这条缝里漏出来的）。现在 boot 由 booted 把关：同一次加载里第二次调用直接返回，
+   * 换页（astro:after-swap）时才把闸门打开。
+   */
+  if (booted) return;
+  booted = true;
+
   disposeJourney?.();
   const global = getGlobal();
   clearTimers();
@@ -139,10 +188,22 @@ document.addEventListener('astro:before-swap', (event) => {
   markIncomingLanguageText(event.newDocument);
 });
 
+// 换页真的发生了：放开闸门，让这一页的 boot 跑一次（见 boot() 开头的说明）。
+document.addEventListener('astro:after-swap', () => {
+  booted = false;
+});
+
 document.addEventListener('astro:page-load', boot);
 
+/*
+ * 兜底：万一这个浏览器 / 版本根本不发 `astro:page-load`，初始加载也得能启动。
+ * 只在"确实还没 boot 过"时才补一次 —— 这就是防止重复 boot 的那道闸门。
+ */
+const bootIfPageLoadMissed = (): void => {
+  if (!booted) boot();
+};
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', boot, { once: true });
+  document.addEventListener('DOMContentLoaded', bootIfPageLoadMissed, { once: true });
 } else {
-  boot();
+  bootIfPageLoadMissed();
 }

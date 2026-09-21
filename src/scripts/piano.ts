@@ -34,6 +34,10 @@ const SUSTAIN = 0.42;
 const RELEASE = 0.34;
 /** 单音最长存活时间，防止 noteOff 丢失时留下挂住的声音 */
 const MAX_HOLD = 9;
+/** 采样最多分几轮下完（手机上一次请求被系统/网络打断是常事，见 preload()） */
+const PRELOAD_ATTEMPTS = 4;
+/** 上一轮没下完，隔多久补下一轮 */
+const PRELOAD_RETRY_MS = 1500;
 
 type Voice = {
   source: AudioBufferSourceNode;
@@ -49,6 +53,10 @@ export class PianoEngine extends EventTarget {
   private voices = new Map<number, Voice>();
   private state: PianoState = "idle";
   private loading: Promise<void> | null = null;
+  /** 已经下过几轮：给"补下漏掉的那几个"收口，免得一直空转 */
+  private attempts = 0;
+  /** 补下那一轮的定时器：dispose 要收掉 */
+  private retryTimer = 0;
   private token = 0;
   private volume = 0.9;
 
@@ -145,7 +153,21 @@ export class PianoEngine extends EventTarget {
    * 浏览器不允许在交互之前创建/恢复 AudioContext。
    */
   ensure(): void {
-    if (this.state === "failed") return;
+    /*
+     * 上下文已经被关掉（dispose 之后又被引用、或系统回收）—— 整套重来。
+     * 只认 `failed` 就返回是另一种死法：状态还写着 ready，声音却永远出不来。
+     */
+    if (this.ctx && this.ctx.state === "closed") {
+      this.ctx = null;
+      this.master = null;
+      this.buffers.clear();
+      this.loading = null;
+      this.attempts = 0;
+      this.setState("idle");
+    }
+
+    // 采样下了好几轮还是全军覆没：先不再空转（重建引擎会重新给机会）
+    if (this.state === "failed" && this.attempts >= PRELOAD_ATTEMPTS) return;
 
     if (!this.ctx) {
       const Ctor: typeof AudioContext | undefined =
@@ -175,16 +197,29 @@ export class PianoEngine extends EventTarget {
     void this.preload();
   }
 
-  /** 下载并解码需要的采样（只做一次，失败就标记 failed） */
+  /**
+   * 下载并解码需要的采样。
+   *
+   * 分轮进行：一轮最多 PRELOAD_ATTEMPTS 次，缺的那几个隔 1.5 秒补下一轮。
+   * 上一版这里有个"自己把自己挡在门外"的写法：开头 `if (this.state === 'ready') return`
+   * —— 只要**有一个**采样成功，状态就变成 ready，于是后面那段"补下漏掉的"永远进不来，
+   * 手机上一次请求被打断就再也补不上（那几个音只能拿最近的采样顶替，甚至没声），
+   * 表现就是本人说的"文件都下好了、点播放还是不出声/进不了可播放状态"。
+   * 现在按"还缺不缺"判断（补齐了就直接返回），用 attempts 收口。
+   */
   preload(): Promise<void> {
     if (this.loading) return this.loading;
-    if (this.state === "ready" || this.state === "failed" || !this.ctx) {
-      return Promise.resolve();
-    }
+    if (!this.ctx) return Promise.resolve();
 
-    this.setState("loading");
-    const ctx = this.ctx;
     const needed = this.requiredSamples;
+    // 齐了就不用再下；下够轮数就收手（剩下的音由最近采样顶替，见 bufferFor()）
+    if (this.buffers.size >= needed.length) return Promise.resolve();
+    if (this.attempts >= PRELOAD_ATTEMPTS) return Promise.resolve();
+
+    this.attempts += 1;
+    // 一个都还没解出来时才回到 loading；已经有声了就别把状态往回退
+    if (this.buffers.size === 0) this.setState("loading");
+    const ctx = this.ctx;
 
     this.loading = (async () => {
       let ok = 0;
@@ -211,21 +246,22 @@ export class PianoEngine extends EventTarget {
       });
 
       await Promise.all(workers);
-      if (ctx === this.ctx) this.setState(ok > 0 ? "ready" : "failed");
+      if (ctx !== this.ctx) return;
 
+      this.setState(this.buffers.size > 0 ? "ready" : "failed");
       /*
-       * 漏掉的那几个（手机上一次请求被打断很常见）过一会儿再补一次：
-       * 不补的话，那几个音永远只能用最近的采样顶替，甚至没声。
-       * 只在还有上下文、而且确实缺东西的时候补，失败就作罢（合成器会兜底）。
+       * setState 只在状态真的变了时发事件 —— 但这一轮补到了东西，得说一声：
+       * 正等着"采样齐了再开弹"的地方（identity-player 的 piano:state）才接得上。
        */
+      if (ok > 0) this.emit("piano:state");
+
+      this.loading = null;
       const missing = needed.filter((sample) => !this.buffers.has(sample.midi));
-      if (missing.length > 0 && ctx === this.ctx && this.ctx) {
-        this.loading = null;
-        window.setTimeout(() => {
-          if (ctx !== this.ctx || this.buffers.size >= needed.length) return;
-          void this.preload();
-        }, 1500);
-      }
+      if (missing.length === 0) return;
+      this.retryTimer = window.setTimeout(() => {
+        this.retryTimer = 0;
+        void this.preload();
+      }, PRELOAD_RETRY_MS);
     })();
 
     return this.loading;
@@ -320,6 +356,9 @@ export class PianoEngine extends EventTarget {
   }
 
   dispose(): void {
+    if (this.retryTimer) window.clearTimeout(this.retryTimer);
+    this.retryTimer = 0;
+    this.attempts = 0;
     this.allNotesOff();
     this.voices.clear();
     this.buffers.clear();

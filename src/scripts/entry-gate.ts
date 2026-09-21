@@ -2,40 +2,7 @@ import type { MusicManager } from './music-manager';
 import { requestMotionAccess } from './identity-motion';
 import { primeIdentityPiano } from './identity-audio';
 import { primeMiniLabPiano } from './minilab';
-
-let entered = false;
-const ENTRY_KEY = 'rest-note.entry-passed';
-
-function hasPassedEntry(): boolean {
-  try {
-    return window.sessionStorage.getItem(ENTRY_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function rememberEntry(): void {
-  try {
-    window.sessionStorage.setItem(ENTRY_KEY, '1');
-  } catch {
-    /* Privacy mode: keep the in-memory flag for client-side navigation. */
-  }
-}
-
-function forgetEntry(): void {
-  try {
-    window.sessionStorage.removeItem(ENTRY_KEY);
-  } catch {
-    /* Storage may be unavailable in privacy mode. */
-  }
-}
-
-function navigationType(): PerformanceNavigationTiming['type'] {
-  const navigation = performance.getEntriesByType('navigation')[0] as
-    | PerformanceNavigationTiming
-    | undefined;
-  return navigation?.type ?? 'navigate';
-}
+import { visitSession } from './visit-session';
 
 function applySystemLanguage(gate: HTMLElement): void {
   const language = navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
@@ -62,12 +29,20 @@ export function initEntryGate(music: MusicManager): boolean {
   const gate = document.querySelector<HTMLElement>('[data-entry-gate]');
   if (!gate) return false;
 
-  // 地址栏输入、书签或外部链接属于一次新的 navigate：必须重新入场。
-  // 只有 reload / back_forward 才沿用已经点击过“进入”的会话标记。
-  const navigation = navigationType();
-  if (!entered && navigation === 'navigate') forgetEntry();
-  entered ||= navigation !== 'navigate' && hasPassedEntry();
-  if (entered) {
+  /*
+   * 拦不拦人，全部交给 visit-session.ts 判定 —— 这里不再自己看
+   * `PerformanceNavigationTiming.type`。只看 type 的话，"在地址栏里重新输入同一个网址"
+   * 会被当成刷新而沿用上一趟的"已进入"标记，入场页不再出现（本人报的 bug）；
+   * 现在那条路靠"历史条目上的访问 id 已经被新导航顶掉"认出来，见 lib/visit.ts。
+   *
+   * 判据只有一条：**这一趟点过"进入"没有**。新的一趟访问在判定时就已经把那个标记清掉了
+   * （见 visit-session.ts），所以"刷新之后又冒出入场页"不会发生；
+   * 反过来，站内换页（ClientRouter 不换文档）时这一趟当然还是"已进入"，
+   * 入场页不会跟着新的 HTML 又长出来 —— 这里**不能**拿"这次文档加载算不算新访问"来判，
+   * 那个答案是给"要不要清标记"用的，整份文档里始终是同一个值。
+   */
+  const visit = visitSession();
+  if (visit.hasEntered()) {
     gate.remove();
     document.body.classList.remove('entry-locked');
     return false;
@@ -79,10 +54,9 @@ export function initEntryGate(music: MusicManager): boolean {
   if (!button || gate.dataset.bound) return true;
   gate.dataset.bound = 'true';
 
-	  const enter = () => {
-	    if (entered) return;
-	    entered = true;
-	    rememberEntry();
+  const enter = () => {
+    if (visit.hasEntered()) return;
+    visit.markEntered();
 
     // This call must stay directly inside the trusted click handler: it is what
     // unlocks audible playback under browser autoplay policies.
@@ -103,48 +77,52 @@ export function initEntryGate(music: MusicManager): boolean {
     // 于是第一声只能拿合成器顶上（本人反馈"第一声不是真实音源"）。现在走到实验室前就绪。
     primeMiniLabPiano();
 
-	    gate.classList.add('is-leaving');
-	    button.disabled = true;
-	    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-	    let cleaned = false;
-	    const cleanup = () => {
-	      if (cleaned) return;
-	      cleaned = true;
-	      setPageLocked(gate, false);
-	      gate.remove();
-	      /*
-	       * 进站就落在首页最顶上（#home）。
-	       *
-	       * 浏览器"继续上次的标签页"／恢复会话时，会把上一次的滚动位置（有时还有 URL 里的
-	       * #about / #blog）一起带回来，于是点完"进入"发现自己不在首页 —— 本人反馈：
-	       * 只有干净的内置浏览器正常，别的浏览器一点开始就直接停在关于区或博客区。
-	       * 这里把地址里那次遗留的锚点去掉、页面拉回顶部；用 instant 是因为
-	       * html 有 scroll-behavior: smooth，不然会当着他的面滑一大段。
-	       * 站内导航（客户端路由）不走这里，所以"返回关于"这类锚点跳转不受影响。
-	       */
-	      if (location.hash && location.hash !== '#home') {
-	        history.replaceState(null, '', location.pathname + location.search);
-	      }
-	      /*
-	       * 拉回顶部要补两次：Safari 经常在遮罩收起之后才把上次的滚动位置恢复回来，
-	       * 只滚一次会被它盖掉。第二、三次都跳过有 #锚点 的情况 —— 那是用户自己点了
-	       * 站内跳转（例如"返回关于"），不能抢。
-	       */
-	      const toTop = () => window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-	      toTop();
-	      requestAnimationFrame(toTop);
-	      window.setTimeout(() => {
-	        if (!location.hash) toTop();
-	      }, 260);
-	      const main = document.querySelector<HTMLElement>('#main');
-	      if (main) {
-	        main.setAttribute('tabindex', '-1');
-	        main.focus({ preventScroll: true });
-	      }
-	    };
-	    gate.addEventListener('animationend', cleanup, { once: true });
-	    window.setTimeout(cleanup, reduced ? 0 : 820);
-	  };
+    gate.classList.add('is-leaving');
+    button.disabled = true;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      setPageLocked(gate, false);
+      gate.remove();
+      /*
+       * 进站就落在首页最顶上（#home）。
+       *
+       * 浏览器"继续上次的标签页"／恢复会话时，会把上一次的滚动位置（有时还有 URL 里的
+       * #about / #blog）一起带回来，于是点完"进入"发现自己不在首页 —— 本人反馈：
+       * 只有干净的内置浏览器正常，别的浏览器一点开始就直接停在关于区或博客区。
+       * 这里把地址里那次遗留的锚点去掉、页面拉回顶部；用 instant 是因为
+       * html 有 scroll-behavior: smooth，不然会当着他的面滑一大段。
+       * 站内导航（客户端路由）不走这里，所以"返回关于"这类锚点跳转不受影响。
+       *
+       * 注意：`history.state` 要原样带过去 —— 那上面有这一趟访问的 id
+       * （visit-session.ts 盖的章）和 Astro 的 index / 滚动位置。传 null 会把它们抹掉，
+       * 于是"带着 #锚点进站 → 进站 → 刷新"会被当成新访问，入场页又冒出来。
+       */
+      if (location.hash && location.hash !== '#home') {
+        history.replaceState(history.state, '', location.pathname + location.search);
+      }
+      /*
+       * 拉回顶部要补两次：Safari 经常在遮罩收起之后才把上次的滚动位置恢复回来，
+       * 只滚一次会被它盖掉。第二、三次都跳过有 #锚点 的情况 —— 那是用户自己点了
+       * 站内跳转（例如"返回关于"），不能抢。
+       */
+      const toTop = () => window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      toTop();
+      requestAnimationFrame(toTop);
+      window.setTimeout(() => {
+        if (!location.hash) toTop();
+      }, 260);
+      const main = document.querySelector<HTMLElement>('#main');
+      if (main) {
+        main.setAttribute('tabindex', '-1');
+        main.focus({ preventScroll: true });
+      }
+    };
+    gate.addEventListener('animationend', cleanup, { once: true });
+    window.setTimeout(cleanup, reduced ? 0 : 820);
+  };
 
   button.addEventListener('click', enter, { once: true });
   window.requestAnimationFrame(() => button.focus({ preventScroll: true }));

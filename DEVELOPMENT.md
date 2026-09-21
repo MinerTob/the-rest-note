@@ -133,14 +133,15 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 合成器（无采样兜底） | `src/scripts/synth.ts` | `KeysSynth.unlock()` / `noteOn()` / `noteOff()` / `allNotesOff()` | — |
 | 真实 MIDI 键盘 | `src/scripts/midi.ts` | `MidiBridge`、`getMidiBridge()` | 事件 `midi:noteon` / `midi:noteoff` / `midi:change` |
 | 彩蛋（隐藏曲目） | `src/lib/easter-eggs.ts`、`src/lib/sequences.ts`、`src/scripts/easter-eggs.ts` | `EASTER_EGGS`、`HOLD_TO_ARM` / `isArmChord()`（入口和弦）、`createSequenceDetector()`、`createSequenceSession()`、`EasterEggManager`（`toggleHint()` / `holdNote()` / `releaseNote()`） | `[data-note]`（琴键）、事件 `minilab:note` / `minilab:release` / `egg:hint` / `egg:accept` / `egg:miss` |
-| About 身份实验场 | `src/components/IdentityStage.astro`、`src/scripts/identity-player.ts`、`identity-physics.ts`、`src/lib/identity.ts`、`identity-midi.ts` | `createIdentityPhysics()`（`reveal()` / `restore()` / `placeMissing()` / `snapshot()`，内部 `makeBody()` 管尺寸自愈）、`initIdentity()`、`disposeIdentity()`、`setIdentityActive()`、`identityRevealPlan()` | `[data-identity*]`、`[data-identity-tag][data-revealed]`、cookie `rest-note-identity-v2-<visit>` |
+| About 身份实验场 | `src/components/IdentityStage.astro`、`src/scripts/identity-player.ts`、`identity-physics.ts`、`src/lib/identity.ts`、`identity-midi.ts` | `createIdentityPhysics()`（`reveal()` / `restore()` / `markPlaced()` / `snapshot()`，内部 `makeBody()` 管尺寸自愈）、`initIdentity()`、`disposeIdentity()`、`setIdentityActive()`、`identityRevealPlan()` | `[data-identity*]`、`[data-identity-tag][data-revealed]`、cookie `rest-note-identity-v3-<这一趟访问的 id>` |
 | 手机摇晃彩蛋（标签跟着晃） | `src/scripts/identity-motion.ts`、`src/lib/shake.ts`、`src/scripts/identity-physics.ts`（`shove()`）、`src/scripts/entry-gate.ts`（入场时申请权限） | `requestMotionAccess()`、`attachIdentityMotion()`、`createShakeDetector()` | `[data-identity]`、`[data-entry-button]`（申请运动权限的那次手势）；传感器事件 `devicemotion`；`getGlobal().motionAccess` |
 | 夜曲跨页不断音（关于 ⇄ 关于我） | `src/scripts/identity-audio.ts`、`src/scripts/identity-player.ts`、`src/scripts/nocturne.ts`、`src/scripts/app.ts` | `identityPiano()`、`handOverIdentityPiano()` / `takeIdentityHandover()`、`releaseIdentityPiano()`、`rampIdentityVolume()`、`HANDOVER_AHEAD` | `getGlobal().identityPiano` / `.identityHandover`；无 DOM 钩子 |
 | 自我介绍页（第十个标签的去处） | `src/views/IntroPage.astro`、`src/pages/about/intro/index.astro`、`src/content/pages/intro.zh.md` / `intro.en.md`、`src/lib/pages.ts` | `getPage('intro', lang)`、`render(entry)`、`introRoutes` | `[data-identity-link]`（写在 About 页的标签上） |
 | 联系方式 / 复制 | `src/components/ContactTiles.astro`、`ContactPanel*.astro`、`src/scripts/contact.ts`、`src/lib/contact.ts` | `initContact()`、`CONTACT`、`isInteractive()` | `[data-contact]`、`[data-contact-row]`、`[data-contact-copy]` |
 | 系统提示 LCD | `src/components/SystemMessage.astro`、`src/scripts/system-message.ts` | `initSystemMessages()` | `[data-system-message]`、window 事件 `space:message` |
 | 入场页 | `src/components/EntryGate.astro`、`src/scripts/entry-gate.ts` | `initEntryGate()` | `[data-entry-gate]`、`[data-entry-button]`、`[data-entry-copy]` |
-| 首页 Journey 长页 | `src/views/JourneyPage.astro`、`src/scripts/app.ts` 里的 `initJourney()` | `initJourney()` | `[data-journey]`、`[data-journey-section]` |
+| **访问会话 / 入场边界** | `src/scripts/visit-session.ts`、`src/lib/visit.ts`、`src/scripts/entry-gate.ts`、`identity-player.ts` | `visitSession()`（`token` / `isNew` / `hasEntered()` / `markEntered()`）、`visitBoundary()`、`navigationKind()`、`readEntryToken()` / `stampEntryToken()` | sessionStorage `rest-note.visit`、`rest-note.entry-passed`、`history.state.restNoteVisit`、`html[data-visit]` |
+| 首页 Journey 长页 | `src/views/JourneyPage.astro`、`src/scripts/app.ts` 里的 `initJourney()`、`src/lib/scene.ts` | `initJourney()`、`sceneCoverage()`、`sceneDecision()` | `[data-journey]`、`[data-journey-section]`、`[data-journey-section="about"][data-scene]` |
 | 博客列表 / 标签 | `src/views/BlogIndexPage.astro`、`src/lib/content.ts` | `getPosts()`、`collectTags()` | — |
 | 文章页 | `src/views/PostPage.astro`、`src/lib/pages.ts` | `buildPostProps()`、`postStaticPaths()`、`tagStaticPaths()` | — |
 | Lab 页 | `src/views/LabPage.astro`、`src/content/lab/*` | `getExperiments()` | — |
@@ -486,7 +487,7 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
   - **被拒绝时会说一句实话**：`announceMotionOffline()` 通过 `space:message` 在 LCD 上打一行 `MOTION OFFLINE / motion & orientation access denied`（只在页面真有 `[data-identity]` 时）。这是设备读数，和 MiniLab 的 `NO DEVICE` 同一种语气，也是排查"为什么摇不动"的第一现场。
   - 兜底入口：这一块在屏幕上时，用户点 / 滑页面任何地方也会走同一个 `requestMotionAccess()`（`document` 捕获阶段的 `pointerdown`，只触发一次）。
 - 布局（标签落点）会存 cookie：`readLayout()` / `writeLayout()` / `clearLayout()`（内部函数，cookie 名 `rest-note-identity-v3-<visit>`，visit id 每次会话一个；`v3` 是落点格式版本，见下）。这份记忆**只当"先摆出来"的兜底**（万一声音还没解锁，页面也不会是一片空地）：`physics.restore()` 之后 `needsAnimation` 仍然是 `true`，音乐一响 `reveal()` 就把已有的身体重新抛回场上再落一次 —— 每次回到这一页，方块都是活的（本人报过"返回之后方块的物理效果就没了"）。`reset()`（重新演奏按钮）会连内部的 `dropped` 一起清空、并 `clearLayout()`，所以下一轮整排重抛。
-- **visit id 跟着"是不是新的一趟访问"走**：`identity-player.ts` 模块加载时，如果这次导航的 `performance.navigation.type` 是 `navigate`（地址栏输入 / 外链 / 书签），就先清掉 sessionStorage 里的 `rest-note.identity-visit`，让下面重新生成一个 —— 于是落点 cookie 是新的、标签会被音乐重新抛一遍。`reload` / `back_forward` 沿用同一个 visit（刷新不算新访问），和入场页的 `rest-note.entry-passed` 是同一条规矩。原因见 §10：浏览器"继续上次的标签页"会把 sessionStorage 一起恢复，不这么做的话上一趟的落点会一直沿用，"每一次进入都是一趟新访问"这件事就消失了。
+- **落点 cookie 的名字跟着"这一趟访问的 id"走**（`visitSession().token`，判定规矩见 §5.15）：新的一趟访问 = 新 cookie = 标签会被音乐重新抛一遍；同一趟（刷新 / 前进后退 / 站内换页）沿用同一个名字，落点才不会丢。`identity-player.ts` 只**读**这个 id —— 它不碰夜曲时间线，也不碰音频运行时（三套状态各管各的，见 §5.15）。**不要再自己看 `performance.navigation.type`**：那条规矩漏掉了"地址栏里重新输入同一个网址"（见 §10 的日志）。
 - **加载乐谱会自动重试；`data-bound` 必须最后才立**：`initIdentity()` 读 `public/music/secret/*.mid` 失败时最多重试两次（间隔 1.2s / 2.4s）再报错，重试挂在同一条 abort 信号上，换页不会漏。另外 `root.dataset.bound = 'true'` 这个"已初始化"记号要放在拿到 2d 上下文**之后**：放在前面的话，取上下文失败的那一次会把自己锁死（后面每次 `initIdentity()` 都被这个记号挡在门外），整块区域一直死到刷新页面为止 —— 本人反馈的"必须手动刷新一下才开始加载 MIDI、重播点了也没反应"就是这个形态。取不到上下文就留个空门，滚回这一块时还能再试。
 - **落点存的是文档像素坐标 + 地板位置**（`{ floor, items: [{ x, y, angle }] }`，`x/y/angle` = 本体中心 + 角度），不是归一化比例。曾经存过比例（`(x-left)/(right-left)`、`(floor-y)/floor`），但两种语言的页面高度差几像素，比例还原时会被整体缩放，实测偏 20-80px —— 本人看到的就是"切语言之后标签位移"。`floor` 是写下落点时 `.identity__landing` 下沿的文档位置：换语言/换宽度会让整块区域上下移动（实测首页那串拼接页切到英文时下沉 **115px**），`restore()` 会先算 `shift = floor_now - layout.floor` 再整体平移，标签才不会漂出自己那一块。改格式记得同时改 `LAYOUT_VERSION`（cookie 名字里那个 `v3`），否则新代码会把旧格式的值当新格式读。
 - `bounds()` 与 `restore()` 的夹取只做"别出视口、别陷进地板"（`x ∈ [8, width-8]`、`y ∈ [8, floor-4]`），**不按方块自己的尺寸算**。按尺寸算会出事：脚本刚接手时量到的元素尺寸常常是错的（样式还没应用，实测 46px 的标签量成 134px），一夹就把方块顶歪 44px；按舞台宽度夹也会把更宽的英文标签整排推走（实测偏 75px）。另外 `bounds()` 里有**尺寸自愈**：元素尺寸和造本体时记下的不一样，就用同一个中心重造本体（位置不动，只补尺寸），`document.fonts.ready` 之后还会再量一次。
@@ -508,7 +509,7 @@ identityRevealPlan(score, count): 每个标签的揭示时刻（并校验曲子�
 - 点按判定在 `identity-physics.ts`：按下后位移 < 8px、且 0.7s 内抬手才算"点击"；拖动过就不算（"抛掷"不能被误认成"点开"）。命中 + 元素带 `data-identity-link` 才回调 `onActivate`，由 `identity-player.ts` 走 `astro:transitions/client` 的 `navigate()`（失败退回 `location.assign`）；键盘上按回车同样打开。
 - **拖动不能触发链接**：第十个标签是 `<a href>`，浏览器在 `pointerup` 之后还会自己补一发 `click`（`setPointerCapture` 让目标仍是它），光靠点按判定拦不住。所以只要这一次抬手不算点按，就把 `swallowClickUntil` 设成"现在 + 300ms"，由文档级捕获阶段的 `click` 监听把这一发 `click.preventDefault()` 掉 —— 拖完标签不会跟着跳页（本人报过的 bug），点一下照常进自我介绍页。
 - `reveal()` 算"备用队形"（没接住音符时靠地面排队）的间距时只统计普通标签：可点击的那个宽得多，算进去会把整排挤成单列。
-- 首页 Journey 模式里，`initJourney()` 用 IntersectionObserver 在滚到 About 区时调用 `initIdentity()` / `setIdentityActive(true)`（见 `src/scripts/app.ts`）。
+- 首页 Journey 模式里，`initJourney()` 用 IntersectionObserver 在滚到 About 区时调用 `initIdentity()` / `setIdentityActive(true)`；"滚到位没有"用的是**带迟滞的覆盖度判据**（见 §5.16），不是单个阈值 —— 单个阈值在手机上会被地址栏收起/展开抖成 pause/start 反复横跳（本人报的"前几秒明显断续、卡顿"）。
 - 音乐靠现有 `PianoEngine.scheduleNote()` 播 MIDI，不另做一套音频链路。
 - 单测：`tests/identity.test.mjs`、`tests/identity-midi.test.mjs`（真实 MIDI 文件解析）。
 
@@ -545,19 +546,22 @@ initSystemMessages(): void;   // 监听 window 'space:message'
 
 ### 5.11 入场页 EntryGate
 
-**文件**：`src/components/EntryGate.astro`、`src/scripts/entry-gate.ts`、`src/scripts/app.ts`
+**文件**：`src/components/EntryGate.astro`、`src/scripts/entry-gate.ts`、`src/scripts/visit-session.ts`、`src/lib/visit.ts`、`src/scripts/app.ts`
 
 ```ts
 initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面被锁）
+visitSession(): VisitSession;                  // 见 §5.15：这一趟的 id / 是不是新的一趟 / 进没进去过
 ```
 
-- 只在"地址栏输入 / 书签 / 外链"（navigation type = `navigate`）时要求重新入场；`reload` / `back_forward` 沿用 sessionStorage `rest-note.entry-passed`。
+- **拦不拦人只问一句：这一趟点过"进入"没有**（`visitSession().hasEntered()`）。"这是不是新的一趟访问"由 `visit-session.ts` 判定，判定为新的一趟时会把 `rest-note.entry-passed` 清掉 —— 所以"刷新之后又冒出入场页"不会发生，而"地址栏重新输入网址"照样会拦（规矩与实测见 §5.15）。
+- **不要拿"这次文档加载算不算新访问"当拦人的判据**：整份文档里那个值是不变的，而站内换页（ClientRouter 不换文档）时 HTML 会整块换新、入场页元素跟着长出来 —— 那样写会在每次站内换页后又冒出入场页。
 - 进入方式：点击 `[data-entry-button]`。这个 click 处理器里**必须直接调用** `music.play()`（浏览器自动播放策略要求音频解锁发生在可信手势里，见代码注释）。
 - **点"进入"之后一定落在首页最顶上（`#home`）**：遮罩收起时把地址里遗留的锚点（浏览器恢复标签页时常见的 `#about` / `#blog`）去掉，并 `scrollTo(0, 0)`；因为 `html` 有 `scroll-behavior: smooth`，必须用 `behavior: 'instant'`，否则会当着他的面滑一大段。**要补三次**（立即 / 下一帧 / 260ms 后）：Safari 常在遮罩收起之后才把上次的滚动位置恢复回来，只滚一次会被它盖掉；后两次都跳过"有 `#锚点`"的情况 —— 那是用户自己点的站内跳转，不能抢。站内导航走客户端路由，不经过这里。
 - 同一个 click 处理器里还调两个"必须在用户手势里做"的动作：`requestMotionAccess()`（`identity-motion.ts`，申请"运动与方向"权限，见 §5.8）和 `primeIdentityPiano()`（`identity-audio.ts`，把"关于"那架钢琴的 AudioContext 建起来并开始预载采样，见 §5.14）。两者都只在真正需要它们的页面生效，桌面 / 不需要 / 已经做过时静默返回，不影响入场。
 - 锁定期间 body 加 `.entry-locked`，除 gate 和 `.ambient` 外的直接子元素设为 `inert`。
 - 文案跟随浏览器语言（`navigator.language` 是否 `zh` 开头），不是站点语言。
 - `app.ts` 里：`if (!initEntryGate(music)) music.init();` —— 有入场页时由入场页负责解锁音频。
+- 收尾去掉遗留锚点时用 `history.replaceState(history.state, ...)`：`history.state` 上有这一趟访问的 id（`restNoteVisit`）和 Astro 的 `index` / 滚动位置，传 `null` 会把它们抹掉，于是"带着 `#锚点` 进站 → 进站 → 刷新"会被当成新访问。
 
 ### 5.12 时钟与控制台
 
@@ -606,6 +610,82 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 - 状态钩子：`[data-nocturne-ready]`（乐谱解析完成）、`[data-nocturne-state="waiting|playing|paused"]` —— 排查"这一页怎么没声音"先看这两个。
 - 单测：这一页是排版 + 内容 + 浏览器行为，只有常量层面的单测（`tests/identity.test.mjs` 里的音量断言）；改动后在浏览器里核对分节标题、图片、返回按钮与夜曲即可（`npm run build` 会校验内容集合字段）。
 
+### 5.15 访问会话与入场边界
+
+**文件**：`src/scripts/visit-session.ts`（浏览器这边）、`src/lib/visit.ts`（纯逻辑，有单测 `tests/visit.test.mjs`）
+
+```ts
+// visit-session.ts
+type VisitSession = {
+  token: string;            // 这一趟访问的 id（落点 cookie 之类"每趟不一样"的东西用它）
+  isNew: boolean;           // 这次**文档加载**算不算新的一趟（决定要不要把"已进入"清掉）
+  hasEntered(): boolean;    // 这一趟点过"进入网站"没有 —— 入场页拦不拦人只问这一句
+  markEntered(): void;
+};
+visitSession(): VisitSession;   // 同一份文档里只判定一次（模块级缓存）
+
+// lib/visit.ts
+navigationKind(raw): 'navigate' | 'reload' | 'back_forward' | 'unknown';
+readEntryToken(state) / stampEntryToken(state, token);   // history.state 上的章（保留 Astro 的 index / scrollX / scrollY）
+visitBoundary({ navigation, sessionToken, entryToken }): 'new' | 'same';
+```
+
+**三套状态从此分开，谁也不许动别人的**（这条是本人明确要求的）：
+
+| 状态 | 在哪 | 谁负责 | 换一趟访问时 |
+| --- | --- | --- | --- |
+| 访问状态（这一趟的 id、进没进去过） | `visit-session.ts` + sessionStorage | `entry-gate.ts` / `identity-player.ts` | 换新 id、清掉"已进入" |
+| 夜曲时间线（`identity:nocturne` 播到第几秒） | `src/lib/live-timeline.ts` | `identity-player.ts` / `nocturne.ts` | **保留**（换一趟不清） |
+| 音频运行时（PianoEngine / AudioContext / 采样 / 排程） | `piano.ts` / `identity-audio.ts` | 同上 | 不受影响 |
+
+**判定规矩**（默认往"新访问"偏：多拦一次只是多按一下，漏掉一次是本人报的 bug）：
+
+| 用户动作 | 浏览器报的 type | 我们的判定 |
+| --- | --- | --- |
+| 第一次打开 / 新标签页 | `navigate`（sessionStorage 里还没有 id） | 新的一趟 |
+| 站内换页（ClientRouter，不换文档） | 不产生文档加载 | 同一趟（`hasEntered()` 还留着） |
+| 刷新（F5 / 刷新按钮） | `reload` | 同一趟（历史条目上的章还在） |
+| 前进 / 后退 / bfcache | `back_forward` | 同一趟 |
+| 地址栏重新输入**同一个**网址 | Chrome 报 `navigate`；有的浏览器报 `reload` | 新的一趟（前者按类型判，后者按"章没了"判） |
+| 地址栏输入另一个网址 / 外链 / 书签 | `navigate` | 新的一趟 |
+
+**为什么不能只看 `PerformanceNavigationTiming.type`**：不同浏览器给"地址栏里重新输入同一个网址"报的 type 不一样 —— 报 `reload` 的那种会被当成刷新，上一趟的 `entry-passed` 被沿用、入场页不再出现（本人报的 bug）。所以这里加了第二个信号：**当前历史条目上有没有我们自己盖的访问 id**（`history.state.restNoteVisit`，每次 boot 都补盖一次）。刷新会把条目原样留下来（章还在 → 同一趟），而"地址栏重新输入网址"是一次新的导航、条目被顶掉（章没了 → 新的一趟）。
+
+**两个容易踩的点**：
+1. **每次 boot 都要补盖一次章**：Astro 的客户端路由换页时是 `history.pushState({ index, scrollX, scrollY })`，会把条目上原有的字段整个换掉。不补盖的话，"站内换页之后再刷新"会被当成新的一趟，凭空多一次入场页。
+2. **`history.replaceState` 一律带 `history.state` 走**：入场页收尾去掉遗留 `#锚点` 时传 `null`，会把章和 Astro 的滚动位置一起抹掉（见 §5.11）。
+
+### 5.16 长页场景激活（关于区什么时候算"在观看区域"）
+
+**文件**：`src/lib/scene.ts`（纯逻辑）、`src/scripts/app.ts` 的 `initJourney()`、有单测 `tests/scene.test.mjs`
+
+```ts
+sceneCoverage({ viewportHeight, top, bottom }): number;   // 露出高度 ÷ min(区块高度, 视口高度)
+sceneDecision(active, coverage, enter = 0.55, leave = 0.25): boolean;   // 迟滞
+SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只是"什么时候叫我们"）
+```
+
+- 判据是**覆盖度**而不是"露出 ÷ 区块高度"：区块比视口高时铺满视口就算 1，比视口矮时整块看得见才算 1。视口高度变化对它的影响比原来那条小得多。
+- 进出用**两个不同阈值**（0.55 / 0.25，中间 0.30 是迟滞带）：只有真的跨过去才切状态，抖动落在带子里就什么也不做。**没有 setTimeout / debounce** —— 不抖是因为判据本身稳，不是因为拖时间。
+- 实测（无头 Chrome，393×852，关于区高 679px）：停在旧判据 0.35 的边界上，地址栏收起/展开（视口 852 ↔ 750，判据 0.35 ↔ 0.373）在修前让 `data-state` 连着翻了 **5** 次（pause → playing → pause → playing → pause，每次都 `allNotesOff()` + 重新排程，听起来就是"前几秒明显断续"）；修后同一条路径 **0** 次。真的走远（滚回博客区）仍然会停（`data-scene=idle`、`data-state=paused`）。
+- 排查读数：`[data-journey-section="about"][data-scene="active|idle"]`。
+
+### 5.17 客户端启动生命周期（boot 一次、换页一次）
+
+**文件**：`src/scripts/app.ts`
+
+- **一次"页面加载"只 boot 一次**：ClientRouter 在初始硬加载上也会发 `astro:page-load`（`router.js` 里 `addEventListener('load', onPageLoad)`），而 `app.ts` 还会在 DOMContentLoaded（或脚本一执行完）自己 boot 一次 —— 于是刷新时 boot 跑两遍：
+
+  ```
+  boot #1 → initJourney → 观察器 → initIdentity → 建播放器、读谱、预载采样
+  boot #2 → disposeJourney → disposeIdentity → abort 掉正在飞的请求、拆掉物理引擎 → 再建一个播放器
+  ```
+
+  中间那次 dispose 会掐掉刚起来的那一套（表现就是本人说的"刷新之后夜曲进不了可播放状态"）。现在 `boot()` 由模块级 `booted` 把关：同一次加载里第二次调用直接返回；换页真的发生（`astro:after-swap`）时才把闸门打开。兜底的 DOMContentLoaded 那一支也走同一道闸门。
+- **页面级清理只在两个地方**：`astro:before-swap`（换页前：`disposeJourney()` / `disposeIdentity()` / `disposeNocturne()` / MiniLab 收摊、必要时 `releaseIdentityPiano()`）和 `disposeJourney()` 内部。**`disposeJourney()` 无条件 `disposeIdentity()`**：以前写成 `if (aboutActive)`，于是"滚进关于区 → 滚回上面 → 点别的页面"这条路上播放器不会被收掉，它挂在 `document` 上的 pointerdown / wheel 监听、ResizeObserver、物理引擎会活到下一页去。
+- `identity-player.ts` 里还有一个**代际守卫**：每次 `initIdentity()` 递增 `identityGeneration`，被换掉的旧 `dispose` / `setActive` 闭包发现自己不是当代就什么都不做（防止旧生命周期误杀新实例）。
+- 采样下载现在**分轮进行**（`PianoEngine.preload()`，最多 4 轮、每轮隔 1.5 秒补漏掉的）：上一版开头是 `if (state === 'ready') return`，只要有一个采样成功状态就变 ready，后面那段"补下漏掉的"**永远进不来**（死代码），手机上一次请求被打断就再也补不上。另外 `ensure()` 现在会处理"上下文已被关掉"（`state === 'closed'` → 整套重来），`failed` 也不再是永久死状态。实测见 §10。
+
 ---
 
 ## 6. 存储与事件
@@ -620,10 +700,13 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 | `space.lang-transition` | sessionStorage | 语言切换的一次性标记："新文档要滑入" | `src/scripts/lang.ts` |
 | `space.lang-scroll` | sessionStorage | 语言切换前记下的 `{ y, hash, anchor: { path, offset } }`，新页面读完就删（地标对齐 + 两段式恢复，见 §5.4） | `src/scripts/lang.ts` |
 | `space.lang-swap` | sessionStorage | 语言切换的目标 pathname（一次性）：对得上才说明"这一趟是切语言"，身份标签据此保留落点（§5.8） | `src/scripts/lang.ts` |
-| `space.position.v1.<id>` | sessionStorage | 每首曲子记下"暂停时的位置" | `src/lib/live-timeline.ts` |
-| `rest-note.entry-passed` | sessionStorage | 本次会话已通过入场页 | `src/scripts/entry-gate.ts` |
+| `space.position.v1.<id>` | sessionStorage | 每首曲子记下"暂停时的位置"（`identity:nocturne` 的夜曲进度也在这里，**换一趟访问不清理**） | `src/lib/live-timeline.ts` |
+| `rest-note.visit` | sessionStorage | 这一趟访问的 id（跟着标签页走；新的一趟会换成新的） | `src/scripts/visit-session.ts`（判定在 `src/lib/visit.ts`） |
+| `rest-note.entry-passed` | sessionStorage | **这一趟**已通过入场页；判定为新的一趟访问时清掉（只清这一个 key） | `src/scripts/visit-session.ts` |
+| `history.state.restNoteVisit` | 历史条目（不是存储） | 当前历史条目属于哪一趟访问：刷新会带着它（同一趟），地址栏重新输入网址则是新条目（新的一趟） | `src/scripts/visit-session.ts`（纯函数 `stampEntryToken()` / `readEntryToken()`） |
 
 规则：所有读写都走 `src/scripts/storage.ts` 的封装（`readString` / `writeString` / `readNumber` / `readBool` / `writeNumber` / `writeBool`），隐私模式下静默降级，不抛异常。跨设备/长期偏好放 localStorage，一次性、会话内的放 sessionStorage。
+例外：`visit-session.ts` 直接读 sessionStorage 是为了能一起处理"隐私模式下拿不到"（数组用的是 `try/catch` + 内存兜底），`history.state` 本来就不在 `storage.ts` 的管辖范围内。身份落点 cookie 名 `rest-note-identity-v3-<这一趟访问的 id>` 也跟着这里走（旧的 `rest-note.identity-visit` key 已不再使用）。
 
 ### 6.2 自定义事件总表
 
@@ -658,6 +741,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 | `[data-i18n]` + `data-zh` / `data-en` | `<T>` 或手写 | `swapChrome(lang)` | 运行期换 UI 文案 |
 | `[data-i18n-aria]` + `data-aria-zh` / `data-aria-en` | 同上 | `swapChrome(lang)` | 运行期换 aria-label |
 | `[data-lang-switch="zh\|en"]` | `Header.astro` | `initLangSwitch()` | 语言切换链接 |
+| `html[data-visit]` | `visit-session.ts`（`new` / `same`） | 只有排查时人读（脚本不读） | 这次文档加载被判成"新的一趟访问"还是"同一趟"——"为什么又弹入场页"先看它 |
 
 ### 主题 / 时钟 / 音乐
 
@@ -682,6 +766,7 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 | 钩子 | 谁写 | 谁读 | 用途 |
 | --- | --- | --- | --- |
 | `[data-identity]` 根 + `-arena` / `-canvas` / `-play` / `-restart` / `-progress` / `-status` / `-time` / `-volume` / `-tag` | `IdentityStage.astro` | `initIdentity()`、`identity-physics.ts` | About 身份实验场 |
+| `[data-journey-section="about"][data-scene]` | `app.ts` 的 `initJourney()`（`active` / `idle`） | 只有排查时人读（脚本不读） | 关于区这一条"算不算在观看区域"（迟滞判定的结果，见 §5.16） |
 | `[data-revealed]` / `[data-dragging="true"]` | `identity-player.ts` | 组件 CSS | 标签出现前隐藏 / 拖拽光标 |
 | `[data-motion]` / `[data-motion-shakes]` / `[data-motion-pushes]` | `identity-motion.ts` 写在 `[data-identity]` 上 | 只有排查时人读（脚本不读） | 摇晃彩蛋的三个读数：`off` / `idle` / `listening` / `shaking`、识别到几次摇晃、真的推了几次 |
 | `[data-minilab-load]` / `[data-minilab-load-wrap]` / `[data-minilab-load-text]` | `minilab.ts`（`renderLoad()` 写 `--load` 与百分比） | 组件 CSS | 采样加载进度条：一颗音符跑在轨道上，只在真的在加载时出现 |
@@ -722,6 +807,31 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-21 · 三个真问题：手机滚动把夜曲抖断 / 刷新后夜曲进不了可播放状态 / 地址栏重新输入网址不算新访问
+
+- 需求：本人报三件事，并要求"先定位实际的 race condition / lifecycle 问题，不要用 setTimeout 掩盖"。①手机滚到关于区没声、回来之后前几秒断续；②刷新之后 About MIDI 无法正常加载 / 无法进入可播放状态；③同一个标签页在地址栏重新输入网址，仍然沿用上一趟的"已进入"，入场页不再出现。另外明确：**Entry 访问状态、夜曲时间线、音频运行时三套状态不要互相污染**，夜曲进度不许被入场逻辑清掉。
+- 复现方式：本会话 Codex 的浏览器插件连不上（`unsupported Codex auth method: apikey`），改用**真实 Chrome + Playwright（CDP）+ Windows UI Automation**：`cua` 不可用，地址栏那件事必须用真输入（`SetFocus` 到地址栏 → `ValuePattern.SetValue` → Enter），脚本放在 `.shots/*.mjs` / `.shots/*.ps1`（`.shots/` 已在 .gitignore 里）。
+- 根因（都是先量出来再改）：
+  1. **1A 抖动**：`initJourney()` 用 `entry.intersectionRatio >= 0.35` 同时管进和出，判据是"露出 ÷ 区块高度"。实测 393×852 手机上关于区高 679px，停在 0.35 边界时地址栏收起/展开（视口 852 ↔ 750）让判据在 **0.35 ↔ 0.373** 之间跳 → `data-state` 翻 5 次（pause → playing → pause → playing → pause），每次都是 `allNotesOff()` + 重新排程。这就是"第一次滚到底没声 / 回来之后前几秒断续"。
+  2. **1B 生命周期**：`astro:page-load` 在**初始硬加载**上也会发（`router.js` 的 `addEventListener('load', onPageLoad)`），而 `app.ts` 还会在 DOMContentLoaded 自己 boot 一次 —— 硬加载时 boot 跑两遍（实测 `IntersectionObserver` 构造次数 = 4 = 2 次 `initJourney()`；修后 = 2）。第二遍的 `disposeJourney() → disposeIdentity()` 会把第一遍刚建好的播放器 abort 掉再重建。同一族里还有两处死路：`preload()` 开头 `if (state === 'ready') return` 让"补下漏掉的采样"成了**永不执行的死代码**（实测：给 5 个只有夜曲才用的采样注入首轮失败 → 修前 5 个**永远缺**、播放器却照样显示 ready/playing；修后 5 个全在 ~1.24s 后被补回、0 缺失）；`ensure()` 只认 `failed` 就返回，且不看 `state === 'closed'`；`nocturne.ts` 只听 `piano:state`，`resume()` 晚一点才成功时它就一直停在 waiting（实测：进入自我介绍页后 `data-nocturne-at` 一直是空）。
+  3. **2 入场边界**：`entry-gate.ts` 只看 `PerformanceNavigationTiming.type`：地址栏重新输入同一个网址时，"报 `navigate` 的浏览器"能被认出来，"报 `reload` 的浏览器"会被当成刷新（本人遇到的正是后者）。而且这个判定原来还兼任两件事，站内换页时那份"新访问"的结论会在整份文档里一直有效。
+- 改动：
+  1. 新增 `src/lib/visit.ts`（纯逻辑：`visitBoundary()` / `navigationKind()` / `readEntryToken()` / `stampEntryToken()`，`tests/visit.test.mjs` 15 项）与 `src/scripts/visit-session.ts`（`visitSession()`：这一趟的 id、`isNew`、`hasEntered()` / `markEntered()`）。判定 = 导航类型 + **当前历史条目上我们盖的访问 id**：刷新条目原样留着（同一趟），地址栏重新输入网址则是新条目（新的一趟）。每次 boot 补盖一次章（Astro 客户端路由 push 新条目时会冲掉 state，见 §5.15 两个坑）。
+  2. `entry-gate.ts`：拦人的判据改成**只问 `hasEntered()`**（新的一趟判定时已经把 `rest-note.entry-passed` 清掉）；收尾去锚点改成 `history.replaceState(history.state, …)`，不再把章和 Astro 的滚动位置一起抹掉；顺手把那段 tab 缩进的代码恢复成两空格。
+  3. `identity-player.ts`：落点 cookie 名改用 `visitSession().token`（不再自己看 navigation type、也不再用 `rest-note.identity-visit`）；加 `identityGeneration` 代际守卫。
+  4. `app.ts`：`booted` 闸门（一次加载一次 boot，`astro:after-swap` 放行）；`disposeJourney()` 无条件 `disposeIdentity()`；关于区的激活判定换成 `lib/scene.ts` 的覆盖度 + 迟滞（0.55 / 0.25，新增 `tests/scene.test.mjs` 7 项），并写 `data-scene` 读数。
+  5. `piano.ts`：`preload()` 按"还缺不缺"判断、最多 4 轮、每轮 1.5 秒后补漏（补到东西会补发一次 `piano:state`）；`ensure()` 处理 `state === 'closed'` 的上下文与"下够轮数"的收口；`dispose()` 收掉补下定时器。
+  6. `nocturne.ts`：补 `piano:context` 监听（上下文晚醒也要接上）。
+- 文件：新增 `src/lib/visit.ts`、`src/lib/scene.ts`、`src/scripts/visit-session.ts`、`tests/visit.test.mjs`、`tests/scene.test.mjs`；改动 `src/scripts/app.ts`、`src/scripts/entry-gate.ts`、`src/scripts/identity-player.ts`、`src/scripts/piano.ts`、`src/scripts/nocturne.ts`、`DEVELOPMENT.md`（§3 / §5.8 / §5.11 / 新增 §5.15–§5.17 / §6.1 / §7 / 本条）。
+- 函数：新增 `visitSession()`、`visitBoundary()`、`navigationKind()`、`readEntryToken()`、`stampEntryToken()`、`VISIT_STATE_KEY`、`sceneCoverage()`、`sceneDecision()`、`SCENE_ENTER` / `SCENE_LEAVE` / `SCENE_THRESHOLDS`；`initEntryGate()` 的判定改走访问会话；`initJourney()` 的观察器改迟滞判据；`boot()` 加闸门；`PianoEngine.preload()` / `ensure()` / `dispose()` 改生命周期。
+- 钩子/数据：新增 `html[data-visit]`（`new` / `same`）与 `[data-journey-section="about"][data-scene]`（`active` / `idle`）两个排查读数；storage key：新增 `rest-note.visit`，`rest-note.identity-visit` 不再使用（`rest-note.entry-passed` 语义不变，只是现在由访问会话负责清）；`history.state` 上新增 `restNoteVisit` 字段（与 Astro 的 `index` / `scrollX` / `scrollY` 共存）。没有新增自定义事件。
+- 验证（真实 Chrome 152，本地构建产物；脚本在 `.shots/`）：
+  - `npm test` **103/103**（新增 15 + 7 项）；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。
+  - **1A**（`scene-probe.mjs`，393×852）：边界抖动 5 次 → **0 次**；回顶部/滚到博客区 → `scene=idle state=paused`，滚到底 → `scene=active state=playing`。
+  - **1B**（`reload-probe.mjs` / `samples-probe.mjs`）：硬加载 `IntersectionObserver` 构造 4 → **2**（= 一次 boot）；播放中刷新 → `data-state=playing` 连续、时间线 8.31s → 19.09s 接着走；注入首轮失败的 5 个夜曲专用采样 → 修前**永远缺失**、修后全部在 ~1.24s 后补回（0 缺失）；刷新后暂停/恢复各一次都正常（`paused` → `playing`，之后一直 playing）。
+  - **2**（`scenarios.mjs`，真实地址栏 + 真 F5 + 真新标签页）：**A–O 全过** —— 首次加载有入场页；站内换语言页不入场页；刷新（含站内换页之后刷新）不入场页；前进后退不入场页；F5 不入场页；**地址栏重新输入同一个网址 → 出现入场页**；地址栏回车（未编辑）→ 出现入场页；地址栏输入别的网址 → 出现入场页；跨文档后退 → 不入场页；新标签页 → 出现入场页；自我介绍页 → 点"返回"回到关于区，夜曲 7.30s → 11.50s 接着弹、`data-state=playing`。
+  - 未能覆盖：iOS 那种"AudioContext 必须在手势里才能启动"的路径 —— 无头 Chrome 无论怎么设 `--autoplay-policy` 都会给出 running 的上下文（实测 `new AudioContext().state === 'running'`，`navigator.userActivation` 也不可用），只能在真机上确认；代码侧对应的三条兜底是入场点击里的 `primeIdentityPiano()`、`primeIdentityPianoOnFirstGesture()` 与两处 `piano:context` 监听。
 
 ### 2026-09-19 · 撤掉 MiniLab 的加载条（回到之前的安静样子）
 

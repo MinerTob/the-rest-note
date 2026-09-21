@@ -177,6 +177,16 @@ export function initNocturne(): void {
   piano.addEventListener('piano:state', () => {
     if (piano.getState() === 'ready' && piano.isRunning) void start();
   }, { signal });
+  /*
+   * 上下文**晚一点**才醒的时候也要接上。上面那个监听只在"状态变成 ready"时响，
+   * 而 `start()` 里 `ensure()` 触发的 `resume()` 是异步的：那一刻 `isRunning` 还是 false，
+   * 于是这次 `start()` 直接进了 waiting；等上下文真的跑起来时，`piano:state` 不会再响
+   * （状态没变），这一页就一直停在那儿等用户再点一下 —— 本人说的"进来之后不出声、
+   * 得再碰一下"里就有这一条。About 那一族的播放器监听的是 `piano:context`，这边也要有。
+   */
+  piano.addEventListener('piano:context', () => {
+    if (piano.isRunning && !playing && !loading && !disposed) void start();
+  }, { signal });
   document.addEventListener('visibilitychange', () => {
     // 与 About 页一致：切走时停手，切回来接着弹（位置存在同一条时间线上）
     if (document.hidden) pause();

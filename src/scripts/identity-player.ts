@@ -18,6 +18,7 @@ import { IDENTITY_TRACK_SRC } from "@/lib/identity";
 import { getGlobal } from "./global";
 import { savedPosition, savePosition, restartPosition } from "@/lib/live-timeline";
 import { takeLanguageSwap } from './lang';
+import { visitSession } from './visit-session';
 
 const SOURCE = IDENTITY_TRACK_SRC;
 const TIMELINE = "identity:nocturne";
@@ -36,44 +37,22 @@ const keyPositions = (() => {
 })();
 let disposeCurrent: (() => void) | undefined;
 let setActiveCurrent: ((active: boolean) => void) | undefined;
+/** 每次 initIdentity 递增：被换掉的旧实例不许再动新实例（见下面的 dispose / setActive） */
+let identityGeneration = 0;
 
-const VISIT_KEY = 'rest-note.identity-visit';
 /** 落点格式版本：v1 存归一化比例，v2 存文档像素，v3 连地板位置一起存 —— 换名字，免得把旧值当新格式读。 */
 const LAYOUT_VERSION = 'v3';
 
 /**
- * 一次"进入网站"（地址栏输入 / 外链 / 书签 = navigation type `navigate`）算一次新的访问：
- * 先把 visit id 清掉，下面 layoutCookieName() 就会生成一个新的，
- * 于是落点 cookie 是新的、标签会被音乐重新抛一遍。
+ * 落点 cookie 的名字里带上"这一趟访问"的 id（visit-session.ts）：
+ * 新的一趟访问 = 新 cookie = 标签会被音乐重新抛一遍；同一趟（刷新 / 前进后退）
+ * 沿用同一个名字，落点才不会丢。
  *
- * 为什么需要：浏览器"继续上次的标签页"时会把 sessionStorage 一起恢复，
- * 同一个 visit id 会让上一趟的落点沿用下来 —— 本人反馈的"每一次进入新 cookies 的动作
- * 都不见了"就是这个。刷新 / 前进后退不算新访问（沿用同一个 visit），
- * 和入场页 rest-note.entry-passed 是同一条规矩（见 entry-gate.ts）。
+ * 判定规矩全在 `src/lib/visit.ts`（含"地址栏里重新输入同一个网址"那种：
+ * 只看 navigation type 会漏掉，见 §10）。这里**只读**访问 id，不碰夜曲时间线，
+ * 也不碰音频运行时 —— 三套状态各管各的（见 visit-session.ts 的说明）。
  */
-try {
-  const navigation = performance.getEntriesByType('navigation')[0] as
-    | PerformanceNavigationTiming
-    | undefined;
-  if ((navigation?.type ?? 'navigate') === 'navigate') sessionStorage.removeItem(VISIT_KEY);
-} catch {
-  /* 隐私模式下读不到就当作没有 —— 下面会退回随机 visit id */
-}
-
-function layoutCookieName(): string {
-  let visit = '';
-  try {
-    visit = sessionStorage.getItem(VISIT_KEY) ?? '';
-    if (!visit) {
-      visit = crypto.randomUUID().replace(/-/g, '');
-      sessionStorage.setItem(VISIT_KEY, visit);
-    }
-  } catch {
-    visit = Math.random().toString(36).slice(2);
-  }
-  return `rest-note-identity-${LAYOUT_VERSION}-${visit}`;
-}
-const layoutCookie = layoutCookieName();
+const layoutCookie = `rest-note-identity-${LAYOUT_VERSION}-${visitSession().token}`;
 function readLayout(): IdentityLayout | undefined {
   try {
     const value = document.cookie.split('; ').find((part) => part.startsWith(`${layoutCookie}=`))?.split('=').slice(1).join('=');
@@ -103,6 +82,7 @@ export function initIdentity(): void {
   if (!found || found.dataset.bound) return;
   const root: HTMLElement = found;
   disposeIdentity();
+  const generation = (identityGeneration += 1);
   const zh = root.dataset.lang === "zh";
   const canvas = root.querySelector<HTMLCanvasElement>("canvas")!;
   const ctx = canvas.getContext("2d");
@@ -581,6 +561,8 @@ export function initIdentity(): void {
   };
   loadScore();
   disposeCurrent = () => {
+    // 已经被新实例顶掉的旧生命周期不许再动手（换页 / 重复 init 时的保险）
+    if (generation !== identityGeneration) return;
     disposed = true;
     // 交棒：先把接下来这一小段排进音频时钟，再停下来（不掐音），
     // 于是换页过程中声音是连续的；下一个页面从交棒位置接着往下排。
@@ -605,6 +587,7 @@ export function initIdentity(): void {
     setActiveCurrent = undefined;
   };
   setActiveCurrent = (active) => {
+    if (generation !== identityGeneration) return;
     sceneActive = active;
     if (active && wantsPlayback) void start();
     if (!active) pause();
