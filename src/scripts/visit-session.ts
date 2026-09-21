@@ -5,6 +5,8 @@ import {
   visitBoundary,
   type NavigationKind,
 } from '@/lib/visit';
+import { NOCTURNE_TIMELINE, resetAudioTimelines } from '@/lib/live-timeline';
+import { TRACKS } from '@/lib/music';
 
 /**
  * 访问会话（visit session）—— 浏览器这边的"这一趟访问"状态。
@@ -14,8 +16,10 @@ import {
  *   1. **访问状态**（这里）：这一趟访问的 id + 这一趟点没点过"进入网站"。
  *      存储：sessionStorage `rest-note.visit` / `rest-note.entry-passed`，
  *      外加当前历史条目上的一个章（`history.state.restNoteVisit`，见 lib/visit.ts）。
- *   2. **夜曲时间线**（`src/lib/live-timeline.ts`）：`identity:nocturne` 播到第几秒。
- *      换一趟访问**不动它** —— 那是"这首歌听到哪了"，不是"这趟进没进站"。
+ *   2. **音频时间线**（`src/lib/live-timeline.ts`）：背景音乐与 `identity:nocturne`
+ *      播到第几秒。它跟着标签页活：刷新 / 站内换页 / 前进后退都**保留**（那是"这首歌
+ *      听到哪了"）；只有判定为**新的一趟访问**时才归零 —— 新的一趟该从 0 开始放
+ *      （见 createSession() 里的 `resetAudioTimelines()`）。
  *   3. **音频运行时**（`piano.ts` / `identity-audio.ts`）：PianoEngine、AudioContext、
  *      采样缓冲、排程。跟上面两个状态没有任何关系。
  *
@@ -109,9 +113,21 @@ function createSession(): VisitSession {
   const token = isNew || !previous ? newToken() : previous;
 
   write(VISIT_KEY, token);
-  // 新的一趟：只把"这一趟进没进过"清掉。**不碰**夜曲时间线、也不清整个 sessionStorage
-  // —— `identity:nocturne` 的播放进度得留着（见 live-timeline.ts）。
-  if (isNew) forget(ENTRY_KEY);
+  /*
+   * 新的一趟访问：把"这一趟进没进过"和**音频时间线**一起归零。
+   *
+   * 地址栏重新输入网址 / 外链 / 新标签页是一趟新访问 —— 它不该接着上一趟的播放位置
+   * 往下放：MP3 与夜曲都要从 0 开始。这里清的是 `space.position.v1.*` 那组 key，
+   * **不清整个 sessionStorage**（访问 id 刚写进去，入场标记由 forget() 单独负责）。
+   * 同一趟的刷新 / 前进后退 / 站内换页都走不到这里（isNew 为 false），位置照旧保留。
+   */
+  if (isNew) {
+    forget(ENTRY_KEY);
+    resetAudioTimelines([
+      ...TRACKS.map((track) => `track:${track.id}`),
+      NOCTURNE_TIMELINE,
+    ]);
+  }
   stampEntry(token);
   /*
    * 排查读数（和 data-motion / data-nocturne-at 同一个习惯）：这次文档加载被判定成

@@ -1,6 +1,6 @@
 import { parseMidi, type MidiNote, type MidiScore } from '@/lib/identity-midi';
 import { IDENTITY_TRACK_SRC } from '@/lib/identity';
-import { restartPosition, savePosition, savedPosition } from '@/lib/live-timeline';
+import { NOCTURNE_TIMELINE, restartPosition, savePosition, savedPosition } from '@/lib/live-timeline';
 import { getGlobal } from './global';
 import { identityPiano, rampIdentityVolume } from './identity-audio';
 import type { PianoEngine } from './piano';
@@ -21,7 +21,8 @@ import type { PianoEngine } from './piano';
  * 紧接着 `releaseIdentityPiano()` 把这架琴也收掉。
  */
 
-const TIMELINE = 'identity:nocturne';
+/** 时间线 id 定义在 lib/live-timeline.ts：换一趟新访问要按它把夜曲进度一起归零 */
+const TIMELINE = NOCTURNE_TIMELINE;
 const FIRST = 21;
 const LAST = 108;
 /** 提前多少秒把音符排进音频时钟（太短会漏音，太长会让暂停按钮迟钝） */
