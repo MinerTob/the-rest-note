@@ -2,6 +2,7 @@ import type { MusicManager } from './music-manager';
 import { requestMotionAccess } from './identity-motion';
 import { audioUnlock } from './audio-unlock';
 import { primeMiniLabPiano } from './minilab';
+import { stopNocturneTransport } from './nocturne-transport';
 import { visitSession } from './visit-session';
 
 function applySystemLanguage(gate: HTMLElement): void {
@@ -57,6 +58,26 @@ export function initEntryGate(music: MusicManager): boolean {
   const enter = () => {
     if (visit.hasEntered()) return;
     visit.markEntered();
+
+    /*
+     * 进来之前先把夜曲的播放意图收掉。
+     *
+     * 在 About / 关于区那一页"地址栏重新输入网址"时，文档带着上一个位置加载，
+     * About 场景是 active、transport 的 desired 也是 true；入场页收尾才把页面拉回
+     * Home。如果先解锁音频（下面第 6 步），夜曲会赶在回位之前抢响第一个音。
+     * 这里只是清掉那点播放意图（player 自己的 stop()：desired 归零 + suspend），
+     * 不改调度、不改 AudioContext。
+     */
+    stopNocturneTransport();
+
+    /*
+     * About 让位还开着的话关掉：否则 Home 的背景音乐仍被 About 状态挡着，
+     * 下面那次 play() 不出声。只有这一页真在关于区（`data-scene="active"`）时才需要，
+     * 别的页面 `inAbout` 本来就是 false，不必动。
+     */
+    if (document.querySelector('[data-journey-section="about"][data-scene="active"]')) {
+      music.setAboutActive(false);
+    }
 
     // 用户点了"进入"：先解除闸门，后面那一下 play() 与解锁才不会被它挡住
     music.setAutoStart(true);
