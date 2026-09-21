@@ -78,13 +78,3 @@ export function visitCookie(token: string, secure: boolean): string {
 export function enteredCookie(secure: boolean): string {
   return `${ENTERED_COOKIE}=1; ${attributes(secure)}`;
 }
-
-/**
- * 真正让浏览器**删掉** `rest_note_entered`（`Max-Age=0`）。
- *
- * 新的一趟外部导航必须走这里，不能只在服务端把 entered 当成 false 用：302 到首页之后，
- * 浏览器下一次请求还会把旧的 `rest_note_entered=1` 带回来，子页又会被直接放行。
- */
-export function clearEnteredCookie(secure: boolean): string {
-  return `${ENTERED_COOKIE}=; ${attributes(secure)}; Max-Age=0`;
-}
