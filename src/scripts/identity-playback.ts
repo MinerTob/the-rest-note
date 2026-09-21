@@ -54,6 +54,9 @@ export function createNocturnePlayback(options: Options) {
     onState?.(next);
   };
 
+  /** 用函数读状态，别让 TS 把 await 前后的判断收窄掉 */
+  const isPlaying = () => state === 'playing';
+
   /** 当前听到的位置（秒） */
   const pos = (): number =>
     state === 'playing' ? Math.max(0, engine.currentTime - origin) : lastPos;
@@ -128,12 +131,12 @@ export function createNocturnePlayback(options: Options) {
 
   const enter = async () => {
     wanted = true;
-    if (state === 'playing' || loading) return;
+    if (isPlaying() || loading) return;
     loading = true;
     try {
       engine.ensure();
       await engine.preload();
-      if (!wanted || state === 'playing') return;
+      if (!wanted || isPlaying()) return;
       if (engine.getState() === 'failed') {
         setState('waiting');
         return;
