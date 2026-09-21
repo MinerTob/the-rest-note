@@ -478,6 +478,18 @@ function playIncomingTransition(): void {
 }
 
 export function initLangSwitch(): void {
+  /*
+   * 新页面已经 boot：把"正在发起语言切换"的锁恢复成当前页面的初始状态。
+   *
+   * `switching` 是模块级变量，而 ClientRouter 是 SPA 导航 —— 模块**不会**重建。
+   * 旧页面那次切换的收尾（`finally { switching = false }`）要等它自己的 `navigate()`
+   * 落定才跑，而新页面可能已经 swap 完、`boot()` 也已经给新的 `[data-lang-switch]`
+   * 绑好了事件。这中间只要旧 handler 还没收尾，锁就还挂在 `true` 上，新页面的语言
+   * 按钮会被上一页遗留的状态挡住（现象：中文 → English 能切，进了英文页 ZH 点不动）。
+   * 所以每次 boot 在这里明确复位一次，再往下绑定新页面的事件。
+   * 防重复点击本身保留：同一次切换过程中（本页面内）它照样生效。
+   */
+  switching = false;
   if (!scrollRestoreReady) {
     scrollRestoreReady = true;
     document.addEventListener('astro:after-swap', restoreScrollAfterSwap);
