@@ -402,7 +402,6 @@ export function initIdentity(): void {
         return;
       }
       // 接手上一页的交棒点（换页不断音）；没有就按 live-timeline 的记忆继续
-      let startLead = AUDIO_START_LEAD;
       if (adopted && handover !== null) {
         // 交棒时那一段（position → scheduledUntil）已经由上一页排好、正在响，
         // 所以这里只排它之后的音：既不重复，也不会把时间轴往前推。
@@ -410,15 +409,27 @@ export function initIdentity(): void {
         offset = handover.position;
         handover = null;
         cursor = notes.findIndex((n) => n.start >= from);
-        startLead = 0;
       } else {
-        offset = savedPosition(TIMELINE, duration());
-        cursor = notes.findIndex((n) => n.end > offset);
+        /*
+         * 从记忆位置接着放：**把起跑余量算进位置里**，而不是去挪时间轴。
+         *
+         * 这两件事必须分清：
+         *   · 起跑余量（AUDIO_START_LEAD）是给"刚醒来的音频线程"留的空档，本来就该跳过；
+         *   · 时间轴映射（origin）必须严格等于 currentTime - offset，不能把余量塞进去 ——
+         *     塞进去就等于"记忆的进度"和"真实听到的位置"错开 0.14 秒，刷新回来会接不上。
+         *
+         * `start >= offset`（而不是 `end > offset`）：跨过接续点、本来还在响的那两三个音
+         * 会被跳过 —— 它们已经从采样中间响过一遍了，再排一次就是在同一瞬间重敲几个没有
+         * 音头的音，听感正是"颤动/卡顿"（本人手机实测）。跳过它们的代价只是这 0.14 秒里
+         * 少两三个音，比糊一坨好得多。
+         */
+        offset = savedPosition(TIMELINE, duration()) + AUDIO_START_LEAD;
+        cursor = notes.findIndex((n) => n.start >= offset);
       }
       root.dataset.loops = String(loop);
       music?.setDucked(true);
       if (cursor < 0) cursor = 0;
-      origin = piano.currentTime + startLead - offset;
+      origin = piano.currentTime - offset;
       playing = true;
       restart.disabled = false;
       progress.disabled = false;
@@ -530,6 +541,19 @@ export function initIdentity(): void {
       else if (sceneActive && wantsPlayback) void start();
     },
     { signal },
+  );
+  /*
+   * 手机端"第一次滑到关于区没声音"的兜底：那一次往往只是音频还没被手势解锁
+   * （上下文还在 suspended / interrupted），于是 start() 只能停在"点击或按键"。
+   * 解锁不一定发生在同一个手势里，所以这里挂一个"只要没在放、且这一区还在屏幕上，
+   * 任何一次点击/触摸都再试一次"的兜底 —— 成了就不再调（playing 为真时 start() 自己早退）。
+   */
+  document.addEventListener(
+    "pointerdown",
+    () => {
+      if (!playing && sceneActive && wantsPlayback && !loading && !disposed) void start();
+    },
+    { capture: true, signal },
   );
   window.addEventListener("pagehide", () => pause(), { signal });
   const resizeObserver = new ResizeObserver(resize);
