@@ -16,11 +16,34 @@ import { logConsoleNote } from './console-note';
 import { MusicManager } from './music-manager';
 import { initEntryGate } from './entry-gate';
 import { trackInputModality } from './input-modality';
-import { SCENE_THRESHOLDS, sceneCoverage, sceneDecision } from '@/lib/scene';
+import { SCENE_ENTER, SCENE_THRESHOLDS, sceneCoverage, sceneDecision } from '@/lib/scene';
+import { stopNocturneTransport } from './nocturne-transport';
+import {
+  isLanguageSwap,
+  peekFamilyScroll,
+  rememberFamilyScroll,
+  restoreScroll,
+  takeFamilyScroll,
+} from './scene-scroll';
 
 let disposeJourney: (() => void) | undefined;
 /** 本次"页面加载"有没有 boot 过。防止同一次加载里 boot 跑两遍（见文件末尾）。 */
 let booted = false;
+/** 换页时"先恢复、boot 里再用一次"的 scrollY（同一份文档里换页时用） */
+let pendingRestore: number | null = null;
+/** 恢复落点时从路由手里拿掉的 `#锚点`，位置放好后再接回地址栏 */
+let pendingHash = '';
+
+/** 关于区这一刻算不算"在观看区域"（与 initJourney 的迟滞判据共用进入阈值） */
+function aboutOnScreen(journey: HTMLElement): boolean {
+  const section = journey.querySelector<HTMLElement>('[data-journey-section="about"]');
+  if (!section) return false;
+  const rect = section.getBoundingClientRect();
+  return (
+    sceneCoverage({ viewportHeight: window.innerHeight, top: rect.top, bottom: rect.bottom }) >=
+    SCENE_ENTER
+  );
+}
 
 function initJourney(root: HTMLElement, music: MusicManager): void {
   disposeJourney?.();
@@ -146,7 +169,21 @@ function boot(): void {
   // "关于"这一族页面（About、自我介绍）都让主题背景音乐让位：
   // 它们放的是同一首夜曲的钢琴演奏，不是 MusicManager 里的 MP3。
   const aboutFamily = Boolean(document.querySelector('[data-identity], [data-nocturne]'));
-  global.music.setAboutActive(aboutFamily && !journey);
+  /*
+   * 换页带过来的落点：这里再对齐一次（关于区把标签搬进 body 之后文档高度会变），
+   * 顺便用它决定"这一页上来就在关于区吗" —— 少了这一步，从自我介绍页返回时
+   * 会先按首页顶部放一下背景音乐、再被观察器纠正（本人听到的"先响一下首页音乐"）。
+   */
+  const restored = pendingRestore ?? takeFamilyScroll(window.location.pathname);
+  pendingRestore = null;
+  if (restored !== null) {
+    restoreScroll(restored);
+    // 布局随后一两帧还会动（关于区把标签搬进 body）：再对齐一次，仍然是 instant
+    requestAnimationFrame(() => {
+      if (Math.abs(window.scrollY - restored) > 4) restoreScroll(restored);
+    });
+  }
+  global.music.setAboutActive(aboutFamily && (!journey || aboutOnScreen(journey)));
   initMusicUI(global.music);
 
   // 4) 交互组件
@@ -167,16 +204,41 @@ function boot(): void {
 }
 
 document.addEventListener('astro:before-swap', (event) => {
+  const leavingFamily = Boolean(document.querySelector('[data-identity], [data-nocturne]'));
+  const carryingNocturne = Boolean(event.newDocument.querySelector('[data-identity], [data-nocturne]'));
   disposeJourney?.();
   disposeIdentity();
   disposeNocturne();
   getGlobal().minilab?.dispose();
   getGlobal().minilab = undefined;
 
-  // 夜曲的跨页交棒：下一张页面仍然是"关于"这一族（About / 自我介绍 / 首页关于区）时，
-  // 这架琴就留着 —— 已经排进音频时钟的音继续响，新页面从交棒位置接着往下排，
-  // 于是"关于 → 关于我"听起来是一口气弹下来的。去别的页面才真的收掉它。
-  if (!event.newDocument.querySelector('[data-identity], [data-nocturne]')) releaseIdentityPiano();
+  /*
+   * 夜曲的跨页：下一张页面还是"关于"这一族（About / 自我介绍 / 首页关于区）时，
+   * 播放器和这架琴都**什么都不做** —— 音频时钟、排程、演奏位置一秒都不停，
+   * 新页面只是 attach 自己的 UI（见 nocturne-transport.ts）。真的去别的页面才收掉。
+   */
+  if (carryingNocturne) {
+    /*
+     * 这次是"回到刚才那一页"吗？看目标页上有没有我们记下的落点。
+     *
+     * 顺序很要紧：**先判断是不是回去，再决定要不要记新的** —— 反过来会把正要用的
+     * 那条覆盖掉（本人那次"先到顶部再滚回关于区"就是这里顺序写反了）。
+     * 是回去：把 `#锚点` 从路由手里拿掉 —— 不拿掉的话路由会 `location.href = to.href`，
+     * 浏览器带着平滑动画滚到锚点，位置由我们精确恢复（`#锚点` 在 after-swap 里接回地址栏）。
+     * 不是回去（进子页）：把精确 scrollY 记下来，回来时第一帧就停在原处。
+     * 切语言那一趟跳过 —— 那件事由 lang.ts 的"地标对齐"负责，别跟它抢。
+     */
+    const returning = event.to ? peekFamilyScroll(event.to.pathname) : null;
+    if (event.to && returning !== null) {
+      pendingHash = event.to.hash;
+      event.to.hash = '';
+    } else if (leavingFamily && !isLanguageSwap(event.to?.pathname ?? '')) {
+      rememberFamilyScroll(window.location.pathname);
+    }
+  } else {
+    stopNocturneTransport();
+    releaseIdentityPiano();
+  }
 
   // 换页的瞬间就把主题写进即将替换上来的那份文档。不然 <html data-theme>
   // 会被新文档的属性覆盖掉，主题在换页时退回默认值。
@@ -191,6 +253,29 @@ document.addEventListener('astro:before-swap', (event) => {
 // 换页真的发生了：放开闸门，让这一页的 boot 跑一次（见 boot() 开头的说明）。
 document.addEventListener('astro:after-swap', () => {
   booted = false;
+  /*
+   * 回到这一页：**第一帧就直接落在离开时那个 scrollY 上**（instant）。
+   * 放在这里是因为 router 换页时的 scrollTo(0, 0) 已经发生、而新页面的第一帧还没拍，
+   * 所以不会出现"先渲染顶部再滚回来"那一下。
+   */
+  const restored = takeFamilyScroll(window.location.pathname);
+  if (restored !== null) {
+    restoreScroll(restored);
+    pendingRestore = restored;
+    if (pendingHash) {
+      // 地址栏把 `#锚点` 接回去（路由那次已经被我们拿掉，不然它会滚一遍）
+      try {
+        history.replaceState(
+          history.state,
+          '',
+          `${window.location.pathname}${window.location.search}${pendingHash}`,
+        );
+      } catch {
+        /* 忽略非法状态 */
+      }
+      pendingHash = '';
+    }
+  }
 });
 
 document.addEventListener('astro:page-load', boot);

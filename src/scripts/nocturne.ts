@@ -1,34 +1,16 @@
-import { parseMidi, type MidiNote, type MidiScore } from '@/lib/identity-midi';
-import { IDENTITY_INTRO_VOLUME, IDENTITY_TRACK_SRC } from '@/lib/identity';
-import { AUDIO } from '@/lib/music';
-import { savedPosition, savePosition } from '@/lib/live-timeline';
-import {
-  HANDOVER_AHEAD,
-  handOverIdentityPiano,
-  identityPiano,
-  rampIdentityVolume,
-  takeIdentityHandover,
-} from './identity-audio';
+import { IDENTITY_INTRO_VOLUME } from '@/lib/identity';
+import { nocturneTransport } from './nocturne-transport';
 
 /**
- * 自我介绍页（/about/intro/）的背景演奏：把 About 页那首夜曲接着放下去。
+ * 自我介绍页（/about/intro/）：夜曲在这里只是**接着放**，不重新起一套播放器。
  *
- * 为什么不交给 MusicManager？因为它放的是 `<audio>` 里的 MP3，
- * 而夜曲是 MIDI + PianoEngine 的采样演奏（与 About 页完全同一条链路）。
+ * 演奏（score / cursor / 音频时钟 / 排程 / 位置）全在 `nocturne-transport.ts` 那一台
+ * 共用的播放器里，ClientRouter 换页时它一秒都不停。这一页只 attach UI：
+ * 把当前秒数、播放状态写到 `[data-nocturne-*]` 上，并在需要时把播放器叫起来。
  *
- * 两边共用 `live-timeline` 的同一个 id（`identity:nocturne`）：
- * 在 About 页听到第 40 秒时点开自我介绍，这里就从第 40 秒接着弹；
- * 从这一页返回 About，演奏也从这里接着走。
- *
- * 页面钩子：`[data-nocturne]`（IntroPage 的根节点）。没有这个钩子就不启动。
+ * 页面钩子：`[data-nocturne]`（IntroPage 的根节点）。没有这个钩子就不接。
  * 这一页的主题背景音乐由 app.ts 的 `setAboutActive(true)` 让位（见 §5.5）。
  */
-const TIMELINE = 'identity:nocturne';
-const FIRST = 21;
-const LAST = 108;
-/** 提前多少秒把音符排进音频时钟（太短会漏音，太长会影响随后切换） */
-const LOOKAHEAD = 0.15;
-const TICK_MS = 25;
 
 let disposeCurrent: (() => void) | undefined;
 
@@ -44,184 +26,39 @@ export function initNocturne(): void {
   disposeNocturne();
   root.dataset.bound = 'true';
 
-  // 与 About 页、首页关于区共用同一架琴：从那边点进来时，声音一秒都不会停
-  const piano = identityPiano();
-  let handover = takeIdentityHandover();
-  const adopted = handover !== null;
   const abort = new AbortController();
   const signal = abort.signal;
-  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
-  let score: MidiScore | undefined;
-  let notes: MidiNote[] = [];
-  let playing = false;
-  let loading = false;
+  const transport = nocturneTransport();
   let disposed = false;
-  let offset = 0;
-  let origin = 0;
-  let cursor = 0;
-  let timer = 0;
-  let lastSave = 0;
-  let cancelVolumeRamp: () => void = () => {};
-
-  const duration = () => (score ? score.duration + 0.8 : 0);
-  const time = () => (playing ? Math.max(0, piano.currentTime - origin) : offset);
-  const setState = (state: 'waiting' | 'playing' | 'paused') => {
-    root.dataset.nocturneState = state;
-  };
-
-  function tick(): void {
-    if (!playing || !score) return;
-    if (time() >= duration()) {
-      // 循环：和 About 页一样，从头再来一次，中间不留缝
-      piano.allNotesOff();
-      origin = piano.currentTime;
-      offset = 0;
-      cursor = 0;
-      lastSave = 0;
-      savePosition(TIMELINE, 0);
-    }
-    const now = time();
-    if (now - lastSave >= 0.5) {
-      savePosition(TIMELINE, now);
-      lastSave = now;
-      // 便于排查"有没有接着上一页放"：把当前秒数写在页面上（与 identity-player 的 data-* 读数同一个习惯）
-      root.dataset.nocturneAt = now.toFixed(1);
-    }
-    schedule(LOOKAHEAD);
-  }
-
-  /**
-   * 只往音频时钟里排；动画帧不负责出声（和 identity-player.ts 同一条规矩）。
-   * 换页交棒时 ahead 会被换成 HANDOVER_AHEAD，先把换页那几百毫秒排满。
+  // 这一页的目标音量（比演奏模式克制），从**当前**音量滑过去 —— 不归零、不重新淡入
+  transport.attachVolume(IDENTITY_INTRO_VOLUME);
+  /*
+   * 订阅快照：当前秒数 / 状态 / 乐谱就绪都写在页面的 data-* 上
+   * （和 identity-player 的 data-* 读数同一个习惯，排查"有没有接着上一页放"就先看它）。
    */
-  function schedule(ahead: number): void {
-    const now = time();
-    while (cursor < notes.length && notes[cursor].start < now + ahead) {
-      const note = notes[cursor++];
-      if (note.end > now)
-        piano.scheduleNote(
-          note.midi,
-          note.velocity,
-          origin + Math.max(note.start, now),
-          origin + note.end,
-          Math.max(0, now - note.start),
-        );
-    }
-  }
+  const unsubscribe = transport.subscribe((snapshot) => {
+    if (disposed) return;
+    root.dataset.nocturneAt = snapshot.position.toFixed(1);
+    root.dataset.nocturneState =
+      snapshot.state === 'playing' ? 'playing' : snapshot.state === 'waiting' ? 'waiting' : 'paused';
+    if (snapshot.ready) root.dataset.nocturneReady = 'true';
+  });
+  // 从 About 那一页走过来时它本来就在响：start() 里已经"想播"就什么都不做
+  transport.start();
 
-  function fadeIn(): void {
-    const target = IDENTITY_INTRO_VOLUME;
-    if (reduced.matches) {
-      piano.setVolume(target);
-      return;
-    }
-    // 从 About 页接手时声音正在响：从**当前**音量滑到这一页的目标音量。
-    // 先归零再淡入那一下，就是"听起来断了一截"的来源。
-    if (adopted) {
-      cancelVolumeRamp = rampIdentityVolume(piano, target, 700);
-      return;
-    }
-    piano.setVolume(0);
-    cancelVolumeRamp = rampIdentityVolume(piano, target, AUDIO.fadeInMs);
-  }
-
-  /** keepRinging = true 时不掐音：留给下一个"关于"页面接着响（无缝换页用） */
-  function pause(keepRinging = false): void {
-    if (!playing) return;
-    savePosition(TIMELINE, time());
-    playing = false;
-    setState('paused');
-    window.clearInterval(timer);
-    timer = 0;
-    if (!keepRinging) piano.allNotesOff();
-  }
-
-  async function start(): Promise<void> {
-    if (playing || loading || disposed || !score) return;
-    loading = true;
-    piano.ensure();
-    try {
-      await piano.preload();
-      if (disposed || playing) return;
-      // 采样还没好、或浏览器还不让出声（缺一次用户手势）：安静地等，不报错。
-      if (piano.getState() !== 'ready' || !piano.isRunning) {
-        setState('waiting');
-        return;
-      }
-      if (adopted && handover !== null) {
-        // 接手上一页：位置照交棒时刻算，音只排"还没排过"的那一段
-        const from = handover.from;
-        offset = handover.position;
-        handover = null;
-        cursor = Math.max(0, notes.findIndex((note) => note.start >= from));
-      } else {
-        offset = savedPosition(TIMELINE, duration());
-        cursor = Math.max(0, notes.findIndex((note) => note.end > offset));
-      }
-      origin = piano.currentTime - offset;
-      playing = true;
-      setState('playing');
-      lastSave = offset;
-      root.dataset.nocturneAt = offset.toFixed(1);
-      fadeIn();
-      timer = window.setInterval(tick, TICK_MS);
-    } finally {
-      loading = false;
-    }
-  }
-
-  const activate = () => void start();
+  // 这一页没有播放控件：滑动/点击/按键就是"要它继续响"的意思
+  const activate = () => {
+    if (!transport.isPlaying()) transport.start();
+  };
   document.addEventListener('pointerdown', activate, { signal });
   document.addEventListener('keydown', activate, { signal });
-  // 采样/音节还在路上时别干等着下一次点击：一就绪就自己接上
-  piano.addEventListener('piano:state', () => {
-    if (piano.getState() === 'ready' && piano.isRunning) void start();
-  }, { signal });
-  /*
-   * 上下文**晚一点**才醒的时候也要接上。上面那个监听只在"状态变成 ready"时响，
-   * 而 `start()` 里 `ensure()` 触发的 `resume()` 是异步的：那一刻 `isRunning` 还是 false，
-   * 于是这次 `start()` 直接进了 waiting；等上下文真的跑起来时，`piano:state` 不会再响
-   * （状态没变），这一页就一直停在那儿等用户再点一下 —— 本人说的"进来之后不出声、
-   * 得再碰一下"里就有这一条。About 那一族的播放器监听的是 `piano:context`，这边也要有。
-   */
-  piano.addEventListener('piano:context', () => {
-    if (piano.isRunning && !playing && !loading && !disposed) void start();
-  }, { signal });
-  document.addEventListener('visibilitychange', () => {
-    // 与 About 页一致：切走时停手，切回来接着弹（位置存在同一条时间线上）
-    if (document.hidden) pause();
-    else void start();
-  }, { signal });
-  window.addEventListener('pagehide', () => pause(), { signal });
-
-  void fetch(IDENTITY_TRACK_SRC, { signal })
-    .then((response) => {
-      if (!response.ok) throw new Error('Missing score');
-      return response.arrayBuffer();
-    })
-    .then((data) => {
-      if (disposed) return;
-      score = parseMidi(new Uint8Array(data));
-      notes = score.notes.filter((note) => note.midi >= FIRST && note.midi <= LAST);
-      root.dataset.nocturneReady = 'true';
-      void start();
-    })
-    .catch(() => {
-      /* 谱子读不到就安静地不播：这是读长文的页面，不该为此弹错误 */
-    });
 
   disposeCurrent = () => {
     disposed = true;
-    // 交棒：先排好接下来这一小段再停（不掐音），声音在换页期间不断
-    if (playing) {
-      const at = time();
-      schedule(HANDOVER_AHEAD);
-      pause(true);
-      handOverIdentityPiano(at, at + HANDOVER_AHEAD);
-    }
+    // 只拆 UI：演奏交给那台共用的播放器，换页期间一秒都不断
+    unsubscribe();
     abort.abort();
-    cancelVolumeRamp();
-    // 不 dispose 钢琴：这架琴是三个"关于"页面共用的（见 identity-audio.ts）
+    // 不 dispose 钢琴、也不停播放器：离开这一族时 app.ts 会收（见 nocturne-transport.ts）
     delete root.dataset.bound;
   };
 }

@@ -15,6 +15,12 @@
 - 样式只用 `src/styles/tokens.css` 的语义变量，组件里不写死颜色。
 - 改完跑：`npm test`、`npm run check`；有 UI 改动再 `npm run build`。
 
+## 交付约定（本人明确要求）
+
+- **修完之后默认直接提交并推送到 `origin`（`main`）**，不用再问："以后都推"。
+  提交信息按仓库习惯写：一句中文说明 + 正文写清根因 / 修法 / 实测（见 `git log` 里的例子）。
+- 推送前保证 `npm test` / `npm run check` / `npm run build` 都过；推完在回复里给出提交号。
+
 ## 代码检索
 
 仓库有 CodeGraph 索引（`.codegraph/`）。找代码优先用它：

@@ -3,7 +3,7 @@ import type { MiniLabController } from './minilab';
 import type { ThemeManager } from './theme';
 import type { MidiBridge } from './midi';
 import type { PianoEngine } from './piano';
-import type { IdentityHandover } from './identity-audio';
+import type { NocturneTransport } from './nocturne-transport';
 import type { EasterEggManager } from './easter-eggs';
 import type { AppStore } from './app-state';
 
@@ -19,8 +19,8 @@ export type SpaceGlobal = {
   piano?: PianoEngine;
   /** "关于"这一族共用的钢琴引擎：About / 自我介绍 / 首页关于区跨页不断音（见 identity-audio.ts） */
   identityPiano?: PianoEngine;
-  /** 上一次交棒：演奏位置、已经排到的位置、什么时候交的（见 identity-audio.ts） */
-  identityHandover?: IdentityHandover;
+  /** 夜曲播放器（About / 自我介绍 / 首页关于区共用，跨页不重建）见 nocturne-transport.ts */
+  nocturne?: NocturneTransport;
   /** 运动与方向权限已经批过（入场页那次点击里申请的），见 identity-motion.ts */
   motionAccess?: boolean;
   eggs?: EasterEggManager;
