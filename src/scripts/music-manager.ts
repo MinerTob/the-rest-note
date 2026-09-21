@@ -76,6 +76,12 @@ export class MusicManager extends EventTarget {
   private fallbackBound = false;
   private fellBack = false;
   /**
+   * 本次文档里这首歌**已经响过一次**没有。
+   * 第一次起播不要把音量从 0 淡上来：那 2.4 秒会把曲子开头吃掉
+   * （timeline 在走、声音几乎是 0 —— 听着就像"第一拍没播出来"）。
+   */
+  private audibleOnce = false;
+  /**
    * 每首曲子只建一个 <audio> 并留着。
    * 切回已经放过的曲子时文件已经缓冲好，不用重新下载、也不会卡在等
    * canplay 上 —— 这是"切回去没声音"最常见的原因。
@@ -101,6 +107,21 @@ export class MusicManager extends EventTarget {
     const wanted = trackForTheme(store.get().theme);
     this.trackId = getTrack(wanted) ? wanted : DEFAULT_TRACK_ID;
     this.syncState();
+
+    /*
+     * 自己管自己的恢复，不靠任何 UI：切回这个标签页 / 从 bfcache 回来时，
+     * 只要"应该响而没响"就再试一次（浏览器拦下的那次会走下面的手势兜底）。
+     */
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) this.retryIfIdle();
+    });
+    window.addEventListener("pageshow", () => this.retryIfIdle());
+  }
+
+  /** 应该响却没响时再试一次（不改变用户的暂停意图，也不碰 About 的让位） */
+  private retryIfIdle(): void {
+    if (this.userPaused || this.inAbout || this.isPlaying()) return;
+    void this.attemptStart();
   }
 
   /** 把「真实在放的那首」写回统一状态，播放器显示的就是这个值 */
@@ -239,13 +260,19 @@ export class MusicManager extends EventTarget {
       "pointerdown",
       "keydown",
       "touchstart",
+      /* 滚动本身也可能带着手势（手机上滚动就是 touch / pointer），
+         多点几种输入，用户动一下就能接上，不用非得点到播放器那一块 */
+      "touchmove",
+      "wheel",
+      "scroll",
+      "pointerup",
     ];
     const onFirstGesture = () => {
       events.forEach((name) =>
         window.removeEventListener(name, onFirstGesture),
       );
       this.fallbackBound = false;
-      if (!this.userPaused) void this.attemptStart();
+      if (!this.userPaused && !this.inAbout) void this.attemptStart();
     };
     events.forEach((name) =>
       window.addEventListener(name, onFirstGesture, {
@@ -266,7 +293,7 @@ export class MusicManager extends EventTarget {
         return;
       }
       this.setState("active");
-      this.applyVolume(true);
+      this.applyVolumeForStart();
     } catch {
       this.setState("ready");
       this.bindAutoplayFallback();
@@ -285,6 +312,13 @@ export class MusicManager extends EventTarget {
     el.src = track.src;
     el.addEventListener("loadedmetadata", () => {
       if (this.el === el && !this.inAbout) this.syncLive(el, track.id);
+    });
+    /*
+     * 文件就绪而音乐还没响（刷新后常遇到：play() 那一枪打在"还没加载好"上，
+     * 或者被自动播放策略挡了）—— 自己再试一次，不用等用户滚到某个位置或点某个 UI。
+     */
+    el.addEventListener("canplay", () => {
+      if (this.el === el && el.paused) this.retryIfIdle();
     });
 
     el.addEventListener("error", () => {
@@ -348,7 +382,7 @@ export class MusicManager extends EventTarget {
         return;
       }
       this.setState("active");
-      this.applyVolume(true);
+      this.applyVolumeForStart();
       // 播放稳定之后，后台把另一套主题的曲子也缓冲好（见 warmOtherTrack）
       this.warmOtherTrack();
     } catch {
@@ -439,6 +473,31 @@ export class MusicManager extends EventTarget {
     }
 
     el.volume = target;
+  }
+
+  /**
+   * 起播时的音量。
+   *
+   * **本次文档的第一次**：直接摆到目标音量 —— 元素刚建出来时 volume 是 0，
+   * 按老写法要从 0 淡入 2.4 秒，曲子开头那一下（第一拍）就一直压在几乎听不见的音量里，
+   * 听起来就是"开头没播出来 / 网络还没加载好 timeline 就先走了"（本人报的 Bug 2）。
+   * 缓存的曲子、已经在元素里的位置都不动，点下去就按目标音量出声。
+   *
+   * 之后（暂停再继续、切回已经放过的曲子）：保持原来那点淡入，避免突然一响。
+   */
+  private applyVolumeForStart(): void {
+    const el = this.el;
+    if (!el) return;
+    const target = this.muted || this.ducked ? 0 : this.volume;
+    this.fadeFrame();
+    if (!this.audibleOnce) {
+      this.audibleOnce = true;
+      el.volume = target;
+      return;
+    }
+    this.fadeFrame = ramp(el.volume, target, AUDIO.fadeInMs, (value) => {
+      el.volume = value;
+    });
   }
 
   /**

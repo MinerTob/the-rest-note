@@ -333,6 +333,11 @@ function initMusicUI(music: MusicManager): void;
 ```
 
 - 事件：`MusicManager` 派发普通 `'change'`；UI（`music-ui.ts`）监听它刷新标题/状态/进度，并支持同页多个面板（`[data-music]` 循环绑定）。
+- **恢复播放只归 MusicManager 管，跟播放器面板在不在视口里没有任何关系**（`music-ui.ts` 只读状态、只转发点击/拖动，不会去启动音乐）：
+  - boot 里 `music.init()` 决定"这一趟该不该响"（用户暂停过 / 在 About 让位期间 → 不响，其余照旧）；
+  - 自动播放被拦下时挂一次性手势兜底，**输入种类放宽到 `pointerdown` / `keydown` / `touchstart` / `touchmove` / `wheel` / `scroll` / `pointerup`**（手机上滚动就是 touch，用户动一下就能接上，不必点到播放器那一块）；
+  - `canplay`（文件已就绪而元素还停着）、`visibilitychange`（切回这个标签页）、`pageshow`（从 bfcache 回来）各自会 `retryIfIdle()` 再试一次 —— 这三条都是"自己叫醒自己"，不需要别的系统伸手。
+- **第一次起播不从 0 淡入**（`applyVolumeForStart()`）：元素刚建出来时 volume 是 0，老写法要淡入 `AUDIO.fadeInMs`（2.4 秒），曲子开头那一下会被压到几乎听不见的音量里（timeline 在走、声音没有 —— 本人报的"第一拍没播出来 / 像还没加载好 timeline 就先走了"）。现在**本次文档的第一次**直接摆到目标音量（缓存的曲子立刻就响），之后（暂停再继续、切回放过的曲子）保持原来的淡入。暂停/继续与进度保存逻辑不变。
 - 音量渐变用 `requestAnimationFrame`（`ramp()`），进度两头都 `clamp01`；`prefers-reduced-motion` 时直接跳到目标音量（不渐变）。
 - 曲目定义在 `src/lib/music.ts`：`TRACKS`、`DEFAULT_TRACK_ID`、`AUDIO`（音量常量）、`getTrack()`；纯函数 `clamp01()` / `easeOutQuad()` / `volumeAt()`（有单测 `tests/audio.test.mjs`）。
 - 进度记忆在 `src/lib/live-timeline.ts`：`savedPosition(id, duration)` / `savePosition(id, position)` / `restartPosition(id)`，存 sessionStorage `space.position.v1.<id>`，只记"真正播放过"的位置。
@@ -807,6 +812,21 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-22 · 主页 MP3：刷新后自己恢复 + 第一次起播不再把开头吃掉
+
+- 需求：本人报两件事 —— ①"在主页某些位置刷新时，背景音乐不会恢复，必须滚到音乐播放器区域才开始"；②"第一次从入场页进主页播放 MP3 时，开头/第一拍没真正播出来，像网络还没加载完 timeline 就先走了"。要求初始化/恢复不依赖播放器 UI、刷新后独立恢复保存的播放状态与进度、第一次播放从正确起点开始且不人为等待，暂停/继续与进度保存不受影响；这轮不碰 Entry Gate / visit 判定 / MIDI / scene-scroll / 关于区迟滞 / 语言系统。
+- 先量后改（无头 Chrome + 真实静态服务器，`Content-Length` / `Range` 都给全；脚本 `.shots/music-probe.mjs`、`.shots/music-refresh-probe.mjs`）：
+  - 进度恢复本身是好的：刷新后 48ms 就把 `el.currentTime` 落到保存的位置（8.03s）并接着放；这条路由是 `syncLive()`（`loadedmetadata` + 起播前各一次），与 UI 无关。
+  - 真正"第一拍没播出来"是**音量**：元素初始 `volume = 0`，`applyVolume(true)` 要从 0 淡入 `AUDIO.fadeInMs = 2400ms`。实测 100ms 时 0.01、800ms 时 0.16、1600ms 才 0.27（目标 0.3）—— 开头那一段几乎是静音，而 timeline 已经在走。
+  - "刷新后不自己恢复"的那部分：MusicManager 只有**外部**叫醒路径（关于区让位的 `play()`、用户点到播放器或任意 pointerdown / keydown / touchstart），自己不会在"文件就绪""切回标签页""从 bfcache 回来"时重试；手势清单里也没有 `wheel` / `scroll` / `touchmove` / `pointerup`。关于区那一带的"位置相关"表现是 §5.16 的让位设计（这轮明确没动）。
+- 改动（只改 `src/scripts/music-manager.ts` + 文档）：
+  1. `applyVolumeForStart()`：本次文档的**第一次**起播直接把音量摆到目标值（缓存的曲子立刻出声，不人为等待）；之后（暂停再继续、切回放过的曲子）保持原来的淡入。暂停/继续、进度保存、交叉淡入淡出都没动。
+  2. 自己管恢复：新增 `retryIfIdle()`（"该响而没响"时重试，尊重用户暂停与关于区让位），挂在 `canplay`、`visibilitychange`、`pageshow` 上；手势兜底的输入种类放宽到 `pointerdown` / `keydown` / `touchstart` / `touchmove` / `wheel` / `scroll` / `pointerup`。
+  3. 明确不动的：`music-ui.ts` 仍然只读状态、只转发点击/拖动（不会去启动音乐）；不新增任何音频实例（每首曲子还是 `elements` 里那一个 `<audio>`）。
+- 文件：`src/scripts/music-manager.ts`、`DEVELOPMENT.md`（§5.5 / 本条）。没碰 Entry Gate / visit-session / MIDI / nocturne transport / scene-scroll / 关于区迟滞 / 语言系统。
+- 钩子/数据：无新增 data-* / storage key / 事件。
+- 验证：`npm test` 103/103；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。实测：全新访问点"进入"之后第一个采样点 `state=active vol=0.30`（改前同一时刻 0.01），位置从 0 正常推进；刷新后 48ms `currentTime` 落到保存位置并继续播放；暂停/继续与进度保存行为未变。
 
 ### 2026-09-22 · 关于 ⇄ 自我介绍 真正无缝（一台常驻播放器）+ 返回时第一帧就回到原 scrollY
 
