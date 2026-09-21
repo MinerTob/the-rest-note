@@ -54,18 +54,69 @@ function initJourney(root: HTMLElement, music: MusicManager): void {
   const about = root.querySelector<HTMLElement>('[data-journey-section="about"]');
   let aboutActive = false;
 
-  const sectionObserver = new IntersectionObserver((entries) => {
-    const visible = entries
-      .filter((entry) => entry.isIntersecting)
-      .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-    const id = (visible?.target as HTMLElement | undefined)?.dataset.journeySection;
-    if (!id) return;
+  /*
+   * 顶栏那条蓝色下划线（nav active）判定。
+   *
+   * 以前用的是 IntersectionObserver 回调里那一次传进来的 `entries`：它**只包含这一帧
+   * 跨越阈值的元素**，不是"当前视口最接近哪个区块"。于是点导航平滑滚动时蓝杠可能还停在
+   * Home、手动滚动会滞后、两个区块交界时看起来像跳错。
+   *
+   * 现在改成每次滚动都对着一条固定的**视口观察线**算一遍（不碰区块的 intersectionRatio）：
+   *   · 观察线取 sticky header 底部以下 —— headerBottom + 剩余高度 * 0.35；
+   *   · 观察线落在哪个区块的 rect.top ~ rect.bottom 内，哪个就是 active；
+   *   · 万一暂时不在任何区块内，取"区块中心离观察线最近"的那个。
+   *
+   * 监听 scroll / resize，用 requestAnimationFrame 节流；初始化时立刻算一次。
+   * 点击导航不手工指定蓝杠：平滑滚动过程中滚动事件一直在跑，蓝杠会随着视口经过
+   * Home → Blog → Lab → About 自己移动。dispose 时必须解绑并取消挂起的那一帧。
+   *
+   * 注意：这**只管导航蓝杠**。About 的激活（aboutObserver / sceneCoverage / 音乐让位）
+   * 完全是另一套东西，见下面那段，一行都没动。
+   */
+  const header = document.querySelector<HTMLElement>('.site-header');
+  let activeSectionId = '';
+  let rafId = 0;
+
+  const updateActiveSection = (): void => {
+    rafId = 0;
+    if (!sections.length) return;
+
+    const headerBottom = header?.getBoundingClientRect().bottom ?? 0;
+    const viewportHeight = window.innerHeight;
+    const line = headerBottom + (viewportHeight - headerBottom) * 0.35;
+
+    let active = '';
+    // 先用观察线严格命中；没有命中再退到"中心离观察线最近"
+    let fallback = '';
+    let fallbackDistance = Number.POSITIVE_INFINITY;
+    for (const section of sections) {
+      const rect = section.getBoundingClientRect();
+      if (rect.top <= line && line <= rect.bottom) {
+        active = section.dataset.journeySection ?? '';
+        break;
+      }
+      const distance = Math.abs((rect.top + rect.bottom) / 2 - line);
+      if (distance < fallbackDistance) {
+        fallbackDistance = distance;
+        fallback = section.dataset.journeySection ?? '';
+      }
+    }
+    const id = active || fallback;
+    if (!id || id === activeSectionId) return;
+    activeSectionId = id;
     links.forEach((link) => {
       if (link.dataset.sectionTarget === id) link.setAttribute('aria-current', 'page');
       else link.removeAttribute('aria-current');
     });
-  }, { rootMargin: '-34% 0px -52% 0px', threshold: [0, 0.01, 0.25, 0.5] });
-  sections.forEach((section) => sectionObserver.observe(section));
+  };
+
+  const scheduleActiveSection = (): void => {
+    if (rafId) return;
+    rafId = requestAnimationFrame(updateActiveSection);
+  };
+  window.addEventListener('scroll', scheduleActiveSection, { passive: true });
+  window.addEventListener('resize', scheduleActiveSection);
+  updateActiveSection();
 
   /*
    * 顶栏跳区块（Home / Blog / Lab / About）。
@@ -149,7 +200,10 @@ function initJourney(root: HTMLElement, music: MusicManager): void {
   if (about && aboutObserver) aboutObserver.observe(about);
 
   disposeJourney = () => {
-    sectionObserver.disconnect();
+    window.removeEventListener('scroll', scheduleActiveSection);
+    window.removeEventListener('resize', scheduleActiveSection);
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
     aboutObserver?.disconnect();
     /*
      * 无条件收掉这一页的播放器。以前写成 `if (aboutActive) disposeIdentity()`：

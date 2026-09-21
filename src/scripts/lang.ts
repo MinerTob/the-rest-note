@@ -485,12 +485,16 @@ export function initLangSwitch(): void {
   }
   playIncomingTransition();
   const pageLang = getDocumentLang();
-  const preferred = getPreferredLang();
-
-  // 进来时：如果之前选过别的语言，界面文案跟随偏好（内容语言仍然由 URL 决定）
-  if (preferred && preferred !== pageLang) {
-    swapChrome(preferred);
-  }
+  /*
+   * 当前 URL / document 的语言就是这一页语言的唯一真相：
+   * 每次 boot 都把界面文案明确对齐到它（首屏、ClientRouter 换页、历史前进后退、刷新
+   * 之后都各对齐一次）。**不再**用 localStorage 里的偏好去覆盖它 —— 那会让
+   * "/en/... 页面 + 中文导航"这种错位出现：URL 是英文，存储里还留着 zh，
+   * 导航就被改回中文，而 Header 的语言当前态是 Astro 按 URL 渲染的，两边打架。
+   * 偏好（getPreferredLang）仍然只表示"用户以后选择了什么"，给脚本里的动态文字用
+   * （见 music-ui / theme-switch / easter-eggs），不参与页面语言判定、也不触发跳转。
+   */
+  swapChrome(pageLang);
 
   document.querySelectorAll<HTMLAnchorElement>('[data-lang-switch]').forEach((link) => {
     if (link.dataset.ready === '1') return;

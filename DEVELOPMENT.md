@@ -142,7 +142,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 系统提示 LCD | `src/components/SystemMessage.astro`、`src/scripts/system-message.ts` | `initSystemMessages()` | `[data-system-message]`、window 事件 `space:message` |
 | 入场页 | `src/components/EntryGate.astro`、`src/scripts/entry-gate.ts` | `initEntryGate()` | `[data-entry-gate]`、`[data-entry-button]`、`[data-entry-copy]` |
 | **访问会话 / 入场边界** | `src/scripts/visit-session.ts`、`src/lib/visit.ts`、`src/scripts/entry-gate.ts`、`identity-player.ts` | `visitSession()`（`token` / `isNew` / `hasEntered()` / `markEntered()`）、`visitBoundary()`、`navigationKind()`、`readEntryToken()` / `stampEntryToken()` | sessionStorage `rest-note.visit`、`rest-note.entry-passed`、`history.state.restNoteVisit`、`html[data-visit]` |
-| 首页 Journey 长页 | `src/views/JourneyPage.astro`、`src/scripts/app.ts` 里的 `initJourney()`、`src/lib/scene.ts` | `initJourney()`、`sceneCoverage()`、`sceneDecision()` | `[data-journey]`、`[data-journey-section]`、`[data-journey-section="about"][data-scene]` |
+| 首页 Journey 长页 | `src/views/JourneyPage.astro`、`src/scripts/app.ts` 里的 `initJourney()`、`src/lib/scene.ts` | `initJourney()`、`updateActiveSection()`（导航蓝杠：视口观察线）、`sceneCoverage()`、`sceneDecision()` | `[data-journey]`、`[data-journey-section]`、`[data-journey-section="about"][data-scene]` |
 | 博客列表 / 标签 | `src/views/BlogIndexPage.astro`、`src/lib/content.ts` | `getPosts()`、`collectTags()` | — |
 | 文章页 | `src/views/PostPage.astro`、`src/lib/pages.ts` | `buildPostProps()`、`postStaticPaths()`、`tagStaticPaths()` | — |
 | Lab 页 | `src/views/LabPage.astro`、`src/content/lab/*` | `getExperiments()` | — |
@@ -812,6 +812,19 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-22 · Header 两处状态修正：导航蓝杠按视口观察线判定 + 界面语言以 URL/document 为准
+
+- 需求：本人报两个 Header UI 状态问题，并要求只碰这两处、不碰当天已经稳定的 NEW VISIT / 音频 / 滚动恢复架构。①导航蓝杠（Home / Blog / Lab / About）必须始终表示"当前视口最接近、正在观看的区块"，点击平滑滚动 / 滚轮 / 触摸 / 键盘滚动 / 刷新恢复位置都要同步；②中英文 Header 状态偶尔错乱（英文页面配中文导航）。
+- 根因：
+  1. `initJourney()` 的 `sectionObserver` 用 IntersectionObserver 回调里**本次传进来的 `entries`**：它只包含这一帧跨越阈值的元素，`filter(isIntersecting).sort(intersectionRatio)[0]` 拿到的不是"视口最接近的区块"；加上 `rootMargin: -34% / -52%` 那条窄带，点击平滑滚动时蓝杠可能仍停在 Home、手动滚动会滞后、交界处看起来像跳错。
+  2. `lang.ts` 的 `initLangSwitch()` 里有 `if (preferred && preferred !== pageLang) swapChrome(preferred)`：URL 明明是 `/en/...`，而 localStorage `space.lang` 还留着 `zh` 时，导航文案又被改回中文；而 Header 的语言当前态是 Astro 按 URL 渲染的，两边打架。
+- 改动：
+  1. **导航蓝杠（`src/scripts/app.ts`）**：删掉 `sectionObserver`（它只负责 `aria-current`，不留两套 active 判定抢状态）；新增 `updateActiveSection()` —— 取固定视口观察线 `line = headerBottom + (innerHeight - headerBottom) * 0.35`（header 底边以下 35%），观察线落在哪个区块的 `rect.top ~ rect.bottom` 内就是 active，暂时不落在任何区块时取"区块中心离观察线最近"的那个，统一写 `aria-current="page"` / 清其余；`scroll` / `resize` 用 `requestAnimationFrame` 节流，初始化立刻算一次；点击导航**不**手工指定蓝杠，平滑滚动中由滚动事件自然跟随；`disposeJourney()` 解绑两个监听并 `cancelAnimationFrame` 挂起的那一帧。**About 的 `aboutObserver` / `sceneCoverage` / 音乐让位一行未动**。
+  2. **语言真相（`src/scripts/lang.ts`）**：删掉那次偏好覆盖，改成每次 boot `swapChrome(pageLang)` —— 当前 URL / document 语言是唯一真相；`getPreferredLang()` 只保留"用户以后选了什么"的语义（`music-ui` / `theme-switch` / `easter-eggs` 的动态文字仍在用），不参与页面语言判定、不触发跳转。语言切换导航自身（`writeString` + `navigate` + 滑出滑入 + 滚动位置 + `space.lang-swap` 记号）与 Header 的语言 current（Astro 按 URL 渲染的 `span.is-current`）都未改。
+- 文件：`src/scripts/app.ts`、`src/scripts/lang.ts`、`DEVELOPMENT.md`（§3 / §10）。没碰 `Header.astro`（`[aria-current='page']` 那条 CSS 原样用）、Entry Gate / audio-unlock / MusicManager / nocturne / scene-scroll / visit-session / history.state。
+- 钩子/数据：没有新增 / 删除 data-* 钩子或 storage key；`html[data-lang]` 语义由"渲染语言"变成"唯一页面语言真相"（这正是本次的修法）。
+- 验证：`npm run check` 0 错误 0 警告 0 提示；`npm run build` 19 页。按本人要求这轮不跑浏览器 / CDP 测试，实机验证由本人完成。
 
 ### 2026-09-22 · 内容：双语开发日记《为你弹奏肖邦的夜曲》/《A Nocturne for You》
 
