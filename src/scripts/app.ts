@@ -239,6 +239,13 @@ function boot(): void {
       if (Math.abs(window.scrollY - restored) > 4) restoreScroll(restored);
     });
   }
+  /*
+   * 落点对齐好了，可以把第一帧的遮盖摘掉（见 global.css 的 [data-scroll-pending] 与
+   * BaseLayout.astro 里那段 is:inline 脚本）。浏览器是在这一刻之前画第一帧的，
+   * 所以摘掉之后画出来的就已经是正确位置 —— 不会再闪一下 Home 顶部。
+   * 覆盖是 `visibility`（不占位、不改文档高度），摘掉它不动任何滚动位置。
+   */
+  delete document.documentElement.dataset.scrollPending;
   global.music.setAboutActive(aboutFamily && (!journey || aboutOnScreen(journey)));
   initMusicUI(global.music);
 

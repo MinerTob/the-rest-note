@@ -18,6 +18,23 @@ html {
   overflow-x: clip;
 }
 
+/*
+ * 刷新时的"第一帧"遮盖（见 app.ts 的 boot() 与 layouts/BaseLayout.astro 里那段
+ * is:inline 脚本）：浏览器是在我们自己把落点对齐**之前**画第一帧的，所以刷新
+ * Blog / Lab / About 时会先看到 Home 顶部再瞬间跳到正确位置。
+ * 这里在恢复完成前不把页面内容画出来（ambient 背景与 EntryGate 遮罩照常可见，
+ * 文档高度也不变，浏览器的滚动恢复不受影响）；对齐好之后 app.ts 摘掉这个属性。
+ * 默认没有这个属性 → 只影响"第一帧"这一瞬间，站内换页与平时浏览不经过它。
+ */
+html[data-scroll-pending] .skip-link,
+html[data-scroll-pending] .site-header,
+html[data-scroll-pending] main,
+html[data-scroll-pending] .site-footer,
+html[data-scroll-pending] [data-theme-switch],
+html[data-scroll-pending] [data-system-message] {
+  visibility: hidden;
+}
+
 body {
   margin: 0;
   min-height: 100svh;

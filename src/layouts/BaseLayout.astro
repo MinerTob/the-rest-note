@@ -65,6 +65,17 @@ const rss = rssHref ?? (lang === 'zh' ? '/rss.xml' : '/en/rss.xml');
         不用 body 背景图是因为它需要 fixed 定位才能让光晕不随滚动跑掉。 */}
     <div class="ambient" aria-hidden="true" transition:persist="ambient"></div>
 
+    {/*
+      刷新时的"第一帧"遮盖：在**任何内容渲染之前**（这个内联脚本在 body 最前面，
+      比 app.ts 那个 module 脚本早）给 <html> 挂上 data-scroll-pending，
+      于是页面内容一帧都不会以 Home 顶部的样子被画出来。
+      app.ts 在 boot 里把落点对齐好之后（或者确认这一页不需要等）再摘掉它。
+      CSS 在 src/styles/global.css 的 [data-scroll-pending] 那一段。
+    */}
+    <script is:inline>
+      document.documentElement.dataset.scrollPending = '';
+    </script>
+
     <EntryGate />
 
     <a class="skip-link" href="#main"><T k="a11y.skip" lang={lang} /></a>
