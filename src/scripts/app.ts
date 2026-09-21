@@ -34,27 +34,6 @@ let pendingRestore: number | null = null;
 /** 恢复落点时从路由手里拿掉的 `#锚点`，位置放好后再接回地址栏 */
 let pendingHash = '';
 
-/**
- * 硬刷新时浏览器那边记下的 scrollY。
- *
- * Astro 的 ClientRouter 一上来就会 `history.scrollRestoration = "manual"`
- * （见 astro/dist/transitions/router.js），也就是说**刷新后的落点由它自己负责**，
- * 它用的就是历史条目上这个 `scrollY`。问题是它恢复用的是
- * `scrollTo({ left, top })` —— 没有 behavior，于是被 `html { scroll-behavior: smooth }`
- * 接管成一段 200–800ms 的平滑滚动：刷新后先在第 0 帧渲染顶部、再慢慢滑下去，
- * 看起来就是"刷新之后又跳回主页顶部"（实测 600 / 2200 / 2949 三个位置分别
- * 用 397 / 776 / 698ms 才到位）。这里读的是同一个来源，只是用 instant 落位。
- *
- * 只读不写：不动历史条目、不改地址、不碰 hash。
- */
-type RouterScrollState = { scrollY?: unknown; scrollX?: unknown };
-
-function rememberScrollY(): number | null {
-  const state = history.state as RouterScrollState | null;
-  const y = state?.scrollY;
-  return typeof y === 'number' && Number.isFinite(y) ? y : null;
-}
-
 /** 关于区这一刻算不算"在观看区域"（与 initJourney 的迟滞判据共用进入阈值） */
 function aboutOnScreen(journey: HTMLElement): boolean {
   const section = journey.querySelector<HTMLElement>('[data-journey-section="about"]');
@@ -203,23 +182,7 @@ function boot(): void {
     requestAnimationFrame(() => {
       if (Math.abs(window.scrollY - restored) > 4) restoreScroll(restored);
     });
-  } else {
-    /*
-     * 硬刷新（不是站内换页回来的那一趟）：浏览器有可能还没把落点放好，
-     * 而 Router 那次恢复又会带着 html 的平滑动画慢慢滑过去。这里用同一份
-     * `history.state.scrollY` 直接 instant 落位 —— 不替它决定落点，只把
-     * "慢慢滑下去"变成"第一帧就在那儿"。
-     *
-     * `location.hash` 非空时让位：带锚点的刷新（比如 /#about）由浏览器按锚点定位，
-     * 锚点优先，不去抢它。浏览器已经放到位（差值 ≤ 4px）时也什么都不做。
-     */
-    const saved = rememberScrollY();
-    if (saved !== null && saved > 0 && !window.location.hash && Math.abs(window.scrollY - saved) > 4) {
-      restoreScroll(saved);
-    }
   }
-  // 位置定下来之后再判"这一页上来是不是就在关于区"：先归位、后同步音乐状态，
-  // 背景音乐跟着页面的真实落点走，而不是反过来为了音乐去挪页面。
   global.music.setAboutActive(aboutFamily && (!journey || aboutOnScreen(journey)));
   initMusicUI(global.music);
 
