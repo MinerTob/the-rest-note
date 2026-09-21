@@ -936,10 +936,27 @@ a.chip:hover {
   font-size: 0.85rem;
 }
 
+/* 正文里的插图：阅读区内居中、保持原图比例（不裁切），窄屏由正文栏宽度自适应。
+   图片下面紧跟一行斜体就是 caption（Markdown 里 ![alt](src) 换行后接 *说明*）。 */
 .prose img {
+  display: block;
+  margin-inline: auto;
+  max-width: 100%;
+  height: auto;
   border-radius: var(--radius);
   border: 1px solid var(--sheet-line);
   margin-block: 1.8em;
+}
+
+.prose p:has(> img) {
+  text-align: center;
+}
+
+.prose :is(p:has(> img), p:has(> a > img)) + p:has(> em:only-child) {
+  margin-top: -0.9em;
+  text-align: center;
+  font-size: var(--fs-xs);
+  color: var(--reading-ink-2);
 }
 
 .prose table {
