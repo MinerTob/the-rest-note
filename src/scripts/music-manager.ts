@@ -73,6 +73,18 @@ export class MusicManager extends EventTarget {
   private state: MusicState = "idle";
   private fadeFrame: () => void = () => {};
   private userPaused: boolean;
+  /**
+   * 现在允不允许**自动**起播（不包含用户明确的 play()）。
+   *
+   * 入场页还立着、这一趟又没点过"进入"时，必须为 false：一首 4–5MB 的曲子不该在
+   * 用户还没进门时就被建出来、下载、播放。这件事由外面明确告诉它 —— `app.ts` 在
+   * 建这个实例时按"页面上有没有入场页 + 这一趟进没进过"传进来，`entry-gate.ts`
+   * 在用户点"进入"的那次手势里解除。MusicManager **不自己查 DOM**。
+   *
+   * 只管自动启动：`pageshow` / `visibilitychange` / `canplay` / 手势兜底这几条
+   * 恢复路径都要经过它；入场页按钮里那次真实的 `play()` 不走这里。
+   */
+  private autoStart: boolean;
   private fallbackBound = false;
   private fellBack = false;
   /**
@@ -95,12 +107,14 @@ export class MusicManager extends EventTarget {
   /** 后台预热另一套主题曲子的定时器 */
   private warmTimer = 0;
 
-  constructor(store: AppStore) {
+  constructor(store: AppStore, options: { autoStart?: boolean } = {}) {
     super();
     this.store = store;
     this.volume = clamp01(readNumber(KEY.volume, AUDIO.volume));
     this.muted = readBool(KEY.muted, false);
     this.userPaused = readBool(KEY.paused, false);
+    // 默认允许自动起播；入场页那趟由 app.ts 明确传 false（见 autoStart 的说明）
+    this.autoStart = options.autoStart ?? true;
 
     // 当前曲目由主题推导（theme profile）：刷新之后曲目一定和主题一致，
     // 不可能出现「主题是 modern，却在放彩蛋曲」这种错位。
@@ -120,8 +134,17 @@ export class MusicManager extends EventTarget {
 
   /** 应该响却没响时再试一次（不改变用户的暂停意图，也不碰 About 的让位） */
   private retryIfIdle(): void {
-    if (this.userPaused || this.inAbout || this.isPlaying()) return;
+    if (this.userPaused || this.inAbout || !this.autoStart || this.isPlaying()) return;
     void this.attemptStart();
+  }
+
+  /**
+   * 明确解除 / 恢复"允许自动起播"（由 app.ts 与 entry-gate.ts 调用，见 autoStart）。
+   * 只翻这个状态，不顺手起播：解除它的那一次是入场页里的真实手势，
+   * 入场页自己会在同一个手势里调 `play()`（见 entry-gate.ts）。
+   */
+  setAutoStart(allowed: boolean): void {
+    this.autoStart = allowed;
   }
 
   /** 把「真实在放的那首」写回统一状态，播放器显示的就是这个值 */
@@ -243,7 +266,7 @@ export class MusicManager extends EventTarget {
 
   /** 页面加载后调用：能自动播就播，不能就等第一次交互。 */
   init(): void {
-    if (this.inAbout || this.isPlaying()) return;
+    if (this.inAbout || !this.autoStart || this.isPlaying()) return;
     if (this.userPaused) {
       this.setState("paused");
       return;
@@ -272,7 +295,7 @@ export class MusicManager extends EventTarget {
         window.removeEventListener(name, onFirstGesture),
       );
       this.fallbackBound = false;
-      if (!this.userPaused && !this.inAbout) void this.attemptStart();
+      if (!this.userPaused && !this.inAbout && this.autoStart) void this.attemptStart();
     };
     events.forEach((name) =>
       window.addEventListener(name, onFirstGesture, {

@@ -15,6 +15,7 @@ import { initThemeSwitcher } from './theme-switch';
 import { logConsoleNote } from './console-note';
 import { MusicManager } from './music-manager';
 import { initEntryGate } from './entry-gate';
+import { visitSession } from './visit-session';
 import { trackInputModality } from './input-modality';
 import { SCENE_ENTER, SCENE_THRESHOLDS, sceneCoverage, sceneDecision } from '@/lib/scene';
 import { stopNocturneTransport } from './nocturne-transport';
@@ -33,69 +34,6 @@ let booted = false;
 let pendingRestore: number | null = null;
 /** 恢复落点时从路由手里拿掉的 `#锚点`，位置放好后再接回地址栏 */
 let pendingHash = '';
-
-/**
- * 硬加载（刷新 / 重新打开网址）后该停在哪儿。
- *
- * 落点的决定权在 ClientRouter 手里：它每次硬加载都会把**浏览器此刻的滚动位置**
- * 写进历史条目（`history.replaceState({ index, scrollX, scrollY })`，之后每次
- * 滚动结束由 `scrollend` / popstate 更新），并以这个值恢复
- * （见 astro/dist/transitions/router.js：`if (history.state) scrollTo({ left, top })`）。
- * 它那次调用**没带 behavior**，于是被 `html { scroll-behavior: smooth }` 接管 ——
- * 这正是"刷新之后先看到开始页顶部、再滑回去"的来源。这里不去替它决定落点，
- * 只把它的决定换成瞬间完成。只读：不写历史条目、不改地址、不碰 hash。
- */
-function routerSavedScrollY(): number {
-  const state = history.state as { scrollY?: unknown } | null;
-  const y = state?.scrollY;
-  return typeof y === 'number' && Number.isFinite(y) && y > 0 ? y : 0;
-}
-
-/**
- * 顶栏点的那个 `#区块` 现在在文档里的位置。
- *
- * 只给"点导航栏跳过去、紧接着刷新"这一种情况兜底：那一下是同文档的锚点跳转，
- * 历史条目上那个 `scrollY` 要等滚动结束（`scrollend`）才被路由更新；还没更新就刷新，
- * 读到的还是上一次的位置（常常是 0）—— 于是刷新直接回开始页。
- * `#锚点` 是地址栏里一直带着的（跳转后 `location.replaceState` 保留 hash），
- * 按它测量比历史条目可靠。量不到（元素不在这一页 / HTML 还没解析）就返回 0，不猜。
- */
-function hashTargetY(): number {
-  const id = window.location.hash.slice(1);
-  if (!id || document.readyState === 'loading') return 0;
-  let anchor: Element | null = null;
-  try {
-    anchor = document.getElementById(id) ?? document.querySelector(`[name="${CSS.escape(id)}"]`);
-  } catch {
-    return 0;
-  }
-  if (!anchor) return 0;
-  const y = Math.round(anchor.getBoundingClientRect().top + window.scrollY);
-  return y > 0 ? y : 0;
-}
-
-/** 刷新后该停在哪儿：优先路由记下的位置，它还没更新到锚点时用锚点兜底 */
-function restoreTarget(): number {
-  const saved = routerSavedScrollY();
-  return saved > 0 ? saved : hashTargetY();
-}
-
-/** 落到刷新前的那个位置（instant：html 上有 scroll-behavior: smooth，不能让第一帧滑过去） */
-function applyRestoreTarget(): void {
-  const target = restoreTarget();
-  if (target > 0 && Math.abs(window.scrollY - target) > 4) restoreScroll(target);
-}
-
-/*
- * 硬加载：**在模块执行的这一刻就把落点定下来**（此时比 ClientRouter 的 `load`
- * 监听更早，也在第一帧绘制之前），所以刷新后的第一帧就直接在原位置，
- * 不会先闪一下开始页顶部再跳回来。`boot()` 里还会再对齐一次：那时关于区
- * 把标签搬进 body、文档高度变了，需要按落好之后的几何再坐实一遍（都是 instant）。
- *
- * 站内换页（ClientRouter 不换文档）不经过这里 —— 那条路由 `after-swap` /
- * `pendingRestore` 精确恢复，与"关于 ⇄ 自我介绍"的返回逻辑无关。
- */
-applyRestoreTarget();
 
 /** 关于区这一刻算不算"在观看区域"（与 initJourney 的迟滞判据共用进入阈值） */
 function aboutOnScreen(journey: HTMLElement): boolean {
@@ -127,6 +65,42 @@ function initJourney(root: HTMLElement, music: MusicManager): void {
     });
   }, { rootMargin: '-34% 0px -52% 0px', threshold: [0, 0.01, 0.25, 0.5] });
   sections.forEach((section) => sectionObserver.observe(section));
+
+  /*
+   * 点击导航栏跳区块（Home / Blog / Lab / About）之后，把"落在哪儿"写进当前历史条目。
+   *
+   * 顶栏那几项在长页上就是 `#home` / `#blog` / `#lab` / `#about`（见 Header.astro 的
+   * `navHref()`），所以跳完地址栏里一直带着区块锚点；缺的是历史条目上那个 `scrollY` ——
+   * ClientRouter 只在滚动结束（`scrollend`，老浏览器是 50ms 轮询兜底）时才更新它，
+   * 没更新到就刷新，路由按旧值恢复，于是回到开始页顶部。
+   * 这里在同一个时机把**真实落点**写回去（`replaceState` 必须带着 `history.state` 走，
+   * 上面有这一趟访问的章）。不自己算坐标、不加 scrollTo、不动平滑滚动 —— 只让
+   * "导航完成 = 历史条目记着这个区块"这件事成立，刷新交给浏览器与路由照常恢复。
+   */
+  if (!root.dataset.sectionScrollSynced) {
+    root.dataset.sectionScrollSynced = '1';
+    /*
+     * 用 `scrollend`：对区块锚点的平滑滚动，它在滚动结束时触发；ClientRouter
+     * 自己（`router.js` 的 `onScrollEnd`）也是用这个事件 + 老浏览器 50ms 轮询兜底，
+     * 我们跟着它走，不另起一套。`replaceState` 必须带着 `history.state` 走 ——
+     * 那上面有这一趟访问的章（见 visit-session.ts）。
+     */
+    window.addEventListener(
+      'scrollend',
+      () => {
+        if (!window.location.hash || !history.state) return;
+        const at = Math.round(window.scrollY);
+        const state = history.state as { scrollX?: unknown; scrollY?: unknown };
+        if (state.scrollY === at) return;
+        try {
+          history.replaceState({ ...state, scrollX: 0, scrollY: at }, '');
+        } catch {
+          /* 某些沙盒 / file:// 下 replaceState 会抛，忽略 */
+        }
+      },
+      { passive: true },
+    );
+  }
 
   /*
    * "关于"这一条的激活判定：**迟滞**，不是单个阈值。
@@ -226,7 +200,16 @@ function boot(): void {
   logConsoleNote();
 
   // 3) 音乐系统常驻。当前曲目由主题推导，刷新后也不会和主题错位。
-  global.music ??= new MusicManager(global.store);
+  /*
+   * 入场页还立着、这一趟又没点过"进入"时，只允许**用户自己的手势**放音乐
+   * （入场页按钮里那次 `play()`）：`pageshow` / `canplay` / `visibilitychange`
+   * 那几条自动恢复路径都要被闸门挡住，否则一首 4–5MB 的曲子会在用户还没进门时
+   * 就被建出来开始播。判定在这里做一次，MusicManager 自己不去查 DOM；
+   * 用户点"进入"之后由 `entry-gate.ts` 解除（`setAutoStart(true)`）。
+   */
+  const entryGateUp =
+    Boolean(document.querySelector('[data-entry-gate]')) && !visitSession().hasEntered();
+  global.music ??= new MusicManager(global.store, { autoStart: !entryGateUp });
   theme.attachMusic(global.music);
   const journey = document.querySelector<HTMLElement>('[data-journey]');
   // "关于"这一族页面（About、自我介绍）都让主题背景音乐让位：
@@ -245,19 +228,6 @@ function boot(): void {
     requestAnimationFrame(() => {
       if (Math.abs(window.scrollY - restored) > 4) restoreScroll(restored);
     });
-  } else {
-    /*
-     * 硬加载（刷新 / 重新打开网址）这一趟。模块执行时已经坐实过一次落点
-     * （见文件上方那次 applyRestoreTarget()），这里再对齐一次：一是布局到这一步
-     * 才定下来（关于区把标签搬进 body、文档高度会变），二是"点导航栏跳过去之后
-     * 紧接着刷新"时历史条目上的 `scrollY` 可能还没被路由更新到锚点位置，
-     * `restoreTarget()` 会用地址栏那个 `#锚点` 兜底 —— 没有这一步就会刷新回开始页。
-     *
-     * 最后那一帧也是 instant：路由自己那次恢复没带 behavior，会被
-     * `html { scroll-behavior: smooth }` 变成动画，必须由我们把它按住。
-     */
-    applyRestoreTarget();
-    requestAnimationFrame(() => applyRestoreTarget());
   }
   global.music.setAboutActive(aboutFamily && (!journey || aboutOnScreen(journey)));
   initMusicUI(global.music);

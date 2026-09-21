@@ -58,6 +58,13 @@ export function initEntryGate(music: MusicManager): boolean {
     if (visit.hasEntered()) return;
     visit.markEntered();
 
+    /*
+     * 用户自己点了"进入"：这里是解除音乐闸门的地方 —— 先放开（`setAutoStart(true)`），
+     * 再在同一个可信手势里真正开播。顺序不能反：闸门关着时 `play()` 之外的自动恢复
+     * 全被挡住，先放开才能让"之前被挡下的那几条恢复路径"接上这次手势。
+     */
+    music.setAutoStart(true);
+
     // This call must stay directly inside the trusted click handler: it is what
     // unlocks audible playback under browser autoplay policies.
     void music.play();
