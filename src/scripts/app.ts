@@ -67,40 +67,50 @@ function initJourney(root: HTMLElement, music: MusicManager): void {
   sections.forEach((section) => sectionObserver.observe(section));
 
   /*
-   * 点击导航栏跳区块（Home / Blog / Lab / About）之后，把"落在哪儿"写进当前历史条目。
+   * 顶栏跳区块（Home / Blog / Lab / About）。
    *
-   * 顶栏那几项在长页上就是 `#home` / `#blog` / `#lab` / `#about`（见 Header.astro 的
-   * `navHref()`），所以跳完地址栏里一直带着区块锚点；缺的是历史条目上那个 `scrollY` ——
-   * ClientRouter 只在滚动结束（`scrollend`，老浏览器是 50ms 轮询兜底）时才更新它，
-   * 没更新到就刷新，路由按旧值恢复，于是回到开始页顶部。
-   * 这里在同一个时机把**真实落点**写回去（`replaceState` 必须带着 `history.state` 走，
-   * 上面有这一趟访问的章）。不自己算坐标、不加 scrollTo、不动平滑滚动 —— 只让
-   * "导航完成 = 历史条目记着这个区块"这件事成立，刷新交给浏览器与路由照常恢复。
+   * 全局的 `scroll-behavior: smooth` 已经去掉（刷新必须是瞬间定位，见 global.css），
+   * 所以"只有用户点导航才平滑"这件事改由这里显式给：`preventDefault()` 拦掉浏览器/
+   * 路由的默认跳转，自己把地址栏的 `#区块` 写上、再 `scrollIntoView({ behavior: 'smooth' })`。
+   * 平滑结束后**只为这一次导航**监听一次 `scrollend`，下一帧把最终落点写进历史条目
+   * （`...history.state` 带着这一趟访问的章与 Astro 的 index），这样它覆盖掉 Astro 写的
+   * 旧 scrollY —— 刷新后路由按这个值恢复，就留在刚才跳到的区块，不会回 Home。
    */
-  if (!root.dataset.sectionScrollSynced) {
-    root.dataset.sectionScrollSynced = '1';
-    /*
-     * 用 `scrollend`：对区块锚点的平滑滚动，它在滚动结束时触发；ClientRouter
-     * 自己（`router.js` 的 `onScrollEnd`）也是用这个事件 + 老浏览器 50ms 轮询兜底，
-     * 我们跟着它走，不另起一套。`replaceState` 必须带着 `history.state` 走 ——
-     * 那上面有这一趟访问的章（见 visit-session.ts）。
-     */
-    window.addEventListener(
-      'scrollend',
-      () => {
-        if (!window.location.hash || !history.state) return;
-        const at = Math.round(window.scrollY);
-        const state = history.state as { scrollX?: unknown; scrollY?: unknown };
-        if (state.scrollY === at) return;
-        try {
-          history.replaceState({ ...state, scrollX: 0, scrollY: at }, '');
-        } catch {
-          /* 某些沙盒 / file:// 下 replaceState 会抛，忽略 */
-        }
-      },
-      { passive: true },
-    );
-  }
+  let pendingJump: string | null = null;
+
+  const settleJump = (): void => {
+    if (!pendingJump || window.location.hash !== pendingJump) return;
+    pendingJump = null;
+    // 让"最后一帧的落点"先定下来，再记
+    requestAnimationFrame(() => {
+      const state = history.state as Record<string, unknown> | null;
+      if (!state) return;
+      window.history.replaceState(
+        {
+          ...state,
+          scrollX: Math.round(window.scrollX),
+          scrollY: Math.round(window.scrollY),
+        },
+        '',
+        window.location.href,
+      );
+    });
+  };
+
+  const onSectionClick = (event: Event): void => {
+    const link = event.currentTarget as HTMLAnchorElement;
+    const id = link.dataset.sectionTarget;
+    const anchor = id ? document.getElementById(id) : null;
+    // 不在长页上（data-section-target 只在长页渲染）或锚点不存在：交给 ClientRouter 照常换页
+    if (!id || !anchor) return;
+    event.preventDefault();
+    // 地址栏写上这次要去的区块（同一份文档，不触发跳转）
+    window.history.replaceState(window.history.state, '', `#${id}`);
+    anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    pendingJump = `#${id}`;
+    window.addEventListener('scrollend', settleJump, { once: true, passive: true });
+  };
+  links.forEach((link) => link.addEventListener('click', onSectionClick));
 
   /*
    * "关于"这一条的激活判定：**迟滞**，不是单个阈值。

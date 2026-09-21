@@ -12,15 +12,10 @@
 
 html {
   -webkit-text-size-adjust: 100%;
-  scroll-behavior: smooth;
+  /* 全局**不**设 scroll-behavior: smooth：
+     刷新 / 浏览器自己的滚动恢复必须是瞬间定位，不能让整页从 Home 平滑滑回去。
+     站内"点导航栏跳区块"那一次的平滑由 app.ts 的 scrollIntoView({ behavior: 'smooth' }) 单独给。 */
   overflow-x: clip;
-}
-
-
-@media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto;
-  }
 }
 
 body {
