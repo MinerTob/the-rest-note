@@ -127,9 +127,12 @@ npm test             # 纯逻辑单元测试（音名映射、旋律识别、主
 | 项 | 值 |
 | --- | --- |
 | Environment | Node |
-| Build Command | `npm install && npm run build` |
+| Build Command | `npm install && npm run build`（Blueprint 里是 `npm ci && npm run build`） |
 | Start Command | `npm run start:server` |
-| Health / 端口 | 服务读 `process.env.PORT`，监听 `0.0.0.0` |
+| Health Check Path | `/health`（`GET`/`HEAD` → `200` + `ok`，不写 cookie、不碰访问状态） |
+| 端口 | 服务读 `process.env.PORT`，监听 `0.0.0.0`（不要在平台侧写死） |
+
+仓库根目录已经有 `render.yaml`（Render Blueprint）：`type: web` / `runtime: node` / `plan: free` / `branch: main` / `healthCheckPath: /health` / `autoDeployTrigger: commit`。没有 disk、没有数据库、没有环境变量 —— Node 版本走 `package.json` 的 `engines`（`>=22.12.0 <25.0.0`），不要在 `render.yaml` 里重复设 `NODE_VERSION`。
 
 `server/index.ts` 只做四件事：HTTP 入口判断、未进门时把子路由 302 到 `/` 或 `/en/`、Entry Gate 的服务端 session cookie、从 `dist/` 分发静态文件（`_astro/*`、图片、CSS、JS、sitemap、RSS、favicon、robots 都是普通静态响应，永不参与重定向）。它**不是** Astro SSR，也不碰任何前端逻辑（MIDI / AudioContext / scene / scroll 都还在浏览器里）。入口脚本用 Node 直接跑 TypeScript（`node --experimental-strip-types`），没有构建步骤、没有框架依赖。
 

@@ -756,7 +756,9 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 - **`#fragment` 服务端看不见**：`/#about`、`/en/#about` 在服务器眼里只是 `/`，所以首页那四个 Journey hash 的早期清理仍然由 `BaseHead.astro` 在客户端做（见 §5.15）。
 - **`POST /api/enter`**：浏览器点"进入空间"时（同一次点击、不 await）打过来，网关回 `204 No Content` 并写 `rest_note_entered=1`；不返回页面、不管音频。别的方法 → `405`。
 - **启动**：`PORT` 读 `process.env.PORT`（本地默认 3000），监听 `0.0.0.0`；Node 直接跑 TypeScript（`node --experimental-strip-types`），所以没有构建步骤、没有框架依赖（不用 Express）。`SIGTERM` 时 `server.close()` 后退出。
-- Render 配置：Build Command `npm install && npm run build`，Start Command `npm run start:server`。
+- **`GET /health`（Render 健康检查）**：在 `handleRequest` 的**最前面**处理，早于 cookie 读取、Entry Gate 判定与静态分发 —— 它不读也不写任何 cookie（`rest_note_visit` / `rest_note_entered` 都不会被创建）、不参与 302、不读 `dist/`、不改任何访问状态。`GET` / `HEAD` → `200` + `Content-Type: text/plain; charset=utf-8` + `Cache-Control: no-store`，body 固定 `ok`；其它方法 → `405`（`Allow: GET, HEAD`）。
+- **Render Blueprint**：仓库根目录的 `render.yaml` 声明这个 Web Service（`runtime: node`、Free plan、`branch: main`、`buildCommand: npm ci && npm run build`、`startCommand: npm run start:server`、`healthCheckPath: /health`、`autoDeployTrigger: commit`）；没有 disk / 数据库 / 写死的 PORT / 多余环境变量，Node 版本沿 `package.json` 的 `engines`（`>=22.12.0 <25.0.0`），不在 `render.yaml` 里重复设 `NODE_VERSION`。
+- 手动新建服务时的等价配置：Build Command `npm install && npm run build`，Start Command `npm run start:server`。
 
 ---
 
@@ -883,6 +885,17 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-22 · 增加 Render Web Service Blueprint 与健康检查
+
+- 需求：只做 Render Web Service 的部署配置 —— ①`server/index.ts` 加一个最小健康检查 `GET /health`（必须在 Entry Gate / cookie / 静态路由判断**之前**处理；`200` + `text/plain; charset=utf-8` + `Cache-Control: no-store`，body `ok`；`HEAD /health` 也允许 `200` 且可不写 body；不创建 `rest_note_visit` / `rest_note_entered` cookie、不参与 Entry Gate redirect、不读 `dist`、不改任何访问状态）；②仓库根目录新增 `render.yaml`（不配 disk / 数据库、不写死 PORT、不加无用环境变量、不改 Docker / Astro SSR）；③Node 版本继续用 `package.json` 的 `engines`，不在 `render.yaml` 里重复设 `NODE_VERSION`。
+- 改动：
+  1. `server/index.ts`：新增常量 `HEALTH_PATH = '/health'` / `HEALTH_BODY = 'ok'`；`handleRequest()` 里在解析完 pathname 之后、`isSecureRequest()` / `readEntryCookies()` / `decideEntry()` 之前插入 `/health` 分支 —— `GET`/`HEAD` 回 `200`（`HEAD` 只发头不写 body，`Content-Length: 2` 与实际 GET 一致），其它方法回 `405` + `Allow: GET, HEAD`。**没有经过任何 cookie 逻辑**，所以健康检查不会给 Render 的探针发 session cookie，也不会污染访问状态。
+  2. 新增 `render.yaml`：`type: web` / `name: the-rest-note` / `runtime: node` / `plan: free` / `branch: main` / `buildCommand: npm ci && npm run build` / `startCommand: npm run start:server` / `healthCheckPath: /health` / `autoDeployTrigger: commit`。就这些，没有别的字段。
+- 明确没碰：Entry Gate session 语义、两个 cookie 的属性与读写、`/api/enter`、静态文件服务与防 traversal、AudioContext、MIDI、MusicManager、`visit-session`、`BaseHead`、Header、scroll。
+- 文件：`server/index.ts`、**新增** `render.yaml`、`DEVELOPMENT.md`（§5.18 / 本条）、`README.md`（部署章节补 `/health` 与 blueprint）。
+- 钩子/数据：新增一个 HTTP 端点 `GET|HEAD /health`（不写 cookie、不落任何状态）；没有新增 data-* 钩子、storage key、自定义事件或环境变量。
+- 验证：`npm run check` 112 个文件 0 错误 0 警告 0 提示；`npm run build` 19 页；另按同等级许可用 `node --experimental-strip-types --check server/index.ts` 做了一次 Node TypeScript 语法检查（通过）。按要求没起服务、没跑浏览器 / CDP / Playwright。
 
 ### 2026-09-22 · 增加 Node Web Service 入口网关与 Entry Gate 服务端会话
 

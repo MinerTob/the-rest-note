@@ -36,6 +36,11 @@ const parsedPort = Number.parseInt(process.env.PORT ?? '', 10);
 const PORT = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 3000;
 const HOST = '0.0.0.0';
 
+/** Render 健康检查的 path（render.yaml 的 healthCheckPath）；**不碰** cookie / Entry Gate / dist */
+const HEALTH_PATH = '/health';
+/** 健康检查的 body：固定 `ok` */
+const HEALTH_BODY = 'ok';
+
 const CONTENT_TYPES: Record<string, string> = {
   '.avif': 'image/avif',
   '.css': 'text/css; charset=utf-8',
@@ -198,6 +203,34 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   if (pathname === null) {
     res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end('400 Bad Request\n');
+    return;
+  }
+
+  /*
+   * Render 健康检查：**放在最前面** —— 在读 cookie、进 Entry Gate 判定、碰 dist 之前就返回。
+   * 所以它不读也不写任何 cookie（rest_note_visit / rest_note_entered 都不会被创建）、
+   * 不参与 302、不读磁盘、不改任何访问状态：GET/HEAD 之外的方法给 405。
+   */
+  if (pathname === HEALTH_PATH) {
+    if (method === 'GET' || method === 'HEAD') {
+      res.writeHead(200, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Length': String(HEALTH_BODY.length),
+        'Cache-Control': 'no-store',
+      });
+      if (head) {
+        res.end();
+        return;
+      }
+      res.end(HEALTH_BODY);
+      return;
+    }
+    res.writeHead(405, {
+      Allow: 'GET, HEAD',
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    res.end('405 Method Not Allowed\n');
     return;
   }
 

@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: the-rest-note
+    runtime: node
+    plan: free
+    branch: main
+
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:server
+
+    healthCheckPath: /health
+    autoDeployTrigger: commit
