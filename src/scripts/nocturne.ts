@@ -47,7 +47,18 @@ export function initNocturne(): void {
   transport.start();
 
   // 这一页没有播放控件：滑动/点击/按键就是"要它继续响"的意思
-  const activate = () => {
+  const activate = (event: Event) => {
+    /*
+     * 入场页挡着的时候不许起播：Gate 上的 pointerdown / keydown 会冒泡到 document，
+     * 这些 activate 会赶在"进入"按钮的 click 之前把夜曲启动，露出一个音符。
+     * `body.entry-locked` 是主判据；顺带挡一下落在 Gate 里的事件。
+     * Gate cleanup 解除锁定之后，"点击或按键可恢复"照旧。
+     */
+    if (
+      document.body.classList.contains('entry-locked') ||
+      (event.target as Element | null)?.closest('[data-entry-gate]')
+    )
+      return;
     if (!transport.isPlaying()) transport.start();
   };
   document.addEventListener('pointerdown', activate, { signal });

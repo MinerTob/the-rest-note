@@ -343,6 +343,18 @@ export function initIdentity(): void {
     { signal },
   );
   const activate = (event: Event) => {
+    /*
+     * 入场页挡着的时候一个字都不许起：Gate 自己收到的 pointerdown / keydown 会冒泡到
+     * document，这些旧 activate 会赶在"进入"按钮的 click 之前把夜曲启动，而那次手势
+     * 本身就是可信手势 —— 于是页面还在 About 位置就先漏一个音符。
+     * `body.entry-locked` 是主判据（pointerdown / keydown / wheel 统一挡住）；
+     * 顺带再挡一下落在 Gate 里的事件。Gate cleanup 解除锁定后这里自然放行。
+     */
+    if (
+      document.body.classList.contains('entry-locked') ||
+      (event.target as Element | null)?.closest('[data-entry-gate]')
+    )
+      return;
     if (
       (event.target as Element | null)?.closest(
         "[data-identity-play], [data-identity-restart], [data-identity-progress], [data-identity-volume]",
