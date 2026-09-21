@@ -137,6 +137,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 手机摇晃彩蛋（标签跟着晃） | `src/scripts/identity-motion.ts`、`src/lib/shake.ts`、`src/scripts/identity-physics.ts`（`shove()`）、`src/scripts/entry-gate.ts`（入场时申请权限） | `requestMotionAccess()`、`attachIdentityMotion()`、`createShakeDetector()` | `[data-identity]`、`[data-entry-button]`（申请运动权限的那次手势）；传感器事件 `devicemotion`；`getGlobal().motionAccess` |
 | 夜曲跨页不断音（关于 ⇄ 关于我） | `src/scripts/nocturne-transport.ts`（**全站唯一那台播放器**）、`src/scripts/identity-audio.ts`（那架共用的琴）、`identity-player.ts` / `nocturne.ts`（只 attach UI）、`app.ts`（进出族时停/收） | `nocturneTransport()`、`stopNocturneTransport()`、`NocturneTransport`（`subscribe()` / `start()` / `pause()` / `seek()` / `restart()` / `attachVolume()`）、`identityPiano()`、`releaseIdentityPiano()`、`rampIdentityVolume()` | `getGlobal().identityPiano` / `.nocturne`；无 DOM 钩子 |
 | 回到关于区的落点（精确 scrollY） | `src/scripts/scene-scroll.ts`、`src/scripts/app.ts` | `rememberFamilyScroll()`、`takeFamilyScroll()`、`peekFamilyScroll()`、`restoreScroll()`、`isLanguageSwap()` | sessionStorage `space.scene-scroll` |
+| 硬刷新后的落点（原生语义） | `src/scripts/app.ts`（boot 里的硬加载分支） | `rememberScrollY()`（读 `history.state.scrollY`）、`restoreScroll()`、`aboutOnScreen()` | `history.state.scrollY`（Astro 路由自带的字段，只读不写） |
 | 自我介绍页（第十个标签的去处） | `src/views/IntroPage.astro`、`src/pages/about/intro/index.astro`、`src/content/pages/intro.zh.md` / `intro.en.md`、`src/lib/pages.ts` | `getPage('intro', lang)`、`render(entry)`、`introRoutes` | `[data-identity-link]`（写在 About 页的标签上） |
 | 联系方式 / 复制 | `src/components/ContactTiles.astro`、`ContactPanel*.astro`、`src/scripts/contact.ts`、`src/lib/contact.ts` | `initContact()`、`CONTACT`、`isInteractive()` | `[data-contact]`、`[data-contact-row]`、`[data-contact-copy]` |
 | 系统提示 LCD | `src/components/SystemMessage.astro`、`src/scripts/system-message.ts` | `initSystemMessages()` | `[data-system-message]`、window 事件 `space:message` |
@@ -325,6 +326,7 @@ class MusicManager extends EventTarget {
   setVolume(v) / setMuted(v) / toggleMute() / setDucked(v): void;
   getState(): 'idle'|'ready'|'active'|'paused'|'error';
   getVolume(): number; isMuted(): boolean; isPlaying(): boolean;
+  isAboutActive(): boolean;             // 只读：现在是不是"给关于区/夜曲让位中"
   getProgress(): { currentTime, duration, ratio };
   seekToRatio(ratio): void;
   setAboutActive(active: boolean): void;      // 进 About 时压低音量（duck）
@@ -343,6 +345,8 @@ function initMusicUI(music: MusicManager): void;
 - 进度记忆在 `src/lib/live-timeline.ts`：`savedPosition(id, duration)` / `savePosition(id, position)` / `restartPosition(id)`，存 sessionStorage `space.position.v1.<id>`，只记"真正播放过"的位置。
 - 切主题会触发 `crossfadeTo()`（主题 ↔ 曲目绑定见 `src/lib/themes.ts` 的 `THEME_TRACK`）。
 - **"关于"这一族页面会让位**：`app.ts` 的 boot 里，只要页面上有 `[data-identity]`（About）或 `[data-nocturne]`（自我介绍页），就调用 `music.setAboutActive(true)` —— 主题音乐被暂停、音量归零，`play()` / `init()` 也会直接返回；这两页放的是同一首夜曲的钢琴演奏（§5.8 / §5.14）。回首页（Journey）时仍由 `initJourney()` 的观察器控制。
+- **让位判定永远看"页面现在真实落在哪"**：boot 里先恢复落点（站内换页走 `pendingRestore`，硬刷新走 `history.state.scrollY`，见 §5.18），**再**用恢复后的几何算 `aboutOnScreen()` 决定 MP3 让不让位。顺序反了就会出现"位置在关于区、背景音乐却先响一下"。任何时候都不为了音乐去挪页面：页面位置优先，音乐跟着页面状态走。
+- `isAboutActive()` 是这条链路的排查读数（刷新后落点与音乐状态对不对先看它），只读，不改行为。
 - UI 文案（READY / PLAYING / 播放 / 暂停）从组件上的 `data-word-*` / `data-label-*-zh|-en` 读，脚本不再维护字典。
 
 ### 5.6 键盘乐器：MiniLab / 钢琴 / MIDI
@@ -690,6 +694,19 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 - `identity-player.ts` 里还有一个**代际守卫**：每次 `initIdentity()` 递增 `identityGeneration`，被换掉的旧 `dispose` / `setActive` 闭包发现自己不是当代就什么都不做（防止旧生命周期误杀新实例）。
 - 采样下载现在**分轮进行**（`PianoEngine.preload()`，最多 4 轮、每轮隔 1.5 秒补漏掉的）：上一版开头是 `if (state === 'ready') return`，只要有一个采样成功状态就变 ready，后面那段"补下漏掉的"**永远进不来**（死代码），手机上一次请求被打断就再也补不上。另外 `ensure()` 现在会处理"上下文已被关掉"（`state === 'closed'` → 整套重来），`failed` 也不再是永久死状态。实测见 §10。
 
+### 5.18 硬刷新后的落点（为什么不能靠路由那次 `scrollTo`）
+
+**文件**：`src/scripts/app.ts`（`boot()` 里的硬加载分支 + `rememberScrollY()`）、复用 `src/scripts/scene-scroll.ts` 的 `restoreScroll()`
+
+- **先量出来的事**：ClientRouter 一上来就 `history.scrollRestoration = "manual"`（`astro/dist/transitions/router.js`），也就是**刷新后的落点由它自己负责**，它用的就是历史条目上的 `history.state.scrollY`。问题是它恢复时调的是 `scrollTo({ left, top })` —— **没有 behavior**，于是被 `html { scroll-behavior: smooth }` 接管成一段平滑滚动：刷新后第 0 帧先渲染顶部，再用 **400–800ms** 滑下去（CDP 逐帧实测：600 / 2200 / 2949 三个位置分别 397 / 776 / 698ms 才到位，`readyState=complete` 时还停在 5px）。看起来就是"刷新之后又跳回主页顶部"。
+- **修法**：boot 里读**同一个来源** `history.state.scrollY`（只读，不写历史条目、不改地址、不碰 hash），用 `restoreScroll()` 的 `behavior: 'instant'` 直接落位；它跑在路由那次平滑滚动起步之后，会把还在进行的那段动画接过来。实测落点到位时间 400–800ms → **30–80ms**，之后每一帧都停在目标值上（不再有从 0 往上滑的过程）。
+- **边界**：
+  - `location.hash` 非空时**让位**（带锚点的刷新由浏览器按锚点定位，锚点优先）；
+  - 浏览器已经放到位（差值 ≤ 4px）或记的是 0 时什么都不做；
+  - 站内换页回来的那一趟仍然走 §5.14 的 `pendingRestore` / `space.scene-scroll` 精确恢复，两条路互斥，`scene-scroll.ts` 职责不变。
+- **音乐跟着页面走**：位置定下来之后才调 `music.setAboutActive(...)`（见 §5.5）——刷新后落在 About → MP3 让位；落在 Home / Blog / Lab → MP3 按已有状态恢复。
+- 实测（无头 Chrome，桌面 1280×900 + 手机 393×844，脚本 `.probe/accept.mjs`）：首页顶部 / Blog / Lab / 关于区 / `/about/` 五个位置刷新全部保持原 `scrollY`；`/#about` 锚点刷新位置与锚点都保持；关于区刷新时 `music.getState()='paused'` + `isAboutActive()=true`、`data-scene=active`；关于区 → 自我介绍 → 后退仍回到原 `scrollY`；首次起播 `volume=0.3`（目标值，不走淡入）。
+
 ---
 
 ## 6. 存储与事件
@@ -782,6 +799,7 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 | `[data-entry-gate]` / `[data-entry-button]` / `[data-entry-copy]` | `EntryGate.astro` | `initEntryGate()` | 首次入场 |
 | `[data-journey]` / `[data-journey-section="home\|blog\|lab\|about"]` | `JourneyPage.astro` | `initJourney()` | 首页长页滚动定位 |
 | `[data-section-target="..."]` | `Header.astro` | `initJourney()` | 导航高亮当前区块 |
+| `history.state.scrollY` | Astro ClientRouter（`index` / `scrollX` / `scrollY`，与 `restNoteVisit` 共存） | `app.ts` 的 `rememberScrollY()`（**只读**） | 硬刷新后的落点来源，见 §5.18；`MusicManager.isAboutActive()` 是配套的排查读数（JS 侧，不是 DOM 钩子） |
 
 ---
 
@@ -812,6 +830,23 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-22 · 硬刷新后不再"先渲染顶部再滑回去"（落点第一帧就位 + 音乐跟着页面走）
+
+- 需求：硬刷新必须保留浏览器原生 scroll restoration 语义 —— 在哪个 scrollY 刷新就还在那里；刷新路径不许 `scrollTo(0,0)` / `scrollIntoView()` / Journey 回 Home / 改 hash / 设 `history.scrollRestoration='manual'`；不扩展 `scene-scroll.ts`（站内换页精确返回保持原样）；MusicManager 要适应"浏览器恢复后的实际 scrollY"，不能为了恢复 MP3 挪页面；不许用 setTimeout 猜时间。
+- 先量后改（无头 Chrome + CDP，逐帧采样 + `addScriptToEvaluateOnNewDocument` 在任何页面脚本之前挂钩；脚本 `.probe/*.mjs`）：
+  - 修前逐帧：刷新后 `scrollY` 一律从 **0** 开始，用 **397 / 776 / 698ms**（600 / 2200 / 2949 三个位置）才滑到目标；`readyState=complete` 时还停在 5px —— 也就是"先渲染顶部、再慢慢滑下去"。
+  - 抓到唯一的 `scrollTo` 调用：`at≈30ms, from=0, args=[{left:0,top:2600}]`，调用者是 **Astro ClientRouter**（`router.js` 模块顶层 `if (history.state) scrollTo({left: state.scrollX, top: state.scrollY})`）。
+  - 根因链：ClientRouter 顶层设 `history.scrollRestoration = "manual"`（原生恢复被它关掉，落点由它负责），它恢复时**没传 behavior**，于是被 `html { scroll-behavior: smooth }` 接管成平滑动画。不是 `restoreScroll` 主动改位置，也不是入场页 / visit / `About` 迟滞。
+  - 位置本身没丢：`history.state.scrollY` 与刷新前的 `scrollY` 一致（600 / 2200 / 2949），所以是"同一份数据、慢动作落位"，不是"恢复失败"。
+- 改动（只改 `src/scripts/app.ts` + 一个只读读数）：
+  1. `app.ts` boot 的硬加载分支：`restored === null`（不是站内换页回场）时读 `history.state.scrollY`（新函数 `rememberScrollY()`，**只读**），用既有 `restoreScroll()` 的 `behavior:'instant'` 直接落位；`location.hash` 非空时让位给锚点，已在位（≤4px）或值为 0 时什么都不做。
+  2. `setAboutActive()` 的调用移到落点恢复**之后**：页面位置定下来，再按恢复后的几何判"是不是在关于区"（`aboutOnScreen()`）—— 页面位置优先，音乐跟着页面状态走。
+  3. `music-manager.ts` 只新增一个只读 `isAboutActive()`（排查读数）；738349f8 的两个修复（`retryIfIdle` / `canplay` / `visibilitychange` / `pageshow`；`applyVolumeForStart()`）原样保留。
+  4. `scene-scroll.ts` 一行未改（复用它的 `restoreScroll()`）；站内换页那条路仍然是 `pendingRestore ?? takeFamilyScroll(...)`。
+- 文件：`src/scripts/app.ts`、`src/scripts/music-manager.ts`（只读读数）、`astro.config.mjs`（见下）、`DEVELOPMENT.md`（§3 / §5.5 / §5.18 / §7 / 本条）。
+- 顺带修的环境问题（与本回归无关，但挡住 `npm run build`）：Vite 8 的 SSR module runner 用 `AsyncFunction` 执行模块、作用域里没有 `require`，遇到被内联的纯 CJS 依赖（astro glob loader → `picomatch`）就 `require is not defined`，`astro sync` / `dev` / `build` 全部起不来（最小复现：直接 `createServer` + `ssrLoadModule('/node_modules/picomatch/index.js')`；`ssr.external` / `noExternal` / `ssr.optimizeDeps.include` 都不当事）。`astro.config.mjs` 里加了一个只给 SSR 用的 `rest-note:cjs-in-ssr` 插件：把"顶层 `require()` + `module.exports`"的老式 CJS 模块包一层，提供真正的 `require` / `module` / `exports`，不改模块内容。
+- 验证：`npm test` 103/103；`npm run check` 0 错误 0 警告 0 提示；`npm run build` 17 页。无头 Chrome 实测（`.probe/accept.mjs`，桌面 1280×900 / 手机 393×844 各跑一遍，全 PASS）：A 首页顶部刷新停在 0；B Blog（862/1137）C Lab（1868/2171）D 首页关于区（2794/3134）与 `/about/` 刷新都保持原 `scrollY`，落点到位时间 30–80ms（修前 400–800ms，不再有从 0 滑下去的过程）；D 关于区刷新时 `music.getState()='paused'` 且 `isAboutActive()=true`、`data-scene=active`；`/#about` 锚点刷新位置与锚点都保持；关于区 → 自我介绍 → `history.back()` 回到原 `scrollY`（无回顶帧）；首次进站起播 `volume=0.3`（= 目标值，不是 0 淡入）。没碰 Entry Gate / visit-session / NEW VISIT 规则 / nocturne transport / MIDI / scene-scroll 现有 family restore / About 迟滞 / 语言系统。
 
 ### 2026-09-22 · 主页 MP3：刷新后自己恢复 + 第一次起播不再把开头吃掉
 

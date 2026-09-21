@@ -207,6 +207,14 @@ export class MusicManager extends EventTarget {
     return this.state;
   }
 
+  /**
+   * 现在是不是"关于区让位中"（MP3 为夜曲让路）。
+   * 只读：给排查用（刷新后落点与音乐状态是否一致先看它），不改任何行为。
+   */
+  isAboutActive(): boolean {
+    return this.inAbout;
+  }
+
   getVolume(): number {
     return this.volume;
   }
