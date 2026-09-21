@@ -26,8 +26,10 @@ import {
 const TIMELINE = 'identity:nocturne';
 const FIRST = 21;
 const LAST = 108;
-/** 提前多少秒把音符排进音频时钟（太短会漏音，太长会影响随后切换） */
-const LOOKAHEAD = 0.15;
+/** 移动端音频线程刚唤醒时先留一点预滚，避免最前几个采样贴着 currentTime 抖动。 */
+const AUDIO_START_LEAD = 0.14;
+/** 提前多少秒把音符排进音频时钟（与 About 演奏保持一致） */
+const LOOKAHEAD = 0.4;
 const TICK_MS = 25;
 
 let disposeCurrent: (() => void) | undefined;
@@ -148,17 +150,19 @@ export function initNocturne(): void {
         setState('waiting');
         return;
       }
+      let startLead = AUDIO_START_LEAD;
       if (adopted && handover !== null) {
         // 接手上一页：位置照交棒时刻算，音只排"还没排过"的那一段
         const from = handover.from;
         offset = handover.position;
         handover = null;
         cursor = Math.max(0, notes.findIndex((note) => note.start >= from));
+        startLead = 0;
       } else {
         offset = savedPosition(TIMELINE, duration());
         cursor = Math.max(0, notes.findIndex((note) => note.end > offset));
       }
-      origin = piano.currentTime - offset;
+      origin = piano.currentTime + startLead - offset;
       playing = true;
       setState('playing');
       lastSave = offset;

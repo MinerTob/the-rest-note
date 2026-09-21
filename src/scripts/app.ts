@@ -40,7 +40,12 @@ function initJourney(root: HTMLElement, music: MusicManager): void {
   sections.forEach((section) => sectionObserver.observe(section));
 
   const aboutObserver = about ? new IntersectionObserver(([entry]) => {
-    const active = entry.isIntersecting && entry.intersectionRatio >= 0.35;
+    // The About section is taller than a phone viewport, so its intersection
+    // ratio may never reach 35% on mobile. That made the observer immediately
+    // pause a performance that the play button had just started, and repeated
+    // edge crossings could rapidly stop/start the scheduler. Treat any real
+    // intersection as active; the zero crossing is stable on every viewport.
+    const active = entry.isIntersecting;
     if (active === aboutActive) return;
     aboutActive = active;
     if (active) {
@@ -51,7 +56,7 @@ function initJourney(root: HTMLElement, music: MusicManager): void {
       setIdentityActive(false);
       music.setAboutActive(false);
     }
-  }, { threshold: [0, 0.35, 0.6] }) : undefined;
+  }, { threshold: 0 }) : undefined;
   if (about && aboutObserver) aboutObserver.observe(about);
 
   disposeJourney = () => {

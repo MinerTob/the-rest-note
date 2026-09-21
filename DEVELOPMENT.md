@@ -723,6 +723,15 @@ initEntryGate(music: MusicManager): boolean;   // true = 正在拦着（页面�
 
 ## 10. 功能日志（规定动作）
 
+### 2026-09-21 · 修复手机端 About 夜曲滚到底无声、回滚卡顿与播放键闪停
+
+- 需求：首页在电脑端正常，但手机滚到最下面的 About/MIDI 区域没有声音；滚走再回来会卡顿几秒；刷新后手动点播放会先响一下又立刻暂停。同时按本人给出的新版全文替换第一篇文章英文版。
+- 根因：① `initJourney()` 用 `intersectionRatio >= 0.35` 判断 About 区域是否活跃。About 区块比手机视口高很多，手机上即使已经滚进该区域，整个区块的可见比例也可能永远到不了 35%；观察器于是调用 `setIdentityActive(false)`，把刚由播放键启动的夜曲立刻暂停。② 声音每次启动/恢复时，首批采样原先直接贴着 `AudioContext.currentTime` 提交且只提前排 0.15 秒；移动端音频线程刚唤醒时没有预滚余量，于是前几个声音会颤动，而使用独立动画帧的瀑布流完全正常，等持续排程稳定后声音也自然恢复。硬刷新会销毁 `AudioContext`，浏览器自动播放规则不允许页面无手势自行发声；已有的首次触摸/播放点击解锁兜底保留，修复后会从 `sessionStorage` 记住的时间点可靠续播。
+- 文件：`src/scripts/app.ts`、`src/scripts/identity-player.ts`、`src/scripts/nocturne.ts`、`src/content/blog/the-rest-note.en.md`、`DEVELOPMENT.md`。
+- 函数：`initJourney()` 的 About `IntersectionObserver` 改为以 `entry.isIntersecting` 的零交叉判断实际进出视口，不再用对长区块和手机视口不成立的面积比例；`identity-player.ts` 与 `nocturne.ts` 给普通启动/恢复增加 0.14 秒音频预滚，并把持续排程前瞻从 0.15 秒增至 0.4 秒，跨页交棒已有预排程所以不重复加延迟；无新增导出。
+- 钩子/数据：无新增 DOM 钩子、storage key 或自定义事件；夜曲进度仍使用 `space.position.v1.identity:nocturne`。
+- 验证：`npm test`、`npm run check`、`npm run build`。
+
 ### 2026-09-19 · 撤掉 MiniLab 的加载条（回到之前的安静样子）
 
 - 需求：本人明确"**我不要加载条了，就按之前的来**" —— 他反感的不是加载慢，而是这件事被显示出来了。

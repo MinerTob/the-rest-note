@@ -1,262 +1,260 @@
 ---
-title: "The Rest Note: Leaving a Measure of Silence for Myself"
+title: "The Rest Note: I Finally Left Myself a Beat of Rest"
 description: "On September 19, 2026, The Rest Note went live. This is its first development journal — and its first measure."
 pubDate: 2026-09-19
 lang: en
 tags: ["Notes", "Dev"]
 ---
 
-On September 19, 2026, The Rest Note officially went live.
+On September 19, 2026, **The Rest Note officially went live.**
 
-It feels a little strange to write that sentence.
+Writing that sentence feels a little strange.
 
-Before it became a place anyone could visit through a URL, it spent a long time as little more than a folder on my computer: a collection of `.astro`, `.ts`, and `.css` files, accompanied by more rounds of "Something still feels off. Let me change it again." than I can count.
+For a long time, before anyone could actually reach it through a URL, it was nothing more than a folder on my computer—a collection of `.astro`, `.ts`, and `.css` files, along with more rounds of *“This still doesn't feel right. Let me change it again.”* than I could count.
 
-Now, at last, it exists as a real place on the internet.
+Now, at last, it has become a real place on the internet.
 
-## It Started as a "Personal Website"
+## It Started as a “Personal Website”
 
 At first, I simply wanted to build a personal website of my own.
 
-But the phrase personal website always felt as though it was missing something. If all I did was arrange my name, introduction, interests, contact information, and a few articles into neat sections, the result would feel more like a digital business card than a place that actually belonged to me.
+But the idea of a *personal website* always felt like it was missing something. If I simply arranged my name, introduction, interests, contact information, and a few articles into neat sections, it would feel more like a digital business card than a place of my own.
 
-That wasn't quite what I wanted.
+That wasn't what I wanted.
 
-I wanted people to be able to visit without needing a particular reason.
+I wanted people to be able to open the site without necessarily coming here to find something.
 
-They could read something, listen to music, play a few notes on the piano—or simply do nothing at all.
+They could read an article, listen to some music, play a few notes—or do nothing at all.
 
-Eventually, I gave this place a name:
+Eventually, I gave it a name:
 
-The Rest Note.
+**The Rest Note.**
 
-The word rest carries two meanings here. It can mean taking a break, but in music, a rest is also a moment of silence written into the score.
+*Rest* can mean taking a break. In music, it can also mean a moment of silence.
 
-A piece of music cannot be filled with notes from beginning to end. Sometimes it is the silence between them that gives the melody room to breathe.
+A piece of music cannot be filled with notes from beginning to end. It is often the silent spaces between them that give the phrases around them room to breathe.
 
-I suppose this website is meant to be something similar.
+I think this website is meant to be something like that.
 
-Between the melodies of life, leave a measure of silence for yourself.
+> **Between the phrases of life, leave a quiet beat for yourself.**
 
-## What It's Built With
+## What I Built It With
 
-The Rest Note is built primarily with Astro 7, with TypeScript for the logic and plain CSS for almost all of the styling.
+The Rest Note is built primarily with **Astro 7**, with **TypeScript** for its logic and native CSS for almost all of its styling.
 
-There is no React, Vue, or Svelte, and no Tailwind. The entire site is ultimately built into static pages, so there is no runtime database and no conventional backend.
+I didn't use React, Vue, or Svelte, and there is no Tailwind either. The entire site is ultimately built as static pages, so there is no database and no conventional backend.
 
 But being a static website doesn't mean it has to sit still.
 
-The Rest Note uses the Web Audio API to handle music and piano playback, while the Web MIDI API allows it to communicate with a real MIDI keyboard. On the About page, the identity tags that fall, collide, bounce, and react when you shake your phone are powered by Matter.js.
+The Rest Note uses the **Web Audio API** for music and piano playback, and the **Web MIDI API** to connect to a real MIDI keyboard. On the About page, the tags that fall, collide, can be dragged around, and even react when you shake your phone are powered by **Matter.js**.
 
-The Blog and Lab are managed through Astro Content Collections, the site has both Chinese and English versions, and larger assets such as audio files are handled through Git LFS.
+The Blog and Lab use Astro Content Collections, the site is available in both Chinese and English, and larger assets such as audio files are managed through Git LFS.
 
-So, if I had to reduce the project to a single line, its stack would look something like this:
+So the stack now looks something like this:
 
 **Astro 7 + TypeScript + Native CSS + Web Audio API + Web MIDI API + Matter.js + Git LFS**
 
-Which is rather more than I had in mind when I first said:
+Which sounds like quite a lot for something that started with:
 
-"I'm just going to make myself a blog."
+*“I'm just going to make myself a blog.”*
 
 ## A Piano Hidden Inside a Website
 
-Music is probably the least decorative part of this entire project.
+Of everything on this site, music is probably the last thing I would call decoration.
 
-There is a 25-key MiniLab inside the Lab section.
+There is a 25-key MiniLab in the Lab.
 
-You can play it with a mouse, a touchscreen, a computer keyboard, or even connect a real MIDI keyboard and play it directly.
+You can play it with a mouse, a touchscreen, or a computer keyboard. You can also connect a real MIDI keyboard and play it directly.
 
-And I hid a few secrets inside it.
+I also hid a few little secrets inside it.
 
-Some melodies aren't buttons in a menu. The site never tells you, "Click here to unlock an Easter egg."
+Some melodies aren't buttons in a menu, and the site won't simply tell you, *“Click here to trigger an Easter egg.”*
 
-You have to actually play them.
+You actually have to play them.
 
-When the correct sequence of notes is performed, the website changes its theme, and the music changes with it.
+Once the right notes appear in the right order, the site's theme changes, and the music changes with it.
 
-I like designing things this way.
+I really like designing things this way.
 
-Traditional interfaces are constantly telling us:
+Unlike a traditional interface, it doesn't constantly tell you:
 
-Click here.
+**You can click here.**
 
-There's another feature over there.
+**There's another feature over there.**
 
-But I think some things are better left for curious people to discover on their own.
+Some things are simply better left for curious people to discover on their own.
 
-## 88 Keys, and a Little of Me
+## 88 Keys, and a Little About Me
 
-The About page is probably my favourite part of the site.
+The About page is one of my favourite parts of the site—and also one of the parts I spent the most time wrestling with.
 
-It was also one of the most troublesome to build.
+There is a full **88-key piano** on the page, with a MIDI nocturne playing above it. As the music continues, tags representing different parts of me begin to appear from above and fall according to the laws of physics.
 
-There is a complete 88-key piano on the page, with a MIDI nocturne playing above it. As the music continues, tags representing different parts of me begin to appear and fall into the scene.
+Music. Aviation. Photography. Astronomy. Technology...
 
-Music. Aviation. Photography. Astronomy. Technology.
+And also directness, persistence, and an analytical mind.
 
-And a few parts of my personality as well: directness, persistence, and an analytical mind.
+They collide with one another, bounce a little, settle in different places, and can be dragged around.
 
-The tags collide with one another, bounce, settle in different places, and can even be picked up and moved around.
+I didn't want the About page to be the traditional:
 
-I didn't want the About page to look like this:
+> Name:
+> Age:
+> Hobbies:
+> About Me:
 
-Name:
-Age:
-Hobbies:
-About Me:
+Because a real person isn't made up of a few fields on a form.
 
-A person isn't really a collection of fields in a form.
+I would rather let those pieces appear gradually with the music.
 
-I would rather let those pieces appear gradually, one by one, with the music.
+Just like getting to know someone.
 
-After all, that is usually how we come to know a person.
+You don't learn everything about them in the first second.
 
-We don't learn everything in the first second.
+## Then the Bugs Started Teaching Me
 
-## And Then the Bugs Started Teaching Me Things
+Once I really started building the site, I realised that **“it runs”** and **“it works properly for someone visiting for the first time”** are two completely different things.
 
-Once I began testing the site properly, I discovered that "it works" and "it works for someone visiting for the first time" are two very different standards.
-
-At one point, I cleared my browser cache to simulate a completely new visitor.
+One day, I cleared my browser cache to simulate someone visiting the site for the very first time.
 
 Then I pressed a piano key.
 
-Nothing happened.
+**Nothing happened.**
 
-The reason was simple: the piano samples were still downloading, and the original code simply gave up when the sample for a particular note wasn't ready.
+The reason was simple: the piano samples hadn't finished downloading, and the code at the time simply stopped if it couldn't find the sample it needed.
 
-As the developer, I knew it was loading.
+As the developer, I knew:
+
+*It's loading.*
 
 A visitor wouldn't.
 
-To them, the conclusion would simply be:
+They would simply think:
 
-It's broken.
+**It's broken.**
 
-My first idea was to add a loading screen and refuse to let anyone enter until every audio file had finished downloading.
+At first, I even considered adding a loading screen and making visitors wait until every audio file had finished downloading before they could enter the site.
 
-But the more I thought about it, the less sense that made. I would have been forcing every visitor to wait because of a technical problem that was mine to solve.
+But the more I thought about it, the more it felt like I was making every visitor pay for a technical problem that was mine to solve.
 
-So I changed the approach.
+So I took a different approach.
 
-If a piano sample isn't ready yet, a lightweight synthesizer responds immediately. As soon as the real sample becomes available, it quietly takes over.
+If a sample isn't ready yet, a lightweight synthesizer responds first. Once the actual piano sample finishes loading, it naturally takes over.
 
-The result is simple: even on a cold first visit, the very first key should make a sound.
+That way, even on someone's very first visit, the first key they press should make a sound.
 
-That taught me something surprisingly basic:
+It taught me a very simple lesson:
 
-The user doesn't need to know why your code isn't ready yet.
+**Users don't need to know why your code isn't ready yet.**
 
-They only need to know whether the thing they just touched responded.
+They only need to know whether the thing they just pressed responded.
 
 ## Safari, and the Things You Only Discover on Real Devices
 
-Then my iPhone decided it was time for another lesson.
+Then it was my iPhone's turn to teach me something.
 
-Browser autoplay restrictions. AudioContext unlocking. Motion and orientation permissions. Safari restoring scroll positions whenever it feels like it.
+Browser autoplay restrictions, unlocking an `AudioContext`, motion and orientation permissions, the way Safari restores scroll positions...
 
-Some problems can survive dozens of desktop tests and reveal themselves the moment you open the same page on a phone.
+Some problems can survive dozens of tests on a computer and suddenly appear the moment you try the same thing on a phone.
 
 At one point, the MIDI performance on the About page behaved in a particularly ridiculous way.
 
-Open the page for the first time:
+Open it for the first time:
 
-No sound.
+**No sound.**
 
-Refresh it:
+Refresh once:
 
-Maybe still no sound.
+**Still maybe no sound.**
 
-Refresh it again:
+Refresh again—
 
-Perfect.
+**It works.**
 
-Eventually, I found the problem. Audio unlocking had been treated as a one-shot attempt. On an iPhone, however, that first interaction might also trigger the Motion & Orientation permission prompt, meaning the precious user gesture needed to unlock audio could effectively be lost.
+Eventually, I found out that audio unlocking had originally been designed as a one-time attempt. The problem was that on an iPhone, the first interaction could also bring up the Motion & Orientation permission prompt, so that precious user gesture might not successfully unlock the audio at all.
 
-The solution wasn't to tell people to refresh the page.
+In the end, the solution wasn't to make the user refresh the page.
 
-It was to teach the program a much more reasonable behaviour:
+It was to teach the program:
 
-If it didn't work the first time, try again on the next interaction.
+**If it doesn't work the first time, try again on the next interaction.**
 
-Safari had a few more surprises waiting for me.
+There were plenty of similar problems.
 
-For example, it sometimes restores an old scroll position after the entry screen disappears. I ended up having to correct the page position at several carefully chosen moments just to make sure a new visit actually begins at the top.
+Safari sometimes quietly restores the previous scroll position after the entry screen disappears, so I even had to pull the page back to the top at several different moments after entering the site.
 
-It doesn't sound particularly elegant.
+It sounds a little silly.
 
 But it works.
 
-That, I have learned, is sometimes what development looks like.
+Sometimes that's just what development is like.
 
-You begin the day thinking about elegant architecture.
+You think you're working on elegant architecture, only to end up in some strangely primitive battle of wits with a web browser.
 
-You end it engaged in psychological warfare with a web browser.
+## It Finally Left localhost Behind
 
-## Leaving `localhost` Behind
-
-During development, I saw this address more times than I could possibly count:
+During development, I saw this address far too many times:
 
 `localhost:4321`
 
-When the site lived there, I knew where every button was. I knew how every Easter egg worked. I knew what every strange little interaction was supposed to do.
+While the site was running there, I knew where every button was. I knew how every Easter egg was triggered.
 
 But it was still only on my computer.
 
-Today, after fixing the last few problems, running the build, pushing the repository, and deploying the site, I opened The Rest Note through a real public URL for the first time.
+Then today, I fixed the last few problems, finished the build, pushed the repository, deployed the site, and opened The Rest Note through a real public URL for the first time.
 
-That felt different from simply seeing a successful build.
+That moment felt different from simply seeing a successful build.
 
-Because from that moment on, it was no longer just a project inside my development environment.
+Because from then on, it was no longer just something inside my development environment.
 
-Someone else could actually walk in.
+**Other people could actually walk in.**
 
-Maybe they'll stay for thirty seconds.
+They might stay for only a few seconds.
 
-Maybe they'll read an article.
+They might read an article.
 
-Maybe they'll never discover what's hidden inside the MiniLab.
+They might never discover what's hidden inside the MiniLab.
 
-Maybe they'll spend a while listening to the nocturne on the About page.
+They might spend a while listening to the nocturne on the About page.
 
-Or maybe they'll simply look around for a moment and close the tab.
+Or they might do nothing at all—look around for a moment, then close the page.
 
-That's fine too.
+I'm fine with all of those.
 
-I never wanted this place to feel as though visitors had something they were required to accomplish.
+I never intended this to be a place where visitors had to accomplish anything.
 
 ## The First Measure
 
-The Rest Note is certainly not "finished."
+The Rest Note is, of course, nowhere near “finished.”
 
-There aren't many articles in the Blog yet. More things will eventually appear in the Lab. The design will change, and I'm sure parts of the code will be rewritten as I learn more.
+There aren't many articles in the Blog yet. More things will be added to the Lab, and the design will certainly continue to change.
 
 But I don't really want to say:
 
-"I'll properly begin once everything is finished."
+*“I'll properly begin once everything is finished.”*
 
-A place that genuinely belongs to someone probably shouldn't have a final version.
+Because a place that truly belongs to someone probably shouldn't have a final version.
 
-It should change as they do.
+It should change along with them.
 
-Today I might write about code. Tomorrow it might be music. Later, perhaps a journey, a photograph, an aircraft I happened to see, or simply a small thought I decided was worth keeping.
+Today, I might write about code. Tomorrow, music. Later, perhaps a journey, a photograph, an aircraft I happened to come across, or simply some small thought that occurred to me one day.
 
-Years from now, I may look back and find the code embarrassingly naïve. I may notice a hundred things in the design that I would do differently.
+Years from now, I might look back and think the code I wrote today was naïve, or notice all sorts of things in the design that weren't quite mature yet.
 
-But at least I'll be able to say:
+But at least I'll know this:
 
-On September 19, 2026, I made it real.
+**On September 19, 2026, I really built it.**
 
-It began with a simple thought—I want to build a blog of my own—and slowly grew into thousands of lines of code, countless revisions, real-device testing, audio systems, MIDI, glass materials, physics, and finally, deployment.
+It began with a simple thought—*“I want to make a blog of my own.”* Then came tens of thousands of lines of code, rebuilding things over and over again, testing on real phones, loading audio, MIDI, glass materials, physics, and finally, deployment.
 
-What was once a folder on my computer has become a small corner of the internet.
+A folder on my computer had finally become a tiny corner of the internet.
 
-So I'll leave this here as the first development journal of The Rest Note.
+So I'll leave this article here as the first development journal of The Rest Note.
 
-And, perhaps, its first measure.
+And as its first measure.
 
-I don't know what I'll write in the next one yet.
+I don't know what the next measure will be about yet.
 
-That's all right.
+That's okay.
 
-After a rest, the music always continues.
+**After every rest, the music goes on.**

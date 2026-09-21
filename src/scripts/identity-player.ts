@@ -21,6 +21,12 @@ import { takeLanguageSwap } from './lang';
 
 const SOURCE = IDENTITY_TRACK_SRC;
 const TIMELINE = "identity:nocturne";
+// Give a freshly started/resumed mobile AudioContext time to fill its render
+// quantum before the first note. Without this, the first sources begin at
+// currentTime and can flutter while the audio thread wakes up, even though the
+// visual waterfall remains smooth. Cross-page handovers are already primed.
+const AUDIO_START_LEAD = 0.14;
+const SCHEDULE_AHEAD = 0.4;
 const FIRST = 21,
   LAST = 108,
   LEAD = 2.4;
@@ -318,7 +324,7 @@ export function initIdentity(): void {
       lastPositionSave = now;
     }
     // Schedule ahead on the audio clock; animation frames never trigger sound.
-    schedule(0.15);
+    schedule(SCHEDULE_AHEAD);
     if (loop === 0 && needsAnimation)
       plan.triggers.forEach((n, i) => {
         if (now >= n.start) reveal(i, n);
@@ -396,6 +402,7 @@ export function initIdentity(): void {
         return;
       }
       // 接手上一页的交棒点（换页不断音）；没有就按 live-timeline 的记忆继续
+      let startLead = AUDIO_START_LEAD;
       if (adopted && handover !== null) {
         // 交棒时那一段（position → scheduledUntil）已经由上一页排好、正在响，
         // 所以这里只排它之后的音：既不重复，也不会把时间轴往前推。
@@ -403,6 +410,7 @@ export function initIdentity(): void {
         offset = handover.position;
         handover = null;
         cursor = notes.findIndex((n) => n.start >= from);
+        startLead = 0;
       } else {
         offset = savedPosition(TIMELINE, duration());
         cursor = notes.findIndex((n) => n.end > offset);
@@ -410,7 +418,7 @@ export function initIdentity(): void {
       root.dataset.loops = String(loop);
       music?.setDucked(true);
       if (cursor < 0) cursor = 0;
-      origin = piano.currentTime - offset;
+      origin = piano.currentTime + startLead - offset;
       playing = true;
       restart.disabled = false;
       progress.disabled = false;
