@@ -402,6 +402,18 @@ export function initIdentity(): void {
         return;
       }
       // 接手上一页的交棒点（换页不断音）；没有就按 live-timeline 的记忆继续
+      /*
+       * 起跑余量：刚被手势唤醒的音频线程需要一点时间才稳，所以这一区里
+       * 让音乐从"现在 + 0.14 秒"开始（写进 origin，而不是去动播放位置）。
+       *
+       * 关键区分（我上一版就在这里搞错了）：
+       *   · 从头开始播：position = 0，cursor 落在第一个音上 → **第一个音照常响**，
+       *     只是整条时间轴晚了 0.14 秒；
+       *   · 从记忆位置接续：position 是记忆里的秒数，`start >= position` 会跳过
+       *     "跨过接续点、刚才已经响过"的那两三个音 —— 不重敲它们，就没有那一下颤动。
+       * 跨页接手时前一段音频已经排好了，不需要余量（startLead = 0）。
+       */
+      let startLead = AUDIO_START_LEAD;
       if (adopted && handover !== null) {
         // 交棒时那一段（position → scheduledUntil）已经由上一页排好、正在响，
         // 所以这里只排它之后的音：既不重复，也不会把时间轴往前推。
@@ -409,6 +421,7 @@ export function initIdentity(): void {
         offset = handover.position;
         handover = null;
         cursor = notes.findIndex((n) => n.start >= from);
+        startLead = 0;
       } else {
         /*
          * 从记忆位置接着放：**把起跑余量算进位置里**，而不是去挪时间轴。
@@ -423,13 +436,13 @@ export function initIdentity(): void {
          * 音头的音，听感正是"颤动/卡顿"（本人手机实测）。跳过它们的代价只是这 0.14 秒里
          * 少两三个音，比糊一坨好得多。
          */
-        offset = savedPosition(TIMELINE, duration()) + AUDIO_START_LEAD;
+        offset = savedPosition(TIMELINE, duration());
         cursor = notes.findIndex((n) => n.start >= offset);
       }
       root.dataset.loops = String(loop);
       music?.setDucked(true);
       if (cursor < 0) cursor = 0;
-      origin = piano.currentTime - offset;
+      origin = piano.currentTime + startLead - offset;
       playing = true;
       restart.disabled = false;
       progress.disabled = false;
