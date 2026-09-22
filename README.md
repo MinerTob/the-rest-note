@@ -136,8 +136,6 @@ npm test             # 纯逻辑单元测试（音名映射、旋律识别、主
 
 `server/index.ts` 只做四件事：HTTP 入口判断、未进门时把子路由 302 到 `/` 或 `/en/`、Entry Gate 的服务端 session cookie、从 `dist/` 分发静态文件（`_astro/*`、图片、CSS、JS、sitemap、RSS、favicon、robots 都是普通静态响应，永不参与重定向）。它**不是** Astro SSR，也不碰任何前端逻辑（MIDI / AudioContext / scene / scroll 都还在浏览器里）。入口脚本用 Node 直接跑 TypeScript（`node --experimental-strip-types`），没有构建步骤、没有框架依赖。
 
-"这一趟算不算新的访问"在服务端靠 **Fetch Metadata** 判断：`Sec-Fetch-Mode: navigate` + `Sec-Fetch-Dest: document` 的顶层文档导航里，`Sec-Fetch-Site` 是 `none`（地址栏 / 书签）、`cross-site`（外链）或 `same-site`（同站其它 origin）就是新的外部入口 —— 那时会把 `rest_note_visit` 换成新 token、把 `rest_note_entered` 删掉（`Max-Age=0`），所以**点过 Entry Gate 之后在地址栏重新输入子页，仍然会被送回首页重新入场**；`same-origin`（当前页刷新、站内导航、ClientRouter）与请求头缺失时一律不动，刷新子页照旧停在原地。
-
 > **Node 版本是硬性要求。** Astro 7 需要 **Node ≥ 22.12.0**：仓库根目录的 `.node-version`（`22.22.0`）和 `package.json` 里的 `engines` 都写了这一点。托管平台如果默认给更老的 Node（Render 上，2024 年创建的服务默认是 20.15.1），构建会在 `astro build` 那一步直接拒绝运行，报 `Node.js vX is not supported by Astro!`。平台设置里找不到 Node 版本选项时，加一个环境变量 `NODE_VERSION=22.22.0` 即可（Render 的优先级是 `NODE_VERSION` > `.node-version` > `.nvmrc` > `engines`）。
 
 站点没有数据库、没有服务端渲染，也不需要 `.env` —— 唯一可能用到的环境变量就是上面那个 `NODE_VERSION`（Web Service 方式还会用到平台注入的 `PORT`）。用 `npm run start:server` 时服务端会写两个 HttpOnly cookie（`rest_note_visit` / `rest_note_entered`），浏览器端不需要任何配置。

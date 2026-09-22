@@ -17,9 +17,7 @@
  * Node 直接跑 TypeScript（只剥类型，不做转换），所以这里不用任何构建步骤、也没有框架依赖。
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
-import { pipeline } from 'node:stream/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ENTER_PATH, decideEntry, isHtmlPagePath } from './entry-router.ts';
@@ -141,77 +139,6 @@ function cacheControl(pathname: string, isHtml: boolean): string {
   return 'public, max-age=3600';
 }
 
-/** 取一个请求头（同名多值时取第一个；没有就是 undefined） */
-function headerValue(req: IncomingMessage, name: string): string | undefined {
-  const value = req.headers[name];
-  return Array.isArray(value) ? value[0] : value;
-}
-
-/**
- * 解析 `Range` 请求头里的**单一** bytes 段（媒体文件播放要靠它：浏览器先探一段、
- * 拖动进度条时再要某一段，没有它就只能整份下载）。
- *
- *   · `bytes=start-end`  闭区间（end 超出文件末尾就夹到末尾）
- *   · `bytes=start-`     从 start 到文件末尾
- *   · `bytes=-suffix`    最后 suffix 个字节
- *   · 合法 → `{ start, end }`（含两端）
- *   · 没有 Range / 不是 bytes 单位 / 语法不认识 / **multi-range 带逗号** → `null`
- *     （调用方按"整文件 200"处理：本轮不支持多段，保持简单稳定）
- *   · 有 Range 但一个字节都给不出（起点 ≥ 文件长度、end < start、suffix ≤ 0）→ `'unsatisfiable'`
- */
-function parseRange(
-  header: string | undefined,
-  size: number,
-): { start: number; end: number } | null | 'unsatisfiable' {
-  if (!header) return null;
-  const unit = /^bytes=(.+)$/i.exec(header.trim());
-  if (!unit) return null;
-  const spec = unit[1].trim();
-  if (spec.includes(',')) return null;
-  const parts = /^(\d*)-(\d*)$/.exec(spec);
-  if (!parts) return null;
-  const [, rawStart, rawEnd] = parts;
-  if (rawStart === '' && rawEnd === '') return null;
-
-  if (rawStart === '') {
-    // bytes=-N：最后 N 个字节
-    const suffix = Number(rawEnd);
-    if (!Number.isSafeInteger(suffix)) return null;
-    if (suffix <= 0 || size === 0) return 'unsatisfiable';
-    return { start: Math.max(0, size - suffix), end: size - 1 };
-  }
-
-  const start = Number(rawStart);
-  if (!Number.isSafeInteger(start)) return null;
-  if (start >= size) return 'unsatisfiable';
-  if (rawEnd === '') return { start, end: size - 1 };
-
-  const end = Number(rawEnd);
-  if (!Number.isSafeInteger(end)) return null;
-  if (end < start) return 'unsatisfiable';
-  return { start, end: Math.min(end, size - 1) };
-}
-
-/**
- * 把文件（或其中一段）用流写出去，**不整份读进内存** —— MP3 有 4–5MB，
- * 先把整个文件 `readFile` 再切片就等于没做 Range。
- */
-async function sendFile(
-  res: ServerResponse,
-  file: string,
-  range?: { start: number; end: number },
-): Promise<void> {
-  const stream = range
-    ? createReadStream(file, { start: range.start, end: range.end })
-    : createReadStream(file);
-  try {
-    await pipeline(stream, res);
-  } catch {
-    // 客户端中途断了 / 读文件出错：响应头已经发出去了，没法再改成 404，直接断开
-    res.destroy();
-  }
-}
-
 async function serveNotFound(
   res: ServerResponse,
   head: boolean,
@@ -236,7 +163,6 @@ async function serveNotFound(
 }
 
 async function serveStatic(
-  req: IncomingMessage,
   res: ServerResponse,
   pathname: string,
   head: boolean,
@@ -247,68 +173,27 @@ async function serveStatic(
     await serveNotFound(res, head, cookies);
     return;
   }
-
-  // 先拿文件大小：Range 的解析、206 的 Content-Range、200 的 Content-Length 都要它
-  let size: number;
+  let body: Buffer;
   try {
-    size = (await stat(file)).size;
+    body = await readFile(file);
   } catch {
     await serveNotFound(res, head, cookies);
     return;
   }
-
   const isHtml = file.toLowerCase().endsWith('.html');
-  /*
-   * 静态文件一律声明 `Accept-Ranges: bytes`（媒体播放器据此决定能不能按段要数据）。
-   * 缓存策略保持原样：HTML = no-cache（+ Vary: Cookie）、_astro/ = immutable、其余 max-age。
-   */
-  const headers: Record<string, string | string[]> = {
+  res.writeHead(200, {
     'Content-Type': contentType(file),
+    'Content-Length': String(body.byteLength),
     'Cache-Control': cacheControl(pathname, isHtml),
-    'Accept-Ranges': 'bytes',
     // 同一份 HTML 会因为 cookie 不同而拿到 302 或 200，共享缓存必须按 Cookie 分开
     ...(isHtml ? { Vary: 'Cookie' } : {}),
     ...cookieHeaders(cookies),
-  };
-
-  const range = parseRange(headerValue(req, 'range'), size);
-
-  // 有 Range 但一个字节都给不出：416 + `bytes */总长`（HEAD 同样只回头）
-  if (range === 'unsatisfiable') {
-    res.writeHead(416, {
-      ...headers,
-      'Content-Range': `bytes */${size}`,
-      'Cache-Control': 'no-store',
-    });
-    res.end();
-    return;
-  }
-
-  // 206 Partial Content：只发要的那一段（start / end 都已按文件大小夹好）
-  if (range) {
-    res.writeHead(206, {
-      ...headers,
-      'Content-Range': `bytes ${range.start}-${range.end}/${size}`,
-      'Content-Length': String(range.end - range.start + 1),
-    });
-    if (head) {
-      res.end();
-      return;
-    }
-    await sendFile(res, file, range);
-    return;
-  }
-
-  // 没有（或不认识）Range：整文件 200，行为与以前一致
-  res.writeHead(200, {
-    ...headers,
-    'Content-Length': String(size),
   });
   if (head) {
     res.end();
     return;
   }
-  await sendFile(res, file);
+  res.end(body);
 }
 
 async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -394,7 +279,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       break;
   }
 
-  await serveStatic(req, res, pathname, head, setCookies);
+  await serveStatic(res, pathname, head, setCookies);
 }
 
 const server = createServer((req, res) => {

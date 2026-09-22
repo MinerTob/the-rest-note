@@ -131,7 +131,6 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 焦点圈（仅键盘） | `src/scripts/input-modality.ts`、`src/styles/global.css` | `trackInputModality()` | `html[data-input]` |
 | LCD 时钟 | `src/components/LcdClock.astro`、`src/scripts/clock.ts` | `initClock()` | `[data-clock]`、`[data-clock-time]`、`[data-clock-date]` |
 | 背景音乐播放器 | `src/components/MusicSystem.astro`、`src/scripts/music-manager.ts`、`music-ui.ts`、`src/lib/music.ts` | `MusicManager`、`initMusicUI()` | `[data-music]`、`[data-music-toggle/-progress/-volume/-state/-title/-subtitle/-time]` |
-| 音频解锁（全站唯一入口） | `src/scripts/audio-unlock.ts` | `initAudioUnlock({ gated })`、`audioUnlock()`、内部 `unlockAll()` / `isExplicitAudioControlGesture()` | 手势 `pointerdown` / `keydown`（document capture，`passive`）；**显式播放控件除外**：`[data-music-toggle]`、`[data-identity-play]` |
 | 播放进度记忆 | `src/lib/live-timeline.ts` | `savedPosition()` / `savePosition()` / `restartPosition()` | sessionStorage `space.position.v1.<id>` |
 | MiniLab 25 键 | `src/components/MiniLab.astro`、`src/scripts/minilab.ts`、`notes.ts` | `initMiniLab()`、`MiniLabController` | `[data-minilab*]`、`[data-midi]`、`data-word-*` |
 | 钢琴采样引擎 | `src/scripts/piano.ts`、`src/lib/piano.ts` | `PianoEngine`、`nearestSample()`、`playbackRateFor()`、`samplesForRange()` | 事件 `piano:state` / `piano:context` / `piano:progress` |
@@ -342,17 +341,8 @@ function initMusicUI(music: MusicManager): void;
   - boot 里 `music.init()` 决定"这一趟该不该响"（用户暂停过 / 在 About 让位期间 → 不响，其余照旧）；
   - 自动播放被拦下时挂一次性手势兜底，**输入种类放宽到 `pointerdown` / `keydown` / `touchstart` / `touchmove` / `wheel` / `scroll` / `pointerup`**（手机上滚动就是 touch，用户动一下就能接上，不必点到播放器那一块）；
   - `canplay`（文件已就绪而元素还停着）、`visibilitychange`（切回这个标签页）、`pageshow`（从 bfcache 回来）各自会 `retryIfIdle()` 再试一次 —— 这三条都是"自己叫醒自己"，不需要别的系统伸手。
-- **"真正调 `el.play()`" 只有一个启动事务（`startInFlight` / `startToken`）**：自动恢复的入口很多（`init()`、`unlockAll()` → `retryIfIdle()`、`canplay` / `pageshow` / `visibilitychange`），以前各自直接 `attemptStart()`，同一瞬间可以并发好几次 `el.play()`；后一次打断前一次（AbortError），先失败的那次还会把状态写回 `ready` —— UI 说"暂停"而元素其实在响，用户点一下播放键反而把它 pause 掉（"响一下马上停"），而且那次 pause 把 `space.paused` 写成 true，之后每次刷新都不再自动恢复。
-  - `retryIfIdle()` / `init()` / `attemptStart()` 都先看 `startInFlight > 0` → **同一时刻只有一次启动事务**；
-  - 用户显式 `play()` 也能插进来，它 `++startToken` 之后旧的自动事务立刻过期：`await el.play()` 回来只许默默收场（不 `setState()`、不改音量、不覆盖用户那次的结果）；`pause()` 同样 `++startToken`，免得在飞的事务把刚按下去的暂停又顶起来；
-  - `startInFlight` 用**计数**而不是布尔：被顶替的事务也要能安全收尾，布尔会卡死在 true，之后就再也不自动起播；
-  - boot 那一趟**只发一枪**：`initAudioUnlock()` 里 `music.init()` 之后调 `unlockAll({ retryMusic: false })`，不再在同一 tick 对 MP3 补第二次自动启动（手势那一路才补）。
 - **第一次起播不从 0 淡入**（`applyVolumeForStart()`）：元素刚建出来时 volume 是 0，老写法要淡入 `AUDIO.fadeInMs`（2.4 秒），曲子开头那一下会被压到几乎听不见的音量里（timeline 在走、声音没有 —— 本人报的"第一拍没播出来 / 像还没加载好 timeline 就先走了"）。现在**本次文档的第一次**直接摆到目标音量（缓存的曲子立刻就响），之后（暂停再继续、切回放过的曲子）保持原来的淡入。暂停/继续与进度保存逻辑不变。
 - 音量渐变用 `requestAnimationFrame`（`ramp()`），进度两头都 `clamp01`；`prefers-reduced-motion` 时直接跳到目标音量（不渐变）。
-- **音频解锁只有 `src/scripts/audio-unlock.ts` 一个入口**（MP3 + 夜曲共用）：`pointerdown` / `keydown` 在 document capture 阶段调 `unlockAll()`（`primeIdentityPiano()` + "想播就 `transport.start()`" + `music.retryIfIdle()`）。
-  - **但显式播放控件要排除**：手势 `target.closest('[data-music-toggle], [data-identity-play]')` 命中时这一层**不**解锁。`pointerdown` 永远早于 `click`，抢先把音频恢复成"正在播放"的话，随后播放器自己的 `click` toggle 会看到"已经在播"并把它 pause 掉 —— 表现为 SAME VISIT 刷新后"第一次点播放没反应、第二次才正常"（MP3 与 MIDI 同一症状，本人报的回归）。
-  - 那两个按钮自己那条 click 链就够：MP3 是 `music.toggle()` → `music.play()`；夜曲是 `transport.start()` → `begin()` → `piano.ensure()`（在第一个 `await` 之前），都还在这次 click 的用户激活链里。
-  - **不要改成 bubble 监听**：`pointerdown` 即使冒泡也仍在 `click` 之前，竞争照旧；**也不要排除整个 button**：页面空白处、别的按钮上的 pointerdown / keydown 仍然要走全局解锁（刷新后被拦下的音频，用户随便点一下就能恢复）。
 - 曲目定义在 `src/lib/music.ts`：`TRACKS`、`DEFAULT_TRACK_ID`、`AUDIO`（音量常量）、`getTrack()`；纯函数 `clamp01()` / `easeOutQuad()` / `volumeAt()`（有单测 `tests/audio.test.mjs`）。
 - 进度记忆在 `src/lib/live-timeline.ts`：`savedPosition(id, duration)` / `savePosition(id, position)` / `restartPosition(id)`，存 sessionStorage `space.position.v1.<id>`，只记"真正播放过"的位置。
 - 切主题会触发 `crossfadeTo()`（主题 ↔ 曲目绑定见 `src/lib/themes.ts` 的 `THEME_TRACK`）。
@@ -627,12 +617,6 @@ visitSession(): VisitSession;                  // 见 §5.15：这一趟的 id /
   - `initNocturne()` 在 boot 里调用，`disposeNocturne()` 在 `astro:before-swap` 里调用；缺采样或缺用户手势时只把状态标成 `waiting`，等下一次点击再开始。
   - 切到后台会暂停、切回来接着弹（与 About 页一致）；主题曲的让位由 `app.ts` 的 `setAboutActive(true)` 负责（见 §5.5）。
   - **`playing` 跟着 AudioContext 走，不跟着 UI 走**：`piano:context` 监听有两个方向 —— 上下文变成 `running` 时，若 `desired && !playing` 就 `begin()`；上下文**离开** `running`（iOS 音频会话被打断 / `suspended` / `interrupted`）时若还在 `playing` 就 `suspend()`：存位置、掐音、`playing = false`、通知 UI，**`desired` 保留**。上下文回来时上面那一支再 `begin()`，从存下的 offset 接着弹。**系统打断不等于用户暂停**：只有 `pause()`（点暂停）与离开这一族（`stop()`）才清 `desired`。少了这条反方向同步，`isPlaying()` 会一直是 `true` —— UI 显示在播、位置冻在不再前进的 `currentTime` 上、`audio-unlock.ts` 的 `desired && !isPlaying()` 也不成立，连真实手势都接不回来（"幽灵演奏"，详见 §10）。
-- **`start({ byUser })` / `pause({ byUser })`：分清"用户要听"和"自动恢复"**。自动恢复的入口有好几个（进关于区 `setIdentityActive(true)`、SAME VISIT 刷新 boot、`audio-unlock` 的 `unlockAll()`、上下文醒来后的重试、页面手势兜底），它们**不带** `byUser`；只有用户自己那三下带 —— 播放按钮、重播按钮、页面手势（`initNocturne()` 的 activate / `identity-player` 的 activate）。
-  - 用户点了暂停 → `pause({ byUser: true })` 在 sessionStorage 写下 `space.nocturne-paused`；此后**所有自动路径都不许再把它接回来**（`start()` 一看这个记号就 return），刷新、重进关于区、随便点一下页面都不行；
-  - 用户自己再点播放 / 重播 → `clearUserPause()` 清掉记号（`restart()` 自己也清），以他为准；
-  - 场景离开（`setIdentityActive(false)`）与真的离开这一族（`stop()`）走的是**不带** `byUser` 的 `pause()`：只清 `desired`，不写"用户暂停"；
-  - 用 sessionStorage（不是 localStorage）是因为它属于"这一趟访问"：同一趟里刷新不许覆盖用户的暂停，新的一趟（新标签页 / 新会话）自然重新开始演奏。
-  - SAME VISIT 刷新正好落在关于区时，`app.ts` 的 boot 会在 `initJourney()` 之后**立刻** `initIdentity()` + `setIdentityActive(true)`（判据复用 `aboutOnScreen()`，和观察器同一个阈值），不再等 IntersectionObserver 的第一次回调才建立 `desired`；About 不在视口就什么都不做。
 - 状态钩子：`[data-nocturne-ready]`（乐谱解析完成）、`[data-nocturne-state="waiting|playing|paused"]` —— 排查"这一页怎么没声音"先看这两个。
 - 单测：这一页是排版 + 内容 + 浏览器行为，只有常量层面的单测（`tests/identity.test.mjs` 里的音量断言）；改动后在浏览器里核对分节标题、图片、返回按钮与夜曲即可（`npm run build` 会校验内容集合字段）。
 
@@ -772,12 +756,6 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 - **`#fragment` 服务端看不见**：`/#about`、`/en/#about` 在服务器眼里只是 `/`，所以首页那四个 Journey hash 的早期清理仍然由 `BaseHead.astro` 在客户端做（见 §5.15）。
 - **`POST /api/enter`**：浏览器点"进入空间"时（同一次点击、不 await）打过来，网关回 `204 No Content` 并写 `rest_note_entered=1`；不返回页面、不管音频。别的方法 → `405`。
 - **启动**：`PORT` 读 `process.env.PORT`（本地默认 3000），监听 `0.0.0.0`；Node 直接跑 TypeScript（`node --experimental-strip-types`），所以没有构建步骤、没有框架依赖（不用 Express）。`SIGTERM` 时 `server.close()` 后退出。
-- **服务端的 NEW VISIT 边界（Fetch Metadata）**：`rest_note_entered` 是 session cookie，会一直跟着浏览器会话，所以"点过 Entry Gate 之后在地址栏重新输入子页"这类**新的外部导航**必须由服务端认出来并重置。网关读 `Sec-Fetch-Mode` / `Sec-Fetch-Dest` / `Sec-Fetch-Site`，交给 `isFreshExternalNavigation()`（§5.18 顶部签名）：
-  - `mode: navigate` + `dest: document` + `GET`/`HEAD` 才算"顶层文档导航"（`/_astro/*`、CSS/JS、图片、字体、`*.mp3`、`*.mid`、`POST /api/enter`、`/health` 天然不匹配）；
-  - `site: none`（地址栏 / 书签）/ `cross-site`（外链）/ `same-site`（同站其它 origin、子域）→ **freshNavigation = true**。此时：换一个新的 `rest_note_visit`、**真正删掉** `rest_note_entered`（`Max-Age=0`，不是只在内存里当 false）、`effectiveEntered = false` 再交给 `decideEntry()`；所以子路由照旧 302 回本语言首页，首页则显示 Entry Gate；
-  - `site: same-origin`（当前页刷新、站内导航、ClientRouter 请求）与**头缺失 / 认不出来**（老浏览器、代理抹头）→ 不强制 NEW，cookie 原样保留，由客户端 visit-session 兜底。**这一条是"已进门的子页刷新不被送回首页"的关键**。
-  - 只在 `isHtmlPagePath()` 上认：地址栏输入 `/rss.xml` 之类那也 document 导航，但不是站内页面入口，不动访问状态。
-  - 前端 `BaseHead.astro` **不恢复** `location.replace('/' | '/en/')`：pathname redirect 完全由 Node 执行，客户端只留 `#home` / `#blog` / `#lab` / `#about` 这四条服务端永远看不到的 fragment cleanup。
 - **`GET /health`（Render 健康检查）**：在 `handleRequest` 的**最前面**处理，早于 cookie 读取、Entry Gate 判定与静态分发 —— 它不读也不写任何 cookie（`rest_note_visit` / `rest_note_entered` 都不会被创建）、不参与 302、不读 `dist/`、不改任何访问状态。`GET` / `HEAD` → `200` + `Content-Type: text/plain; charset=utf-8` + `Cache-Control: no-store`，body 固定 `ok`；其它方法 → `405`（`Allow: GET, HEAD`）。
 - **Render Blueprint**：仓库根目录的 `render.yaml` 声明这个 Web Service（`runtime: node`、Free plan、`branch: main`、`buildCommand: npm ci && npm run build`、`startCommand: npm run start:server`、`healthCheckPath: /health`、`autoDeployTrigger: commit`）；没有 disk / 数据库 / 写死的 PORT / 多余环境变量，Node 版本沿 `package.json` 的 `engines`（`>=22.12.0 <25.0.0`），不在 `render.yaml` 里重复设 `NODE_VERSION`。
 - 手动新建服务时的等价配置：Build Command `npm install && npm run build`，Start Command `npm run start:server`。
@@ -800,12 +778,11 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 | `rest-note.visit` | sessionStorage | 这一趟访问的 id（跟着标签页走；新的一趟会换成新的） | `src/scripts/visit-session.ts`（判定在 `src/lib/visit.ts`） |
 | `rest-note.entry-passed` | sessionStorage | **这一趟**已通过入场页；判定为新的一趟访问时清掉（只清这一个 key） | `src/scripts/visit-session.ts` |
 | `space.scene-scroll` | sessionStorage | 离开"关于这一族"页面时记下的精确 `{ path, y }`；回来时取一次就清掉（第一帧直接落在原处） | `src/scripts/scene-scroll.ts` |
-| `space.nocturne-paused` | sessionStorage | **用户自己按过夜曲的暂停**（`1` / `0`）：自动恢复（进关于区 / 刷新 boot / 手势兜底）据此让路，用户点播放 / 重播时清掉；新的一趟访问自然重置（§5.14） | `src/scripts/nocturne-transport.ts`（读写走 `storage.ts` 的 `readSessionBool()` / `writeSessionBool()`） |
 | `history.state.restNoteVisit` | 历史条目（不是存储） | 当前历史条目属于哪一趟访问：刷新会带着它（同一趟），地址栏重新输入网址则是新条目（新的一趟） | `src/scripts/visit-session.ts`（纯函数 `stampEntryToken()` / `readEntryToken()`） |
 | `rest_note_visit` | cookie（HttpOnly，session 级） | **服务端**这一趟访问的 id（随机 token，`randomBytes(24)` → base64url）；网关补发，值不含任何信息 | `server/visit-cookie.ts`（§5.18） |
 | `rest_note_entered` | cookie（HttpOnly，session 级） | **服务端**这个 session 有没有通过 Entry Gate（值只有 `1`）；由 `POST /api/enter` 写入，网关据此决定要不要拦子路由 | `server/visit-cookie.ts` + `src/scripts/entry-gate.ts`（§5.11 / §5.18） |
 
-规则：所有读写都走 `src/scripts/storage.ts` 的封装（`readString` / `writeString` / `readNumber` / `readBool` / `writeNumber` / `writeBool`，以及 sessionStorage 版的 `readSessionBool` / `writeSessionBool`），隐私模式下静默降级，不抛异常。跨设备/长期偏好放 localStorage，一次性、会话内的放 sessionStorage。
+规则：所有读写都走 `src/scripts/storage.ts` 的封装（`readString` / `writeString` / `readNumber` / `readBool` / `writeNumber` / `writeBool`），隐私模式下静默降级，不抛异常。跨设备/长期偏好放 localStorage，一次性、会话内的放 sessionStorage。
 例外：`visit-session.ts` 直接读 sessionStorage 是为了能一起处理"隐私模式下拿不到"（数组用的是 `try/catch` + 内存兜底），`history.state` 本来就不在 `storage.ts` 的管辖范围内。身份落点 cookie 名 `rest-note-identity-v3-<这一趟访问的 id>` 也跟着这里走（旧的 `rest-note.identity-visit` key 已不再使用）。
 服务端那两个 cookie（`rest_note_visit` / `rest_note_entered`）**只能由 Node 网关读写**（HttpOnly，前端 JS 看不到，也不该看到）：它们只存随机 token 与 `1`，用途只有一个 —— 判断这个 session 能不能直接进子页面。
 
@@ -908,48 +885,6 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
-
-### 2026-09-22 · 消除音频刷新恢复竞争并恢复自动续播
-
-- 需求：本人报三件事（现象更新）：①MIDI 显式播放按钮已经修好（上一版那刀不动）；②**MP3 在 Home 顶部点播放"响一下、随后马上暂停"**（发生在 Home，不是 About，所以不是 MIDI 让位）；③**SAME VISIT 刷新后 MP3 / MIDI 都不再自动恢复**，必须手动触发。要求这轮**不再动显式播放按钮的事件竞争**，重点处理"刷新自动恢复 + MusicManager 并发启动"；恢复"刷新前在播且用户没主动暂停 → 刷新后主动尝试继续播"的原语义；不许用"浏览器可能拒绝"当借口把自动恢复整条取消；同时**保护用户主动暂停**（MP3 的 `space.paused`，MIDI 若没有持久记号的先梳理语义再做最小记录）；不许碰 `server/` / Fetch Metadata / cookie / Entry Gate HTTP session / BaseHead / scroll / Header / Render 配置，也不许撤销上一版在 capture 里排除 `[data-music-toggle]` / `[data-identity-play]` 的那一刀。
-- 根因（两个叠在一起）：
-  1. **MusicManager 没有启动锁**。自动恢复入口很多（`initAudioUnlock()` 里 `music.init()` 之后紧接 `unlockAll()` → `retryIfIdle()`，再加 `canplay` / `pageshow` / `visibilitychange`），同一 tick 就能连发两次 `attemptStart()` → 两次并发 `el.play()`。后一次打断前一次（AbortError），而**先失败的那次仍会把状态写回 `ready`** —— 于是元素在响、UI 显示暂停；用户点一下播放键，`toggle()` 看元素在播 → `pause()`："响一下马上停"。更糟的是那次 `pause()` 把 `space.paused` 写成了 `true`，**之后每次刷新都不再自动恢复**（现象③的 MP3 部分）。
-  2. **MIDI 的 `desired` 只在观察器回调里建立**：SAME VISIT 刷新落到关于区时，`desired = true` 要等 IntersectionObserver 第一次回调（下一帧之后）才立起来，刷新恢复不是"boot 阶段"的事。
-- 改动：
-  1. **`src/scripts/music-manager.ts`**：新增 `startInFlight`（在飞的启动事务**计数**）+ `startToken`（最新事务代号），配 `beginStart()` / `isCurrentStart()` / `endStart()`。`retryIfIdle()` / `init()` / `attemptStart()` 先看 `startInFlight > 0` → 同一时刻只有一个启动事务；`attemptStart()` 与显式 `play()` 都在 `await el.play()` 回来后先确认"我还是最新的"，过期事务只默默收场（**不 `setState()`、不改音量、不覆盖用户那次的结果**）；`pause()` 也 `++startToken`（免得在飞事务把刚按下的暂停又顶起来）。用计数而非布尔：被顶替的事务也要能安全收尾，布尔会卡死。
-  2. **`src/scripts/audio-unlock.ts`**：`unlockAll({ retryMusic })`；`initAudioUnlock()` 里 `music.init()` 之后用 `retryMusic: false` —— boot 那一趟对 MP3 **只发一枪**（手势那一路照旧补枪）。**上一版"显式播放控件让位"的排除原样保留**。
-  3. **`src/scripts/nocturne-transport.ts`**：新增"用户自己按过暂停"的最小状态记录（sessionStorage `space.nocturne-paused`，读写走 `storage.ts` 新增的 `readSessionBool()` / `writeSessionBool()`）：`start({ byUser })` 只有用户路径才清记号、否则记号在就让路；`pause({ byUser })` 只有用户那次才写记号（场景离开 / `stop()` 不写）；`restart()` 清记号；对外多一个只读 `isUserPaused()`。
-  4. **`src/scripts/identity-player.ts` / `nocturne.ts`**：把"用户意图"标出来 —— 播放按钮（`byUser: true`，会清记号）、重播按钮（`restart()` 自带清除）、页面手势 activate（`byUser: true`，Intro 页没有按钮，手势就是唯一入口）；场景激活 / 离开走不带参数的 `start()` / `pause()`。
-  5. **`src/scripts/app.ts`**：`initJourney()` 之后，若 `aboutOnScreen(journey)` 为真（判据与观察器同一个 `SCENE_ENTER` 阈值）立刻 `initIdentity()` + `setIdentityActive(true)` → `transport.start()` → `desired = true` + `begin()`：**刷新时本来就在 About 的，意图在 boot 阶段就立起来**，不再等观察器下一帧；About 不在视口则什么都不做（不起 MIDI）。
-- 结果：SAME VISIT 刷新 → MP3 由 `init()` 一枪主动 `attemptStart()`，失败就安静停在 ready 等第一次真实手势（**不再有第二次并发启动把它写成假暂停**）；MIDI 在 About 在屏时 boot 阶段就 `desired = true`；用户按过暂停的，两条链都不许自动接回，直到他自己点播放 / 重播 / 页面手势。
-- 文件：`src/scripts/music-manager.ts`、`src/scripts/audio-unlock.ts`、`src/scripts/nocturne-transport.ts`、`src/scripts/identity-player.ts`、`src/scripts/nocturne.ts`、`src/scripts/app.ts`、`src/scripts/storage.ts`、`DEVELOPMENT.md`（§3 / §5.5 / §5.14 / §6.1 / 本条）。
-- 钩子/数据：新增一个 sessionStorage key `space.nocturne-paused`（§6.1）；`storage.ts` 新增 `readSessionBool()` / `writeSessionBool()`；`NocturneTransport.start()/pause()` 多一个可选 `{ byUser }`；没有新增 data-* 钩子或自定义事件，`server/` 与 cookie 一个字没动。
-- 验证：`npm run check` 112 个文件 0 错误 0 警告 0 提示；`npm run build` 19 页。按要求没跑浏览器 / Playwright / CDP，也没做本地交互测试。
-
-### 2026-09-22 · 修复全局音频解锁抢占播放按钮首次点击
-
-- 需求：本人报一个前端音频共享回归 —— SAME VISIT 刷新后如果音频没有立即恢复，**第一次点"播放"没效果，第二次才正常**；MP3（MusicManager）与 MIDI（Nocturne）症状完全相同。只修"全局 unlock 与显式播放控件的竞争"这一件事。
-- 根因：`src/scripts/audio-unlock.ts` 的 `bindGestureUnlock()` 在 document **capture** 阶段听 `pointerdown` / `keydown`，而 `pointerdown` 永远早于 `click`。第一次点显式播放按钮时的顺序是：`pointerdown`（capture）→ `unlockAll()` 按各自意图把音频恢复成 playing → `click` 才进到播放器自己的 toggle → toggle 看到"已经在播" → 又把它 pause 掉。净效果就是第一击≈没变化。受影响的正是 `[data-music-toggle]`（MP3）与 `[data-identity-play]`（夜曲）。
-- 改动（只改 `src/scripts/audio-unlock.ts`）：新增 `EXPLICIT_AUDIO_CONTROL = '[data-music-toggle], [data-identity-play]'` 与 `isExplicitAudioControlGesture(event)`（`event.target instanceof Element && target.closest(...)`）；`bindGestureUnlock()` 的 `onGesture` 收到 Event 后**命中显式播放控件就直接 return**，其余手势照旧 `unlockAll()`。`capture: true` / `passive: true` 保持不变（改成 bubble 没用：`pointerdown` 冒泡也仍在 `click` 之前）。
-  - 为什么那两个按钮不需要别人代劳：MP3 的 `click` → `music.toggle()` → `music.play()` → `HTMLAudioElement.play()`；夜曲的 `click` → `transport.start()` → `begin()` → `piano.ensure()`（在 `begin()` 第一个 `await` 之前就执行）—— 都仍在这次 click 的可信用户激活链里。
-- 明确没碰：`identity-player.ts` 自己那套 `[data-identity-play] / [data-identity-restart] / [data-identity-progress] / [data-identity-volume]` 的 activate 排除（本轮冲突与它无关）、`MusicManager.toggle()`、`NocturneTransport.start()/pause()`、刷新恢复语义（不改 `userPaused` / `desired` / localStorage / sessionStorage / live-timeline）、服务器 cookie 与 Fetch Metadata、Entry Gate、其它任何音频文件。
-- 文件：`src/scripts/audio-unlock.ts`、`DEVELOPMENT.md`（§3 / §5.5 / 本条）。
-- 钩子/数据：没有新增 / 删除 data-* 钩子、storage key、自定义事件；只是让全局手势解锁**识别**既有的两个播放控件钩子（`[data-music-toggle]` / `[data-identity-play]`）并让位。
-- 验证：`npm run check` 112 个文件 0 错误 0 警告 0 提示；`npm run build` 19 页。按要求没动 `server/`、没跑浏览器自动化（无 Playwright / CDP），三台设备的实机确认留给你。
-
-### 2026-09-22 · 用 Fetch Metadata 修复服务端 NEW VISIT 入口判定
-
-- 需求：本人报"已经点过 Entry Gate 之后，`rest_note_entered=1` 会一直跟着浏览器 session；之后在 Edge / Chrome 地址栏重新输入 `/about/intro/`、`/en/about/intro/`，服务器仍看到 entered=true、直接放行子页，不再回首页"——这是**服务端访问边界缺失**，不是前端 redirect 问题。要求：真正的新的外部 HTTP 导航（地址栏 / 书签 / 外链，以及同站其它 origin）必须算 NEW VISIT（换 `rest_note_visit`、清 `rest_note_entered`、子路由 302 回本语言首页、首页显示 Entry Gate）；SAME VISIT（当前页刷新 / 站内导航 / ClientRouter / `/api/enter` / 静态资源）不许清 entered；不许依赖前端 `PerformanceNavigationTiming` 替服务器做判断；不许恢复 `BaseHead.astro` 的 `location.replace`；不许碰音频、Entry Gate 音频调用顺序、scroll、Header。
-- 根因：`rest_note_entered` 是 session cookie，只在"这一趟浏览器会话"结束时才消失。上一版网关的入口判定只读 cookie（`decideEntry({ entered: cookies.entered })`），没有任何"这一次请求是不是新的外部导航"的信号 —— 于是同一会话里再从地址栏打开子页，服务器眼里和"站内点进来的 SAME VISIT"完全一样，302 分支永远不走。客户端那套 `visitBoundary()` 判得再准也管不到 HTTP 层（那时 HTML 已经发出去了）。
-- 改动（只改 `server/` 三个文件 + 文档）：
-  1. **`server/entry-router.ts`**：新增纯函数 `isFreshExternalNavigation({ method, mode, dest, site })` —— `GET`/`HEAD` + `Sec-Fetch-Mode: navigate` + `Sec-Fetch-Dest: document` 才算顶层文档导航，再看 `Sec-Fetch-Site`：`none` / `cross-site` / `same-site` → `true`；`same-origin` → `false`；头缺失 / 认不出来 → `false`（不强制 NEW，保留 cookie 让客户端兜底）。
-  2. **`server/visit-cookie.ts`**：新增 `clearEnteredCookie(secure)` → `rest_note_entered=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`（HTTPS 仍加 `Secure`）。**必须真的让浏览器删掉**：只在服务端把 entered 当 false 用，302 之后的下一跳还会带着旧 `entered=1` 回来。
-  3. **`server/index.ts`**：新增 `headerValue()` 取请求头；`freshNavigation = isHtmlPagePath(pathname) && isFreshExternalNavigation({...})`；`effectiveEntered = freshNavigation ? false : cookies.entered` 交给 `decideEntry()`；`freshNavigation` 时无条件 `Set-Cookie` 两条 —— 新的 `rest_note_visit`（轮换 token，不看旧 cookie 是否存在）与 `clearEnteredCookie()`。`/health` 仍然在最前面返回，压根不读 cookie、不参与这一切。
-- 结果（`/en/about/intro/` 为例）：地址栏输入 → `Sec-Fetch-Site: none` + navigate/document → freshNavigation → 302 `/en/` 的响应上同时写回"新 token + entered 删除" → 浏览器请求 `/en/`（这次是 redirect 的后续，entered 已为空）→ 英文首页 + 英文 Entry Gate → 点 Enter → `POST /api/enter` → `rest_note_entered=1` → 之后站内去 `/en/about/intro/` 正常放行。
-- 明确没碰：Entry Gate session 语义（客户端 `visitSession()` / `visitBoundary()` 一行未动）、`/api/enter`、静态文件服务与防 traversal、`BaseHead.astro`（不恢复 `location.replace`，只留四条 fragment cleanup）、MusicManager、audio-unlock、NocturneTransport、PianoEngine、live-timeline、identity-player、Entry Gate 音频调用顺序、scroll、Header。
-- 文件：`server/entry-router.ts`、`server/visit-cookie.ts`、`server/index.ts`、`DEVELOPMENT.md`（§5.18 / 本条）。
-- 钩子/数据：无新增 / 删除 data-* 钩子、storage key、自定义事件；cookie 名字与属性不变，只是新增了"新外部导航时把 `rest_note_entered` 删掉"这一条写路径。
-- 验证：`npm run check` 112 个文件 0 错误 0 警告 0 提示；`npm run build` 19 页；`node --experimental-strip-types --check` 对三个 server 文件 3/3 通过。按要求没起服务、没做本地交互测试、没跑浏览器 / CDP / Playwright。
 
 ### 2026-09-22 · 增加 Render Web Service Blueprint 与健康检查
 
