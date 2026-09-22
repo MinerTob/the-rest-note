@@ -2,6 +2,7 @@ import type { MusicManager } from './music-manager';
 import { requestMotionAccess } from './identity-motion';
 import { audioUnlock } from './audio-unlock';
 import { primeMiniLabPiano } from './minilab';
+import { getMidiBridge } from './midi';
 import { stopNocturneTransport } from './nocturne-transport';
 import { visitSession } from './visit-session';
 
@@ -125,6 +126,19 @@ export function initEntryGate(music: MusicManager): boolean {
     // 同一手势里也把 MiniLab 那架琴预热：它的采样原来要等你第一次按琴键才开始下载，
     // 于是第一声只能拿合成器顶上（本人反馈"第一声不是真实音源"）。现在走到实验室前就绪。
     primeMiniLabPiano();
+
+    /*
+     * 紧接着在**同一个可信入场手势**里申请 Web MIDI 权限。
+     *
+     * 为什么必须放在这里：实体 MIDI 键盘在拿到 `MIDIAccess` 之前，网页根本收不到它的按键事件，
+     * 所以"实体 MIDI 第一次按键"没法当触发手势；而入场页这一次点击是全站人人都会做的可信手势。
+     * 此时上面那句 `primeMiniLabPiano()` 已经开始预热 PianoEngine 的真实钢琴采样，所以之后
+     * 实体键盘一响就是采样音源，不需要先碰网页模拟琴键（Lab 里的 prime() 仍作为重试兜底）。
+     *
+     * 不 await：`requestMIDIAccess({ sysex:false })` 由浏览器处理权限，这里不等它 ——
+     * 本次点击后面的收尾（遮罩动画、拉回顶部等）继续留在同一个同步任务里。
+     */
+    void getMidiBridge().start();
 
     gate.classList.add('is-leaving');
     button.disabled = true;
