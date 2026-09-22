@@ -5,6 +5,7 @@ import {
   type PianoSample,
 } from "@/lib/piano";
 import { MINILAB_FIRST_MIDI, MINILAB_KEY_COUNT } from "./notes";
+import { describeError, recordAudioFlight } from "./audio-flight-recorder";
 
 /**
  * Piano Sound Engine
@@ -153,6 +154,13 @@ export class PianoEngine extends EventTarget {
    * 浏览器不允许在交互之前创建/恢复 AudioContext。
    */
   ensure(): void {
+    // 诊断：AudioContext 的每一次建/唤醒都记下来（只读，不动任何时机）
+    recordAudioFlight("piano.ensure.enter", {
+      hasContext: Boolean(this.ctx),
+      contextState: this.ctx?.state ?? null,
+      state: this.state,
+      attempts: this.attempts,
+    });
     /*
      * 上下文已经被关掉（dispose 之后又被引用、或系统回收）—— 整套重来。
      * 只认 `failed` 就返回是另一种死法：状态还写着 ready，声音却永远出不来。
@@ -167,7 +175,10 @@ export class PianoEngine extends EventTarget {
     }
 
     // 采样下了好几轮还是全军覆没：先不再空转（重建引擎会重新给机会）
-    if (this.state === "failed" && this.attempts >= PRELOAD_ATTEMPTS) return;
+    if (this.state === "failed" && this.attempts >= PRELOAD_ATTEMPTS) {
+      recordAudioFlight("piano.ensure.return", { reason: "failed-after-attempts" });
+      return;
+    }
 
     if (!this.ctx) {
       const Ctor: typeof AudioContext | undefined =
@@ -175,13 +186,16 @@ export class PianoEngine extends EventTarget {
         (window as unknown as { webkitAudioContext?: typeof AudioContext })
           .webkitAudioContext;
       if (!Ctor) {
+        recordAudioFlight("piano.ensure.return", { reason: "no-audiocontext-ctor" });
         this.setState("failed");
         return;
       }
       this.ctx = new Ctor();
-      this.ctx.addEventListener("statechange", () =>
-        this.emit("piano:context"),
-      );
+      recordAudioFlight("piano.context.created", { state: this.ctx.state });
+      this.ctx.addEventListener("statechange", () => {
+        recordAudioFlight("piano.context.statechange", { state: this.ctx?.state ?? null });
+        this.emit("piano:context");
+      });
       this.master = this.ctx.createGain();
       this.master.gain.value = this.volume * this.outputGain;
       this.master.connect(this.ctx.destination);
@@ -193,7 +207,21 @@ export class PianoEngine extends EventTarget {
      * 表现就是"关于区一直显示『点击或按键，即可接入钢琴演奏』、点播放没反应、刷新几次才好"
      * （本人实测）。所以这里只判断"没在跑就叫它 resume"。
      */
-    if (this.ctx.state !== "running") void this.ctx.resume();
+    if (this.ctx.state !== "running") {
+      // 诊断：resume 是"能不能出声"的关口，前后各记一条（仍然 fire-and-forget，只是挂上观察回调）
+      const ctx = this.ctx;
+      recordAudioFlight("piano.resume.before", { state: ctx.state });
+      void ctx.resume().then(
+        () => recordAudioFlight("piano.resume.resolved", { state: ctx.state }),
+        (error: unknown) =>
+          recordAudioFlight("piano.resume.rejected", {
+            ...describeError(error),
+            state: ctx.state,
+          }),
+      );
+    } else {
+      recordAudioFlight("piano.resume.skipped", { reason: "already-running", state: this.ctx.state });
+    }
     void this.preload();
   }
 

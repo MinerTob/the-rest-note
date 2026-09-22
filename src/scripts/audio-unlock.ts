@@ -1,5 +1,6 @@
 import { getGlobal } from './global';
 import { identityPiano, primeIdentityPiano, usesIdentityPiano } from './identity-audio';
+import { recordAudioFlight } from './audio-flight-recorder';
 
 /**
  * 全站**唯一**的"音频解锁"入口
@@ -38,20 +39,37 @@ let bound = false;
  * 解锁当前该响的音频。三件事各自幂等：建/唤醒那架琴的 AudioContext；
  * 让 MusicManager 按自己的意图恢复（尊重 userPaused 与 About 让位）；
  * 夜曲只在自己"想播"时才接上。
+ *
+ * （本轮只在这里插诊断记录：每个调用前后各一条，顺序一行没改。）
  */
 function unlockAll(): void {
   const global = getGlobal();
+  recordAudioFlight('unlockAll.enter', {
+    music: Boolean(global.music),
+    hasTransport: Boolean(global.nocturne),
+    desired: global.nocturne?.isDesired() ?? null,
+    musicPlaying: global.music?.isPlaying() ?? null,
+  });
 
   // 琴：建 / 唤醒 AudioContext（手势之外调用也无害，只是可能仍是 suspended）
+  recordAudioFlight('unlockAll.beforePiano');
   primeIdentityPiano();
+  recordAudioFlight('unlockAll.afterPiano', {
+    usesPiano: usesIdentityPiano(),
+    pianoRunning: usesIdentityPiano() ? identityPiano().isRunning : null,
+  });
 
   // 琴真的在跑了，夜曲又"想播"却没在播：接上（上下文刚醒时它自己的监听也会接）
   const transport = global.nocturne;
   if (usesIdentityPiano() && identityPiano().isRunning) {
-    if (transport?.isDesired() && !transport.isPlaying()) transport.start();
+    if (transport?.isDesired() && !transport.isPlaying()) {
+      recordAudioFlight('unlockAll.transportStart', { desired: true, playing: false });
+      transport.start();
+    }
   }
 
   // MP3：这一条自己判断 userPaused、About 让位与闸门
+  recordAudioFlight('unlockAll.beforeMusicRetry');
   global.music?.retryIfIdle();
 }
 
@@ -62,9 +80,27 @@ function unlockAll(): void {
  * 而这条监听本身是幂等的，留着下次手势接着试。
  */
 function bindGestureUnlock(): void {
-  if (bound) return;
+  if (bound) {
+    recordAudioFlight('bindGestureUnlock.skipped', { reason: 'already-bound' });
+    return;
+  }
   bound = true;
-  const onGesture = (): void => unlockAll();
+  recordAudioFlight('bindGestureUnlock.bound', { gestures: GESTURES.join(',') });
+  const onGesture = (event: Event): void => {
+    // 诊断：刷新期间到底有没有"意外的用户手势"（这决定自动播放能不能过）
+    recordAudioFlight(`gesture.${event.type}`, {
+      target: (() => {
+        try {
+          const target = event.target;
+          if (!(target instanceof Element)) return null;
+          return `${target.tagName.toLowerCase()}${target.id ? '#' + target.id : ''}`;
+        } catch {
+          return null;
+        }
+      })(),
+    });
+    unlockAll();
+  };
   for (const name of GESTURES) {
     document.addEventListener(name, onGesture, { capture: true, passive: true });
   }
@@ -75,6 +111,7 @@ function bindGestureUnlock(): void {
  * 并且立刻按各自意图解锁一次。入场页在调用它之前已经放开闸门。
  */
 export function audioUnlock(): void {
+  recordAudioFlight('audioUnlock.enter');
   bindGestureUnlock();
   unlockAll();
 }
@@ -85,10 +122,16 @@ export function audioUnlock(): void {
  * 这样音频不会抢在用户"进入"之前出声。
  */
 export function initAudioUnlock(options: { gated: boolean }): void {
-  if (options.gated) return;
+  recordAudioFlight('initAudioUnlock.enter', { gated: options.gated });
+  if (options.gated) {
+    recordAudioFlight('initAudioUnlock.return', { reason: 'gated' });
+    return;
+  }
   bindGestureUnlock();
   // 先按"这一趟该不该响"发起一次（init 自己会认用户暂停：暂停过就只标状态、不出声），
   // 再走一遍统一解锁；浏览器拒绝时它会安静地停在 ready
+  recordAudioFlight('initAudioUnlock.beforeMusicInit');
   getGlobal().music?.init();
+  recordAudioFlight('initAudioUnlock.afterMusicInit');
   unlockAll();
 }
