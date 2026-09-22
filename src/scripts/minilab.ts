@@ -252,7 +252,15 @@ export function initMiniLab(): void {
   renderMidi();
   renderEngine();
 
-  // 第一次交互：解锁音频 + 申请 MIDI（都不在页面加载时做）
+  /*
+   * Lab 一加载就向浏览器申请 Web MIDI 权限（`navigator.requestMIDIAccess({ sysex:false })`，
+   * 权限完全由浏览器处理）：允许之后实体 MIDI 键盘直接可用，不必先点一下网页模拟琴键。
+   * `midi.start()` 自身有 started / pending 幂等保护，所以下面 prime() 里那次再调用也安全
+   * —— 它继续作为用户交互时的重试兜底（第一次被拒 / 设备稍后插入都还能再试）。
+   */
+  void midi.start();
+
+  // 第一次交互：解锁音频（并重试 MIDI 权限）
   let primed = false;
   const prime = () => {
     if (primed) return;
