@@ -317,36 +317,47 @@ click [data-lang-switch]
 
 ### 5.5 背景音乐
 
-**文件**：`src/components/MusicSystem.astro`、`src/scripts/music-manager.ts`、`src/scripts/music-ui.ts`、`src/lib/music.ts`、`src/lib/live-timeline.ts`
+**文件**：`src/components/MusicSystem.astro`、`src/scripts/music-manager.ts`、`src/scripts/music-ui.ts`、`src/scripts/audio-unlock.ts`、`src/lib/music.ts`、`src/lib/live-timeline.ts`
 
 ```ts
 class MusicManager extends EventTarget {
   get track(): Track;
-  init(): void;                         // 首次用户手势后解锁音频
+  init(): void;                         // boot：这一趟该不该自己响，只在这里判一次
   play(): Promise<void>; pause(): void; toggle(): void;
-  resume(): void;                       // 暂停后恢复
-  crossfadeTo(id, options?): Promise<void>;   // 换曲（force 可强制出声）
-  setVolume(v) / setMuted(v) / toggleMute() / setDucked(v): void;
+  resume(): void;                       // ThemeManager"同一首主题曲"路径
+  crossfadeTo(id, options?): Promise<boolean>;   // 换曲（force = 明确的"我要听这一首"）
+  retryIfIdle(): void;                  // 手势 / canplay / pageshow / visibility 的自动恢复入口
+  setAutoStart(v) / setVolume(v) / setMuted(v) / toggleMute() / setDucked(v): void;
   getState(): 'idle'|'ready'|'active'|'paused'|'error';
   getVolume(): number; isMuted(): boolean; isPlaying(): boolean;
   getProgress(): { currentTime, duration, ratio };
   seekToRatio(ratio): void;
-  setAboutActive(active: boolean): void;      // 进 About 时压低音量（duck）
+  setAboutActive(active: boolean): void;      // 只抢音频焦点（duck + 暂停），不改用户意图
 }
 function initMusicUI(music: MusicManager): void;
 ```
 
-- 事件：`MusicManager` 派发普通 `'change'`；UI（`music-ui.ts`）监听它刷新标题/状态/进度，并支持同页多个面板（`[data-music]` 循环绑定）。
-- **恢复播放只归 MusicManager 管，跟播放器面板在不在视口里没有任何关系**（`music-ui.ts` 只读状态、只转发点击/拖动，不会去启动音乐）：
-  - boot 里 `music.init()` 决定"这一趟该不该响"（用户暂停过 / 在 About 让位期间 → 不响，其余照旧）；
-  - 自动播放被拦下时挂一次性手势兜底，**输入种类放宽到 `pointerdown` / `keydown` / `touchstart` / `touchmove` / `wheel` / `scroll` / `pointerup`**（手机上滚动就是 touch，用户动一下就能接上，不必点到播放器那一块）；
-  - `canplay`（文件已就绪而元素还停着）、`visibilitychange`（切回这个标签页）、`pageshow`（从 bfcache 回来）各自会 `retryIfIdle()` 再试一次 —— 这三条都是"自己叫醒自己"，不需要别的系统伸手。
-- **第一次起播不从 0 淡入**（`applyVolumeForStart()`）：元素刚建出来时 volume 是 0，老写法要淡入 `AUDIO.fadeInMs`（2.4 秒），曲子开头那一下会被压到几乎听不见的音量里（timeline 在走、声音没有 —— 本人报的"第一拍没播出来 / 像还没加载好 timeline 就先走了"）。现在**本次文档的第一次**直接摆到目标音量（缓存的曲子立刻就响），之后（暂停再继续、切回放过的曲子）保持原来的淡入。暂停/继续与进度保存逻辑不变。
+**单一事实来源：两条不变量（§10 的 2026-09-22 重构记录里有动机与实测）**
+
+- **A. 用户意图只有一份：`shouldPlay`。** 由且仅由 `play()`（→ true）、`pause()`（→ false）、换主题的 force 路径（`crossfadeTo(id, { force: true })` 与同一首时的 `resume()`）改写；持久化仍用 `space.paused`（`shouldPlay = !space.paused`，key 不迁移）。**浏览器事件（`pause` / `playing` / `canplay` / `error`）、autoplay 被拒、About 让位、`visibilitychange` / `pageshow`、`retryIfIdle()` 一律不许改它** —— 它们只影响"此刻能不能响"。
+- **B. 实际在不在播只看当前那一个 `HTMLAudioElement`。** `isPlaying()` 直接读 `el.paused` / `ended` / `readyState`；`getState()` 现场推导（`error` → `paused`（用户不想播）→ `paused`（About 让位）→ `active`（元素真在响）→ `ready`（有元素、想播但没响）→ `idle`（还没建元素））。所以 **`active` 必然意味着元素真的在响**，不存在"UI 说在播、元素其实停着"；浏览器拦下 autoplay 时自然得到 `ready`，而不会被伪装成 `paused` 或 `active`。
+
+**其余不变量**
+
+- **C. `currentTime` 只有两个主动写入点**：① 接管一个 element 时恢复一次（`restorePositionOnce()`，每个 element 一生只做一次，元数据没到就挂**一个** `loadedmetadata` 等它）；② 用户拖进度条（`seekToRatio()`）。`play()` / `resume()` / `retryIfIdle()` / `canplay` / `pageshow` / `visibilitychange` **都不许**在起播前"同步一遍保存位置" —— 同一个元素停在哪儿就是哪儿，这就是"同一首暂停后继续不会跳回旧位置"的根据。
+- **D. About / MIDI 只抢音频焦点**：`setAboutActive(true)` 把音量归零并暂停所有主题 MP3、作废在飞的启动与切换，但**不动 `shouldPlay`**；`setAboutActive(false)` 只看 `shouldPlay` 决定要不要恢复（不再有"进入前想不想播"的第二份意图）。About 期间换主题仍然会把当前曲目切到新主题曲（恢复它自己的保存位置），只是保持暂停，离开 About 后按 `shouldPlay` 接着放。
+- **E. 自动恢复只有一条路、同一时刻最多一条在飞**：`init()` / `retryIfIdle()`（`canplay` / `pageshow` / `visibilitychange` / `audio-unlock` 都汇到这里）最终都进 `requestAutoStart()`，条件统一为 `shouldPlay && !inAbout && autoStart && !isPlaying()`；已有启动在飞就直接返回。`play()` 与它共用同一个"在飞"登记位 —— 入场页那次点击里 `music.play()` 紧跟着的 `audioUnlock() → retryIfIdle()` 因此不会在同一个元素上并发第二次 `el.play()`。
+- **F. 过期异步操作无害**：`switchToken` 在每次启动 / 切换 / 暂停 / 进出 About 时 +1；`await el.play()` 回来先对号，对不上就只许安静退场（旧元素已经不是当前曲目时顺手 `volume = 0; pause()`），绝不改 `shouldPlay`、不改 `this.el`、不停掉新的那次播放。
+- **G. 每首曲子各自一个 element、各自一条时间线**：`crossfadeTo()` 切走前把旧曲进度落到 `space.position.v1.track:<id>`（格式不变），新曲只在自己**第一次**被接管时 `restorePositionOnce()`；本次文档用过的元素里就是它自己的真实进度，反复切回来不会被 storage 覆盖。`force` 时**不再先 `await waitForCanPlay()`**（那会拖断用户手势链）：直接 `incoming.play()`（浏览器自己会等媒体 ready），旧曲在它真正起播前继续响，成功后再做原来的交叉淡入。autoplay 被拒时保留 `shouldPlay`，等下一次可信手势 / `canplay`。
+- **H. 显式播放按钮继续绕开全局 capture 解锁**：`audio-unlock.ts` 的 `EXPLICIT_AUDIO_CONTROL = '[data-music-toggle], [data-identity-play]'` —— 手势落在它们上面时 document capture 的 `unlockAll()` 不抢，交给按钮自己的 `click`（`music.toggle()` / `transport.start()`），第一击就生效。
+- **SAME VISIT 刷新的自动恢复怎么描述**：`initAudioUnlock({ gated:false })` 里 `music.init()` **只发一枪**（随后只补非 MP3 的琴 / 夜曲，不再 `retryIfIdle()`）。浏览器允许 → 立即接着放；浏览器拒绝 → 保持 `shouldPlay = true` + `ready`，等第一次真实 `pointerdown` / `keydown`（`unlockAll()`）或 `canplay` / `pageshow` / `visibilitychange` 再试。**这不是"一定允许无手势 autoplay"**，而是"主动尝试 + 保留意图 + 可重试"。
+- 事件：`MusicManager` 派发普通 `'change'`（原生媒体事件只触发它，不写状态）；UI（`music-ui.ts`）每 260ms 重读 `getState()` / `getProgress()` 刷新面板，支持同页多个面板（`[data-music]` 循环绑定）。
+- **第一次起播不从 0 淡入**（`applyVolumeForStart()`）：元素刚建出来时 volume 是 0，老写法要淡入 `AUDIO.fadeInMs`（2.4 秒），曲子开头那一下会被压到几乎听不见的音量里（timeline 在走、声音没有 —— 本人报的"第一拍没播出来 / 像还没加载好 timeline 就先走了"）。现在**本次文档的第一次**直接摆到目标音量，之后保持原来的淡入。暂停保留 450ms 淡出，但任何淡出都能被 `play()` / `pause()` / 切曲 / About 可靠取消（连同它"淡出结束再 `pause()`"的 `done` 回调）。
 - 音量渐变用 `requestAnimationFrame`（`ramp()`），进度两头都 `clamp01`；`prefers-reduced-motion` 时直接跳到目标音量（不渐变）。
 - 曲目定义在 `src/lib/music.ts`：`TRACKS`、`DEFAULT_TRACK_ID`、`AUDIO`（音量常量）、`getTrack()`；纯函数 `clamp01()` / `easeOutQuad()` / `volumeAt()`（有单测 `tests/audio.test.mjs`）。
 - 进度记忆在 `src/lib/live-timeline.ts`：`savedPosition(id, duration)` / `savePosition(id, position)` / `restartPosition(id)`，存 sessionStorage `space.position.v1.<id>`，只记"真正播放过"的位置。
-- 切主题会触发 `crossfadeTo()`（主题 ↔ 曲目绑定见 `src/lib/themes.ts` 的 `THEME_TRACK`）。
-- **"关于"这一族页面会让位**：`app.ts` 的 boot 里，只要页面上有 `[data-identity]`（About）或 `[data-nocturne]`（自我介绍页），就调用 `music.setAboutActive(true)` —— 主题音乐被暂停、音量归零，`play()` / `init()` 也会直接返回；这两页放的是同一首夜曲的钢琴演奏（§5.8 / §5.14）。回首页（Journey）时仍由 `initJourney()` 的观察器控制。
+- 切主题会触发 `crossfadeTo()`（主题 ↔ 曲目绑定见 `src/lib/themes.ts` 的 `THEME_TRACK`）；`warmOtherTrack()` 在第一次播放稳定 5 秒后悄悄把另一套主题曲缓冲好（只建缓存元素 + `load()`，不改当前曲目 / 意图 / 进度，保持 paused + volume 0），省流量模式下跳过。
+- **"关于"这一族页面会让位**：`app.ts` 的 boot 里，只要页面上有 `[data-identity]`（About）或 `[data-nocturne]`（自我介绍页），就调用 `music.setAboutActive(true)` —— 主题音乐被暂停、音量归零（意图保留）；这两页放的是同一首夜曲的钢琴演奏（§5.8 / §5.14）。回首页（Journey）时仍由 `initJourney()` 的观察器控制。
 - UI 文案（READY / PLAYING / 播放 / 暂停）从组件上的 `data-word-*` / `data-label-*-zh|-en` 读，脚本不再维护字典。
 
 ### 5.6 键盘乐器：MiniLab / 钢琴 / MIDI
@@ -885,6 +896,25 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-22 · 重构背景音乐状态机为单一播放意图与真实媒体状态
+
+- 需求：本人要求把背景 MP3 从"`state` / `userPaused` / `audio.paused` / 各种 retry 路径互相修正"改成**单一事实来源**，长期问题一次收口：SAME VISIT 刷新后偶发不恢复、UI 显示播放但真实播放器没在跑、自动恢复与第一次点播放按钮竞争、换主题后暂停/继续跳回旧位置、放置一段时间或 visibility / pageshow 之后状态逐渐脱节。硬约束：**最大限度保持外围 API**（不改 `music-ui.ts` / `theme.ts` / `app.ts` / `entry-gate.ts` / `nocturne-transport.ts` 的调用方式）、不改 server / visit / cookie / Range / Fetch Metadata / Entry Gate / MIDI / PianoEngine / NocturneTransport / UI / 主题视觉 / 语言 / 滚动，不加 debug recorder、不加 setTimeout 兜底、不新建第二套 manager。
+- 根因（旧设计的三处结构性缺陷）：①`private state: MusicState` 是一份**缓存出来的**播放状态，由 `setState()` 在十几个地方手写，于是"状态说 active、元素其实停着"这种分裂必然出现（`playing` / `pause` 事件、`attemptStart` 的 catch、`crossfadeTo` 的尾巴各写一套）。②播放意图是**反向**的 `userPaused`，再叠一个 `resumeAfterAbout` 去猜"进 About 之前想不想播"，两份意图互相修正。③`syncLive(el, id)` 在多条路径上（`loadedmetadata` / `attemptStart()` / `play()` / `crossfadeTo()`）用 storage 里的保存值覆盖 `currentTime` —— 同一个元素明明停在暂停处，`play()` 又把它拽回旧时间线（本人报的"换主题 → 放一会儿 → 暂停 → 播放会接近开头"）。
+- 改动（`src/scripts/music-manager.ts` 内核重写 + `src/scripts/audio-unlock.ts` 拆 boot 双启动 + §5.5 文档）：
+  1. **删掉缓存状态**：`private state`、`setState()` 全部移除，`getState()` 改为现场推导（`error` → `paused`（`!shouldPlay`）→ `paused`（About 让位）→ `active`（元素真在响）→ `ready`（有元素、想播没响）→ `idle`（还没建元素））。原生媒体事件只 `emit()`，让 UI 重新读现场。
+  2. **意图正向化**：`userPaused` → `shouldPlay`（`shouldPlay = !readBool('space.paused')`，**storage key 不迁移、不动已有设置**）；删掉 `resumeAfterAbout`。只有 `play()`（true）、`pause()`（false）、换主题的 force 路径会写它。
+  3. **About 只抢焦点**：`setAboutActive(true)` 归零音量 + 暂停所有主题 MP3 + 作废在飞操作，**不碰 `shouldPlay`**；`setAboutActive(false)` 只看 `shouldPlay` 决定恢复。About 期间换主题仍会切当前曲目（各自恢复自己的位置）但保持暂停。
+  4. **进度只恢复一次**：新增 `positionRestored` / `positionRestorePending`（两个 `WeakSet`）与 `restorePositionOnce(el, id)` —— 接管一个元素时恢复一次；元数据没到就只挂**一个** `loadedmetadata`（用 `{once:true}` + pending 标记防重复挂）。`play()` / `resume()` 里的 `syncLive()` 删除，`syncLive()` 本身也删掉。
+  5. **统一自动启动 + 并发保护**：`init()` / `retryIfIdle()` / `canplay` / `pageshow` / `visibilitychange` 全部汇入 `requestAutoStart()`（条件统一：`shouldPlay && !inAbout && autoStart && !isPlaying()`），用 `startInFlight` 单飞登记位保证同一时刻最多一条在飞；**显式 `play()` 也用同一个登记位** —— 入场页那次点击里 `music.play()` 紧跟的 `audioUnlock() → retryIfIdle()` 因此不会在同一个元素上并发第二次 `el.play()`。
+  6. **过期操作无害化**：`switchToken` 在启动 / 切换 / 暂停 / 进出 About 时 +1；`startElement(el, token)` 在 `await el.play()` 回来后对号 —— 过期就只安静退场（元素已不是当前曲目时 `volume=0; pause()`），不改 `shouldPlay` / 不改 `this.el` / 不停新的播放。失败也不伪装状态：`getState()` 自然给出 `ready`。
+  7. **切曲重构**：`crossfadeTo()` 切走前把旧曲进度落到它自己的 `space.position.v1.track:<id>`；新曲只在自己第一次被接管时恢复位置（用过的元素保留它自己的 `currentTime`）。**删掉先 `await waitForCanPlay()`（连同 `withTimeout()`）**：直接 `incoming.play()`（浏览器自己等媒体 ready），旧曲在它真正起播前继续响，成功后再交叉淡入；autoplay 被拒时保留 `shouldPlay`、曲目仍指向目标、状态 READY。
+  8. **`audio-unlock.ts` 拆 boot 双启动**：拆出 `unlockNonMusic()`（琴 + "琴在跑且夜曲想播"时接上夜曲），`unlockAll()` = `unlockNonMusic()` + `music.retryIfIdle()`（手势那一路用）；`initAudioUnlock({gated:false})` 只调 `music.init()` + `unlockNonMusic()`，**不再补第二枪 MP3**。`EXPLICIT_AUDIO_CONTROL` / `isExplicitAudioControlGesture()` 的让位逻辑原样保留。
+  9. `toggle()` 改成"`!shouldPlay` → play；真在播 → pause；想播没响 → play"，三种情况都对（autoplay 被挡住时不会再变成"暂停"）。`pause()` 保留 450ms 淡出，但 `play()` 会 `stopFades()` 把它连同"淡出结束再 `pause()`"的 `done` 一起取消（450ms 内又点播放的竞争）。
+- 边界（明确没动）：`music-ui.ts`、`theme.ts`、`app.ts`、`entry-gate.ts`、`nocturne-transport.ts`、`piano.ts`、`src/lib/live-timeline.ts`、`src/lib/music.ts` 一行未改（外围 API 与语义保持兼容）；`server/**`、cookie、Range、Fetch Metadata、NEW/SAME VISIT、Entry Gate、语言 / 滚动、MIDI 调度全部零修改；没有新增 debug / setTimeout / start lock 之外的机制，也没有第二套 MusicManager。
+- 文件：`src/scripts/music-manager.ts`、`src/scripts/audio-unlock.ts`、`DEVELOPMENT.md`（§5.5 / 本条）。
+- 钩子/数据：无新增 / 删除 DOM 钩子与 storage key（`space.paused` / `space.volume` / `space.muted` / `space.position.v1.track:<id>` 全部沿用，格式不变）；`MusicManager` 对外接口与 `'change'` 事件不变。
+- 验证：`npm run check` 112 个文件 0 错误 0 警告 0 提示；`npm run build` 19 页。按本人要求没有起 dev / preview、没有浏览器 / Playwright / CDP，真实浏览器验证由本人完成（重点：刷新后自动恢复、第一次点播放生效、换主题与暂停继续各自的位置、About 往返后的意图保留）。
 
 ### 2026-09-22 · 增加 Render Web Service Blueprint 与健康检查
 

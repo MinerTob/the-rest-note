@@ -64,24 +64,33 @@ function isExplicitAudioControlGesture(event: Event): boolean {
 let bound = false;
 
 /**
- * 解锁当前该响的音频。三件事各自幂等：建/唤醒那架琴的 AudioContext；
- * 让 MusicManager 按自己的意图恢复（尊重 userPaused 与 About 让位）；
- * 夜曲只在自己"想播"时才接上。
+ * 只解锁**非 MP3** 那几路：建/唤醒"关于"那架琴的 AudioContext，
+ * 以及"琴真的在跑了 + 夜曲想播却没在播"时把夜曲接上。
+ *
+ * 单独拆出来是为了 boot：`initAudioUnlock()` 里 `music.init()` 已经会发起一次
+ * 自动恢复，紧接着再 `unlockAll()` → `music.retryIfIdle()` 就是同一个 boot 里
+ * 连发两次启动请求（历史 commit 404cf58 定位过这个竞争）。
+ * 手势那一路仍然走完整的 `unlockAll()`。
  */
-function unlockAll(): void {
-  const global = getGlobal();
-
+function unlockNonMusic(): void {
   // 琴：建 / 唤醒 AudioContext（手势之外调用也无害，只是可能仍是 suspended）
   primeIdentityPiano();
 
   // 琴真的在跑了，夜曲又"想播"却没在播：接上（上下文刚醒时它自己的监听也会接）
-  const transport = global.nocturne;
+  const transport = getGlobal().nocturne;
   if (usesIdentityPiano() && identityPiano().isRunning) {
     if (transport?.isDesired() && !transport.isPlaying()) transport.start();
   }
+}
 
-  // MP3：这一条自己判断 userPaused、About 让位与闸门
-  global.music?.retryIfIdle();
+/**
+ * 解锁当前该响的音频：非 MP3 那几路 + 让 MusicManager 按自己的意图恢复
+ * （它自己判断 `shouldPlay` / About 让位 / 入场页闸门，并保证同一时刻只有一条
+ * 自动启动在飞）。真实手势里调用是安全的：手势本身不等于"要出声"。
+ */
+function unlockAll(): void {
+  unlockNonMusic();
+  getGlobal().music?.retryIfIdle();
 }
 
 /**
@@ -117,14 +126,17 @@ export function audioUnlock(): void {
 
 /**
  * boot 里调用一次：没有入场页这一趟（SAME VISIT 刷新 / 站内换页）先挂好听手势的
- * 解锁、再自己试一次自动恢复。`gated` 为真时什么都不做 —— 那一路由入场页自己负责，
+ * 解锁、再做这一次自动恢复。`gated` 为真时什么都不做 —— 那一路由入场页自己负责，
  * 这样音频不会抢在用户"进入"之前出声。
+ *
+ * **MP3 在同一个 boot 里只发一枪**：`music.init()` 自己就会走统一的自动启动；
+ * 这里只再补上非 MP3 那几路（琴 / 夜曲），不再 `music.retryIfIdle()`。
+ * 浏览器拒绝时也不用担心：MusicManager 保持 `shouldPlay = true` + READY，
+ * 第一次真实 pointerdown / keydown 会经 `unlockAll()` 再来一次。
  */
 export function initAudioUnlock(options: { gated: boolean }): void {
   if (options.gated) return;
   bindGestureUnlock();
-  // 先按"这一趟该不该响"发起一次（init 自己会认用户暂停：暂停过就只标状态、不出声），
-  // 再走一遍统一解锁；浏览器拒绝时它会安静地停在 ready
   getGlobal().music?.init();
-  unlockAll();
+  unlockNonMusic();
 }
