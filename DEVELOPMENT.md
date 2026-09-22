@@ -129,7 +129,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 主题切换（modern/baroque） | `src/scripts/theme.ts`、`src/scripts/theme-switch.ts`、`src/lib/themes.ts` | `ThemeManager`、`initTheme()`、`initThemeSwitcher()`、`setTheme()`、`toggle()` | `html[data-theme]`、`[data-theme-switch]` |
 | 全站状态 | `src/scripts/app-state.ts` | `AppStore.get()` / `set()` / `isUnlocked()` / `hasUnlocks()` | `'change'` 事件（detail: `{ state, previous }`） |
 | 焦点圈（仅键盘） | `src/scripts/input-modality.ts`、`src/styles/global.css` | `trackInputModality()` | `html[data-input]` |
-| LCD 时钟 | `src/components/LcdClock.astro`、`src/scripts/clock.ts` | `initClock()` | `[data-clock]`、`[data-clock-time]`、`[data-clock-date]` |
+| LCD 时钟 | `src/components/LcdClock.astro`、`src/scripts/clock.ts` | `initClock()` | `[data-clock]`、`[data-clock-time]`、`[data-clock-date]`、`[data-clock-zone]` |
 | 背景音乐播放器 | `src/components/MusicSystem.astro`、`src/scripts/music-manager.ts`、`music-ui.ts`、`src/lib/music.ts` | `MusicManager`、`initMusicUI()` | `[data-music]`、`[data-music-toggle/-progress/-volume/-state/-title/-subtitle/-time]` |
 | 播放进度记忆 | `src/lib/live-timeline.ts` | `savedPosition()` / `savePosition()` / `restartPosition()` | sessionStorage `space.position.v1.<id>` |
 | MiniLab 25 键 | `src/components/MiniLab.astro`、`src/scripts/minilab.ts`、`notes.ts` | `initMiniLab()`、`MiniLabController` | `[data-minilab*]`、`[data-midi]`、`data-word-*` |
@@ -589,7 +589,11 @@ visitSession(): VisitSession;                  // 见 §5.15：这一趟的 id /
 
 **文件**：`src/components/LcdClock.astro`、`src/scripts/clock.ts`、`src/scripts/console-note.ts`
 
-- `initClock()`：对所有 `[data-clock]` 面板，用 `Intl.DateTimeFormat`（时区 `Asia/Singapore`）每秒刷新 `[data-clock-time]` / `[data-clock-date]`；秒变化时加 `.is-tick` 做很轻的 LCD 刷新感（reduced-motion 时跳过）。
+- `initClock()`：对所有 `[data-clock]` 面板，每秒刷新 `[data-clock-time]` / `[data-clock-date]` / `[data-clock-zone]` / 城市名；秒变化时加 `.is-tick` 做很轻的 LCD 刷新感（reduced-motion 时跳过）。
+- **显示的是访客所在地，不再固定新加坡**：一次 IP 定位（`https://ipwho.is/`，`cache: 'no-store'` + `?_=时间戳` 明确绕开旧缓存）拿到 `city` 与 `timezone.id` 后，用 `Intl.DateTimeFormat` + 该 IANA 时区跑时钟（DST 交给浏览器），UTC 偏移由 `timeZoneName: 'longOffset'` 的 `GMT±HH:MM` 现算（拿不到时用"墙上时间与 UTC 之差"兜底），都不写死偏移、不维护 DST 表。
+- **定位回来之前一律空白**：不默认新加坡 / `UTC+08:00` / 任何时间文本（组件里那两个初始占位是零宽空格，只保住行高；`tick()` 在时区未知时直接 return）。IP 定位失败也保持空白，不回退新加坡。
+- **城市名的三条路**（`applyLocation()`）：英文页直接显示 `ipwho.is` 的原始 `city`；中文页先查 `SPECIAL_CITY_ZH`（少量易错 / 固定译名，命中即用、**不发翻译请求**，例如 `seoul → 首尔` 防止被机翻成"汉城"）；未命中才异步调现有 Cloudflare Translate Worker（`ximu-translate.yanfangwei467.workers.dev`，`?sl=en&tl=zh-CN&q=<原始 city>`，返回 JSON 数组取 `data[0]`），失败回退显示原始英文城市名。翻译不阻塞时钟：时区 / 时间 / 日期 / 偏移在 IP 成功后立刻启用，城市名最后异步补。
+- 同一文档内只请求一次 IP（模块级 Promise 缓存）与最多一次翻译（`cityZh` 记在内存）；**没有 localStorage / sessionStorage**、不持久化 IP / 城市。
 - 定时器登记进 `global.timers`，换页时由 `clearTimers()` 清理。
 - `logConsoleNote()`：给打开 DevTools 的人留一句话，仅此而已。
 
@@ -837,7 +841,7 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 | 钩子 | 谁写 | 谁读 | 用途 |
 | --- | --- | --- | --- |
 | `[data-theme-switch]` / `-btn` / `-value` | `ThemeSwitcher.astro` | `initThemeSwitcher()` | 右下角主题控件（解锁后才存在） |
-| `[data-clock]` / `-time` / `-date` | `LcdClock.astro` | `initClock()` | 新加坡时间 |
+| `[data-clock]` / `-time` / `-date` / `-zone` | `LcdClock.astro` | `initClock()` | 访客所在地时间（IP 定位）+ UTC 偏移；城市名走 `.clock__city` |
 | `[data-music]` 面板 + `-toggle` / `-progress` / `-volume` / `-state` / `-title` / `-subtitle` / `-time` | `MusicSystem.astro` | `initMusicUI()` | 播放器面板（可多实例） |
 | `data-word-ready` / `-active` / `-paused` 等 | `MusicSystem.astro`、`MiniLab.astro` | `music-ui.ts`、`minilab.ts` | JS 动态文字（不维护第二份字典） |
 | `data-label-play-zh/-en`、`data-label-pause-zh/-en` | `MusicSystem.astro` | `music-ui.ts` | 播放/暂停按钮的无障碍标签 |
@@ -896,6 +900,19 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-22 · LCD 时钟改成访客所在地时间 + 中文城市名走现有 Translate Worker
+
+- 需求：把 LCD Clock 从"固定新加坡时间"改成**访客本地时间**（城市 / 时区 / UTC 偏移都跟随访客），中文版城市名要出中文；随后几轮追加：定位回来之前**一律空白**（不默认新加坡 / `UTC+08:00` / 占位时间）、IP 定位必须绕开旧缓存、中文城市翻译改用已有 Cloudflare Translate Worker、只对少数易错城市保留本地小字典。
+- 实现：`src/scripts/clock.ts` 重写为"IP 定位 → 动态时区"：
+  1. `fetch('https://ipwho.is/?_=<Date.now()>', { cache: 'no-store' })`（时间戳 + no-store 双保险，换 VPN / 换出口 IP 不会被旧响应黏住；同一文档只请求一次，模块级 Promise 缓存）；只取 `success` / `city` / `timezone.id`，并用 `Intl.DateTimeFormat` 校验时区名合法。
+  2. 成功后立刻用该 IANA 时区建 `Intl.DateTimeFormat`（`time` / `date` / `zone`）并 `tick()`：时间、日期、UTC 偏移**立即**工作（不等翻译）；偏移用 `timeZoneName: 'longOffset'` 的 `GMT±HH:MM` 现算（`GMT → UTC+00:00`），拿不到时用"墙上时间与 UTC 之差"兜底 —— 不写死偏移、不维护 DST 表。
+  3. 城市名三条路：英文页直接显示原始 `city`；中文页先查 `SPECIAL_CITY_ZH`（少量固定 / 易错译名，命中即用且**不发请求**，`seoul → 首尔` 就是防机翻成"汉城"）；未命中则 city 先空白 → `GET https://ximu-translate.yanfangwei467.workers.dev/?sl=en&tl=zh-CN&q=<原始 city>`（`URL` + `searchParams`，`cache: 'no-store'`）→ 严格按 `Array.isArray(data) && typeof data[0] === 'string' && data[0].trim()` 取译文，只更新城市名那一个节点；失败（网络 / 非 2xx / 解析 / 形状 / 空串）回退显示原始英文城市名。
+  4. 定位回来之前 `tick()` 直接 return，四个动态文本全空（组件里两个初始占位是零宽空格，只为保住行高、避免真实时间到达时跳一下）；IP 失败也保持空白，不回退新加坡。
+- 边界：时区 / 城市只存在内存（无 localStorage / sessionStorage、不持久化 IP / 城市）；翻译失败不弹错误、不重试、不 console spam；时钟仍然只有一个 `setInterval`。**Worker 地址目前写死在 `clock.ts` 的 `TRANSLATE_ENDPOINT`**（本人计划下一步再抽成环境变量 / Render Settings）。
+- 文件：`src/scripts/clock.ts`、`src/components/LcdClock.astro`（`data-clock-zone` 钩子 + 初始文本空白）、`DEVELOPMENT.md`（§3 / §5.12 / §7 / 本条）。没碰 CSS / 布局 / 字体 / spacing / glass 效果 / Audio / MIDI / Entry Gate / Router / Server / Render 配置。
+- 钩子/数据：新增 DOM 钩子 `[data-clock-zone]`；新增两个第三方请求（`ipwho.is` 定位、`ximu-translate.…workers.dev` 翻译，都只在浏览器端、不经服务器）；无新增 storage key。
+- 验证：`npm run check` 112 个文件 0 错误 0 警告 0 提示；`npm run build` 19 页；构建产物核对：`UTC+08:00` / `--:--:--` / `----.--.-- ---` 都不再出现在首页 HTML 里。真人浏览器（VPN 切地区）验证由本人完成：Seoul / Tokyo / Hong Kong / Taipei / Beijing / Los Angeles 以及至少一个字典外城市。
 
 ### 2026-09-22 · 增加外部子路由的轻量服务端首页重定向
 
