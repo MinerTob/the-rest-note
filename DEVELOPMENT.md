@@ -897,6 +897,11 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 
 ## 10. 功能日志（规定动作）
 
+### 2026-09-22 · 增加外部子路由的轻量服务端首页重定向
+
+- 只改 `server/index.ts`（+ §5.18 一行）：在 `/health` 之后、读 cookie 之前加一个小判断 —— 站内 HTML 页面 + `GET|HEAD` + `Sec-Fetch-Mode: navigate` + `Sec-Fetch-Dest: document` + `Sec-Fetch-Site: none|cross-site` 且不是语言首页时，`302` 到 `languageHome(pathname)`（`/en...` → `/en/`，其余 → `/`）。
+- 这是**纯 pathname 重定向**：不读不写 cookie、不动 `rest_note_visit` / `rest_note_entered`、不碰服务端 session，也不改客户端；重定向后的首页仍由客户端 `visitSession()` / Entry Gate 判定 NEW VISIT。刷新当前子页（`same-origin`）、站内 ClientRouter 导航、`/api/enter`、静态资源、`/health`、`/` 与 `/en/` 都不受影响。
+
 ### 2026-09-22 · 重构背景音乐状态机为单一播放意图与真实媒体状态
 
 - 需求：本人要求把背景 MP3 从"`state` / `userPaused` / `audio.paused` / 各种 retry 路径互相修正"改成**单一事实来源**，长期问题一次收口：SAME VISIT 刷新后偶发不恢复、UI 显示播放但真实播放器没在跑、自动恢复与第一次点播放按钮竞争、换主题后暂停/继续跳回旧位置、放置一段时间或 visibility / pageshow 之后状态逐渐脱节。硬约束：**最大限度保持外围 API**（不改 `music-ui.ts` / `theme.ts` / `app.ts` / `entry-gate.ts` / `nocturne-transport.ts` 的调用方式）、不改 server / visit / cookie / Range / Fetch Metadata / Entry Gate / MIDI / PianoEngine / NocturneTransport / UI / 主题视觉 / 语言 / 滚动，不加 debug recorder、不加 setTimeout 兜底、不新建第二套 manager。

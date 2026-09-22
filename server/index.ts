@@ -20,7 +20,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ENTER_PATH, decideEntry, isHtmlPagePath } from './entry-router.ts';
+import {
+  ENTER_PATH,
+  decideEntry,
+  isHtmlPagePath,
+  isLanguageHomePath,
+  languageHome,
+} from './entry-router.ts';
 import {
   enteredCookie,
   isSecureRequest,
@@ -231,6 +237,36 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       'Cache-Control': 'no-store',
     });
     res.end('405 Method Not Allowed\n');
+    return;
+  }
+
+  /*
+   * 外部子路由的轻量入口归一化：**只看这一次是否"明确的新外部顶层导航"**
+   *   · 站内 HTML 页面 + GET/HEAD；
+   *   · `Sec-Fetch-Mode: navigate` + `Sec-Fetch-Dest: document`（顶层文档导航）；
+   *   · `Sec-Fetch-Site: none`（地址栏 / 书签）或 `cross-site`（外站链接进来）；
+   *   · 而且目标不是语言首页（`/`、`/en`、`/en/`）。
+   * 都成立就直接 302 回本语言首页 —— 这是**纯 pathname 重定向**：
+   * 不读不写任何 cookie、不碰服务端 session（`rest_note_visit` / `rest_note_entered` 都不动）、
+   * 也不改任何客户端状态。重定向后的首页由客户端 visitSession() / Entry Gate 自己判定。
+   *
+   * 刷新当前子页（`Sec-Fetch-Site: same-origin`）、站内 ClientRouter 导航（不是文档请求）、
+   * 静态资源与 `/api/enter`（不是 HTML 页面 / 不是 GET|HEAD）都不会走到这里。
+   */
+  const externalDocumentNavigation =
+    isHtmlPagePath(pathname) &&
+    (method === 'GET' || method === 'HEAD') &&
+    req.headers['sec-fetch-mode'] === 'navigate' &&
+    req.headers['sec-fetch-dest'] === 'document' &&
+    (req.headers['sec-fetch-site'] === 'none' ||
+      req.headers['sec-fetch-site'] === 'cross-site');
+
+  if (externalDocumentNavigation && !isLanguageHomePath(pathname)) {
+    res.writeHead(302, {
+      Location: languageHome(pathname),
+      'Cache-Control': 'no-store',
+    });
+    res.end();
     return;
   }
 
