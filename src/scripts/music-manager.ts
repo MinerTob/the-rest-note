@@ -8,8 +8,7 @@ import {
 } from "@/lib/music";
 import { savedPosition, savePosition } from "@/lib/live-timeline";
 import { THEMES, trackForTheme } from "@/lib/themes";
-import { readBool, readNumber, readString, writeBool, writeNumber } from "./storage";
-import { describeError, describeMediaElement, recordAudioFlight } from "./audio-flight-recorder";
+import { readBool, readNumber, writeBool, writeNumber } from "./storage";
 import type { AppStore } from "./app-state";
 
 export type MusicState = "idle" | "ready" | "active" | "paused" | "error";
@@ -19,25 +18,6 @@ const KEY = {
   muted: "space.muted",
   paused: "space.paused",
 };
-
-/** 诊断用：这些原生事件全记一条（只观察，不 preventDefault、不 play/pause） */
-const FLIGHT_MEDIA_EVENTS = [
-  "loadstart",
-  "loadedmetadata",
-  "loadeddata",
-  "canplay",
-  "canplaythrough",
-  "play",
-  "playing",
-  "pause",
-  "waiting",
-  "stalled",
-  "suspend",
-  "abort",
-  "emptied",
-  "error",
-  "ended",
-] as const;
 
 /** 用 rAF 做音量渐变，比 setInterval 更平滑，也不用引入任何库 */
 function ramp(
@@ -150,18 +130,6 @@ export class MusicManager extends EventTarget {
       if (!document.hidden) this.retryIfIdle();
     });
     window.addEventListener("pageshow", () => this.retryIfIdle());
-
-    // 诊断：这一刻的全部启动条件（只读）
-    recordAudioFlight("music.constructor", {
-      autoStart: this.autoStart,
-      userPaused: this.userPaused,
-      muted: this.muted,
-      inAbout: this.inAbout,
-      trackId: this.trackId,
-      state: this.state,
-      storedPausedRaw: readString(KEY.paused, ""),
-      storedVolumeRaw: readString(KEY.volume, ""),
-    });
   }
 
   /**
@@ -179,30 +147,7 @@ export class MusicManager extends EventTarget {
    * "要出声"，这里只恢复本来就应该播放的那一首。
    */
   retryIfIdle(): void {
-    // 诊断：进来先把五个条件记下来；每个提前 return 都写清是哪一个
-    recordAudioFlight("music.retryIfIdle.enter", {
-      state: this.state,
-      userPaused: this.userPaused,
-      autoStart: this.autoStart,
-      inAbout: this.inAbout,
-      playing: this.isPlaying(),
-    });
-    if (this.userPaused) {
-      recordAudioFlight("music.retryIfIdle.return", { reason: "userPaused" });
-      return;
-    }
-    if (this.inAbout) {
-      recordAudioFlight("music.retryIfIdle.return", { reason: "inAbout" });
-      return;
-    }
-    if (!this.autoStart) {
-      recordAudioFlight("music.retryIfIdle.return", { reason: "autoStart=false" });
-      return;
-    }
-    if (this.isPlaying()) {
-      recordAudioFlight("music.retryIfIdle.return", { reason: "already-playing" });
-      return;
-    }
+    if (this.userPaused || this.inAbout || !this.autoStart || this.isPlaying()) return;
     void this.attemptStart();
   }
 
@@ -248,19 +193,7 @@ export class MusicManager extends EventTarget {
   }
 
   setAboutActive(active: boolean): void {
-    // 诊断：About 让位是"刷新时被谁按住"的常见嫌疑，进出一共记两条
-    recordAudioFlight("setAboutActive.enter", {
-      active,
-      inAbout: this.inAbout,
-      state: this.state,
-      playing: this.isPlaying(),
-      userPaused: this.userPaused,
-      resumeAfterAbout: this.resumeAfterAbout,
-    });
-    if (active === this.inAbout) {
-      recordAudioFlight("setAboutActive.exit", { active, noop: true, state: this.state });
-      return;
-    }
+    if (active === this.inAbout) return;
     const leaving = this.inAbout && !active;
 
     // MIDI 只是临时取得音频焦点，不应篡改用户的播放/暂停偏好。
@@ -290,14 +223,6 @@ export class MusicManager extends EventTarget {
       else
         this.setState("paused");
     }
-
-    recordAudioFlight("setAboutActive.exit", {
-      active,
-      leaving,
-      state: this.state,
-      playing: this.isPlaying(),
-      userPaused: this.userPaused,
-    });
   }
 
   private syncLive(el: HTMLAudioElement, id: string): void {
@@ -345,27 +270,8 @@ export class MusicManager extends EventTarget {
 
   /** 页面加载后调用：能自动播就播，不能就等第一次交互。 */
   init(): void {
-    recordAudioFlight("music.init.enter", {
-      state: this.state,
-      userPaused: this.userPaused,
-      autoStart: this.autoStart,
-      inAbout: this.inAbout,
-      playing: this.isPlaying(),
-    });
-    if (this.inAbout) {
-      recordAudioFlight("music.init.return", { reason: "inAbout" });
-      return;
-    }
-    if (!this.autoStart) {
-      recordAudioFlight("music.init.return", { reason: "autoStart=false" });
-      return;
-    }
-    if (this.isPlaying()) {
-      recordAudioFlight("music.init.return", { reason: "already-playing" });
-      return;
-    }
+    if (this.inAbout || !this.autoStart || this.isPlaying()) return;
     if (this.userPaused) {
-      recordAudioFlight("music.init.return", { reason: "userPaused" });
       this.setState("paused");
       return;
     }
@@ -376,62 +282,20 @@ export class MusicManager extends EventTarget {
    * 被浏览器拦下自动播放时**不再自己挂手势监听**：全局的手势解锁统一由
    * `audio-unlock.ts` 负责，它会在第一次 pointerdown / keydown 时调 `retryIfIdle()`。
    * 这里只是把状态标成 ready，等那只手落下来。
-   *
-   * （本轮只在这里插诊断记录，控制流一行没改。）
    */
   private async attemptStart(): Promise<void> {
-    recordAudioFlight("attemptStart.enter", {
-      state: this.state,
-      inAbout: this.inAbout,
-      userPaused: this.userPaused,
-      autoStart: this.autoStart,
-      trackId: this.trackId,
-      playing: this.isPlaying(),
-    });
-    if (this.inAbout) {
-      recordAudioFlight("attemptStart.return", { reason: "inAbout" });
-      return;
-    }
+    if (this.inAbout) return;
     const el = this.ensureElement();
-    recordAudioFlight("attemptStart.element", {
-      trackId: this.trackId,
-      current: this.el === el,
-      ...describeMediaElement(el),
-    });
     try {
-      recordAudioFlight("attemptStart.beforeSync", { trackId: this.trackId });
       this.syncLive(el, this.trackId);
-      recordAudioFlight("attemptStart.afterSync", {
-        currentTime: Number.isFinite(el.currentTime) ? Number(el.currentTime.toFixed(3)) : null,
-      });
-      recordAudioFlight("attemptStart.beforePlay", {
-        state: this.state,
-        current: this.el === el,
-        ...describeMediaElement(el),
-      });
       await el.play();
-      recordAudioFlight("attemptStart.playResolved", {
-        current: this.el === el,
-        inAbout: this.inAbout,
-        ...describeMediaElement(el),
-      });
       if (this.inAbout || this.el !== el) {
-        recordAudioFlight("attemptStart.pausingStaleElement", {
-          current: this.el === el,
-          inAbout: this.inAbout,
-        });
         el.pause();
         return;
       }
       this.setState("active");
       this.applyVolumeForStart();
-    } catch (error) {
-      recordAudioFlight("attemptStart.playRejected", {
-        ...describeError(error),
-        current: this.el === el,
-        inAbout: this.inAbout,
-        ...describeMediaElement(el),
-      });
+    } catch {
       this.setState("ready");
     }
   }
@@ -442,23 +306,6 @@ export class MusicManager extends EventTarget {
    */
   private buildElement(track: Track): HTMLAudioElement {
     const el = new Audio();
-    /*
-     * 诊断：原生媒体事件的只读监听（只观察。**不** preventDefault、**不** play/pause，
-     * 也不影响下面那些既有监听的行为）。element 事件是"谁把声音停了"的第一现场，
-     * 尤其是 pause / waiting / stalled / error。
-     */
-    for (const type of FLIGHT_MEDIA_EVENTS) {
-      el.addEventListener(type, () => {
-        recordAudioFlight(`media.${type}`, {
-          trackId: track.id,
-          current: this.el === el,
-          musicState: this.state,
-          inAbout: this.inAbout,
-          userPaused: this.userPaused,
-          ...describeMediaElement(el),
-        });
-      });
-    }
     el.preload = "auto";
     el.loop = true;
     el.volume = 0;
@@ -520,18 +367,7 @@ export class MusicManager extends EventTarget {
   }
 
   async play(): Promise<void> {
-    recordAudioFlight("explicitPlay.enter", {
-      state: this.state,
-      inAbout: this.inAbout,
-      userPaused: this.userPaused,
-      autoStart: this.autoStart,
-      trackId: this.trackId,
-      playing: this.isPlaying(),
-    });
-    if (this.inAbout) {
-      recordAudioFlight("explicitPlay.return", { reason: "inAbout" });
-      return;
-    }
+    if (this.inAbout) return;
     this.userPaused = false;
     writeBool(KEY.paused, false);
     // 用户明确要播：把还没跑完的切换作废，以这次为准
@@ -540,17 +376,7 @@ export class MusicManager extends EventTarget {
     const el = this.ensureElement();
     try {
       this.syncLive(el, this.trackId);
-      recordAudioFlight("explicitPlay.beforePlay", {
-        trackId: this.trackId,
-        current: this.el === el,
-        ...describeMediaElement(el),
-      });
       await el.play();
-      recordAudioFlight("explicitPlay.resolved", {
-        current: this.el === el,
-        inAbout: this.inAbout,
-        ...describeMediaElement(el),
-      });
       if (this.inAbout || this.el !== el) {
         el.pause();
         return;
@@ -559,19 +385,13 @@ export class MusicManager extends EventTarget {
       this.applyVolumeForStart();
       // 播放稳定之后，后台把另一套主题的曲子也缓冲好（见 warmOtherTrack）
       this.warmOtherTrack();
-    } catch (error) {
+    } catch {
       /*
        * 被浏览器拦下（或那一次手势被系统弹窗吃掉）时挂上一次性监听，
        * 等下一次交互自己再试 —— 之前这里只把状态标成 ready 就完了，
        * 用户再按播放键也可能还是不出声，只能刷新页面（本人实测）。
        * 现在不自己挂监听了：等页面第一次真实手势由 audio-unlock.ts 统一再来一次。
        */
-      recordAudioFlight("explicitPlay.rejected", {
-        ...describeError(error),
-        current: this.el === el,
-        inAbout: this.inAbout,
-        ...describeMediaElement(el),
-      });
       this.setState("ready");
     }
   }
@@ -582,21 +402,6 @@ export class MusicManager extends EventTarget {
     const el = this.el;
     this.switchToken += 1;
     this.stopFades();
-    // 诊断：找出是谁把音乐按停了（只读，签名与行为都不动）
-    recordAudioFlight("pause.called", {
-      state: this.state,
-      hasElement: Boolean(el),
-      trackId: this.trackId,
-      playing: this.isPlaying(),
-      stack: (() => {
-        try {
-          return new Error().stack ?? null;
-        } catch {
-          return null;
-        }
-      })(),
-      ...(el ? describeMediaElement(el) : {}),
-    });
     if (!el) {
       this.setState("paused");
       return;
@@ -616,14 +421,6 @@ export class MusicManager extends EventTarget {
   }
 
   toggle(): void {
-    // 诊断：按下去之前"UI 觉得"和"元素实际"各是什么
-    recordAudioFlight("toggle.called", {
-      state: this.state,
-      playing: this.isPlaying(),
-      userPaused: this.userPaused,
-      inAbout: this.inAbout,
-      trackId: this.trackId,
-    });
     // 看元素本身，不看缓存的状态：状态说 active 但元素其实停着的话，
     // 按一次按钮必须能真的放出声，而不是把"暂停"再按一遍。
     if (this.isPlaying()) {

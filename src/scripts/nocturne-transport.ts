@@ -3,7 +3,6 @@ import { IDENTITY_TRACK_SRC } from '@/lib/identity';
 import { NOCTURNE_TIMELINE, restartPosition, savePosition, savedPosition } from '@/lib/live-timeline';
 import { getGlobal } from './global';
 import { identityPiano, rampIdentityVolume } from './identity-audio';
-import { describeError, recordAudioFlight } from './audio-flight-recorder';
 import type { PianoEngine } from './piano';
 
 /**
@@ -156,14 +155,12 @@ export class NocturneTransport {
 
   /** 开始 / 继续（真正出声要在用户手势里，这里只管"想播"并尝试） */
   start(): void {
-    recordAudioFlight('nocturne.start.called', this.flightState());
     this.desired = true;
     void this.begin();
   }
 
   /** 停下并掐音（场景离开、按暂停）。desired 一起清掉。 */
   pause(): void {
-    recordAudioFlight('nocturne.pause.called', this.flightState());
     this.desired = false;
     this.suspend();
   }
@@ -289,13 +286,7 @@ export class NocturneTransport {
   }
 
   private async begin(): Promise<void> {
-    recordAudioFlight('nocturne.begin.enter', this.flightState());
-    if (this.playing || this.loading || !this.desired) {
-      recordAudioFlight('nocturne.begin.return', {
-        reason: this.playing ? 'already-playing' : this.loading ? 'loading' : 'not-desired',
-      });
-      return;
-    }
+    if (this.playing || this.loading || !this.desired) return;
     const piano = this.piano();
     this.loading = true;
     this.waiting = false;
@@ -304,12 +295,7 @@ export class NocturneTransport {
     try {
       await this.load();
       await piano.preload();
-      if (!this.desired || this.playing || document.hidden) {
-        recordAudioFlight('nocturne.begin.return', {
-          reason: !this.desired ? 'not-desired' : this.playing ? 'already-playing' : 'document-hidden',
-        });
-        return;
-      }
+      if (!this.desired || this.playing || document.hidden) return;
       /*
        * 采样只要不是"全军覆没"就开始弹 —— 缺的那几个音本来就由最近的采样顶替
        * （`bufferFor()` 的退让逻辑），等"一个不差"会把任何一个没下成的采样
@@ -317,17 +303,12 @@ export class NocturneTransport {
        */
       if (piano.getState() === 'failed') {
         this.failed = true;
-        recordAudioFlight('nocturne.begin.return', { reason: 'piano-failed' });
         return;
       }
-      if (!this.ready) {
-        recordAudioFlight('nocturne.begin.return', { reason: 'score-not-ready' });
-        return;
-      }
+      if (!this.ready) return;
       if (!piano.isRunning) {
         // 还没拿到用户手势：安静地等（piano:context 监听会接手）
         this.waiting = true;
-        recordAudioFlight('nocturne.begin.waitingForContext', this.flightState());
         return;
       }
       this.offset = this.resumeOffset();
@@ -339,9 +320,7 @@ export class NocturneTransport {
       getGlobal().music?.setDucked(true);
       this.schedule(LOOKAHEAD);
       this.timer = window.setInterval(() => this.tick(), TICK_MS);
-      recordAudioFlight('nocturne.begin.playing', { ...this.flightState(), offset: this.offset });
-    } catch (error) {
-      recordAudioFlight('nocturne.begin.catch', { ...this.flightState(), ...describeError(error) });
+    } catch {
       this.waiting = true;
     } finally {
       this.loading = false;
@@ -356,23 +335,6 @@ export class NocturneTransport {
   }
 
   /**
-   * 诊断用：这几个状态点共用的只读快照（**只读**，绝不在这里 new 出钢琴 ——
-   * `this.piano()` 会建引擎，那是副作用；没引用过就读 null）。
-   */
-  private flightState(): Record<string, unknown> {
-    return {
-      desired: this.desired,
-      playing: this.playing,
-      loading: this.loading,
-      waiting: this.waiting,
-      ready: this.ready,
-      failed: this.failed,
-      pianoRunning: this.pianoRef ? this.pianoRef.isRunning : null,
-      scoreLoaded: Boolean(this.score),
-    };
-  }
-
-  /**
    * 停下来但保留 offset / desired。
    * 调用方有两类，语义都是"先停下、位置留着"：
    *   · 用户 / 页面主动（`pause()` 会在此之前清掉 desired、切后台、`start()` 里的接管）；
@@ -380,7 +342,6 @@ export class NocturneTransport {
    *     这一路不清 desired，等上下文回到 running 再 `begin()` 接着弹。
    */
   private suspend(): void {
-    recordAudioFlight('nocturne.suspend.called', this.flightState());
     const wasPlaying = this.playing;
     if (wasPlaying) {
       this.offset = this.position();
