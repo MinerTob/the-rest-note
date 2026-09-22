@@ -375,7 +375,14 @@ export class MusicManager extends EventTarget {
     this.stopFades();
     const el = this.ensureElement();
     try {
-      this.syncLive(el, this.trackId);
+      /*
+       * 这里**不**调 `syncLive()`：同一个元素的"暂停 → 继续"要以元素自己的
+       * `currentTime` 为准 —— 它本来就停在暂停的位置上。以前每次显式 play 都从
+       * live-timeline 覆盖一次 currentTime，于是"切主题 → 放一会儿 → 暂停 → 播放"
+       * 会跳回保存的时间线（接近开头），而不是接着刚才那里放。
+       * 需要恢复保存位置的三条路径各自保留：`buildElement()` 的 `loadedmetadata`、
+       * `attemptStart()`（自动恢复）、`crossfadeTo()`（切入另一首曲目）。
+       */
       await el.play();
       if (this.inAbout || this.el !== el) {
         el.pause();
