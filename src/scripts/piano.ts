@@ -193,7 +193,9 @@ export class PianoEngine extends EventTarget {
      * 表现就是"关于区一直显示『点击或按键，即可接入钢琴演奏』、点播放没反应、刷新几次才好"
      * （本人实测）。所以这里只判断"没在跑就叫它 resume"。
      */
-    if (this.ctx.state !== "running") void this.ctx.resume();
+    if (this.ctx.state !== "running") void this.ctx.resume().catch(() => {
+      // 自动恢复可能被浏览器策略拒绝；下次真实手势会再次 ensure()。
+    });
     void this.preload();
   }
 

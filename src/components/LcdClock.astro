@@ -12,7 +12,7 @@ const { lang } = Astro.props;
 <div class="clock glass glass--liquid" data-clock>
   <div class="clock__head">
     <span class="label label--caps label--dim"><T k="clock.label" lang={lang} /></span>
-    {/* 地点 / UTC 偏移由 clock.ts 在拿到访客 IP 定位后写入；之前保持空白，不默认新加坡 */}
+    {/* 先显示浏览器时区，IP 定位成功后切换到访客时区与城市 */}
     <span class="clock__zone num" data-clock-zone></span>
   </div>
 

@@ -261,7 +261,6 @@ function boot(): void {
 
   initSystemMessages();
   initLangSwitch();
-  initClock();
   logConsoleNote();
 
   // 3) 音乐系统常驻。当前曲目由主题推导，刷新后也不会和主题错位。
@@ -337,6 +336,8 @@ function boot(): void {
    */
   const gated = initEntryGate(global.music);
   initAudioUnlock({ gated });
+  // 第三方定位请求最后才发，避免与音频启动争用首轮网络资源。
+  initClock();
 }
 
 document.addEventListener('astro:before-swap', (event) => {

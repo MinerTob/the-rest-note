@@ -4,17 +4,16 @@ import { getDocumentLang } from './lang';
 /**
  * LCD 本地时间（访客所在地）
  * ==================================================================
- * 数据全部来自一次 IP 定位（`ipwho.is`）：`city` + `timezone.id`。
+ * 最终地点来自一次 IP 定位（`ipwho.is`）：`city` + `timezone.id`。
  *
  * 不变量：
- *   1. **拿到 IP 数据之前一律空白**：不显示任何默认地点 / 时区 / 时间（不默认新加坡、不默认 UTC+08:00）。
- *      计时器照旧只建一个（`setInterval`），但 `tick()` 在时区未知时直接返回、什么都不写。
+ *   1. 先用浏览器时区显示时间；IP 定位成功后切换到 IP 的 IANA 时区。
+ *      计时器照旧只建一个（`setInterval`）。
  *   2. 时区只用 IANA id + `Intl.DateTimeFormat`（DST / 夏令时交给浏览器，自己不算偏移、不维护表）。
- *   3. IP 成功后立刻启用 time / date / UTC offset（**不等翻译**）；城市名分三条路：
+ *   3. IP 成功后立刻改用对应时区（**不等翻译**）；城市名分三条路：
  *      英文页立即显示原始 city；中文页先查 `SPECIAL_CITY_ZH`（命中即用本地中文名、不调 Worker），
- *      未命中则 city 先保持空白、异步问 Translate Worker，成功显示译文、失败回退原始英文城市名。
- *   4. IP 查询失败（离线 / 被拦 / 超时 / `success !== true` / 缺 city / 缺 timezone.id / 时区名不合法）
- *      → 什么都不做，保持空白，不报错、不重试（同一文档内只查一次）。
+ *      未命中则先显示原始城市、异步问 Translate Worker，成功显示译文、失败保留原名。
+ *   4. IP 查询失败只影响城市和最终定位，时钟继续显示浏览器当地时间。
  *   5. 只改这四样文本：`[data-clock-time]` / `[data-clock-date]` / `[data-clock-zone]` / 城市名。
  *      结构 / class / CSS / 布局全部原样。
  */
@@ -32,7 +31,7 @@ const LOCATION_ENDPOINT = 'https://ipwho.is/';
  */
 const TRANSLATE_ENDPOINT = 'https://ximu-translate.yanfangwei467.workers.dev/';
 
-type VisitorLocation = { city: string; timeZone: string; cityZh?: string };
+type VisitorLocation = { city: string; timeZone: string; cityZh?: string; translation?: Promise<string | null> };
 
 /** 这一趟文档查到的访客位置：换页回到带时钟的页面时直接复用，不重复打第三方接口 */
 let visitorLocation: VisitorLocation | null = null;
@@ -251,7 +250,7 @@ async function translateCity(city: string): Promise<string | null> {
 
 /**
  * 取一次访客位置：只用 `success` / `city` / `timezone.id` 三个字段。
- * 任何一个不满足（或时区名浏览器不认）就返回 null —— 调用方保持空白。
+ * 时区不满足（或浏览器不认）就返回 null —— 调用方保留浏览器当地时钟。
  *
  * 请求本身**明确绕开 HTTP / 浏览器缓存**：`cache: 'no-store'` + 时间戳 query。
  * 否则换了出口 IP（VPN 切地区）后，浏览器/CDN 可能继续拿上一次那份响应，页面就一直保持旧定位。
@@ -263,6 +262,7 @@ function fetchVisitorLocation(): Promise<VisitorLocation | null> {
     try {
       const response = await fetch(`${LOCATION_ENDPOINT}?_=${Date.now()}`, {
         cache: 'no-store',
+        signal: AbortSignal.timeout(8000),
         headers: {
           accept: 'application/json',
         },
@@ -276,7 +276,7 @@ function fetchVisitorLocation(): Promise<VisitorLocation | null> {
 
       const city = typeof data.city === 'string' ? data.city.trim() : '';
       const timeZone = typeof data.timezone?.id === 'string' ? data.timezone.id.trim() : '';
-      if (!city || !timeZone || !isUsableTimeZone(timeZone)) return null;
+      if (!timeZone || !isUsableTimeZone(timeZone)) return null;
 
       visitorLocation = { city, timeZone };
       return visitorLocation;
@@ -292,9 +292,10 @@ export function initClock(): void {
   const panels = document.querySelectorAll<HTMLElement>('[data-clock]');
   if (panels.length === 0) return;
 
-  // 时区未知之前保持空白：不写任何默认地点 / 时间
-  let timeZone: string | null = null;
-  let formatters: ClockFormatters | null = null;
+  // 定位网络请求与音频启动互不依赖。先显示浏览器时区，定位成功后覆盖。
+  const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  let timeZone = isUsableTimeZone(localZone) ? localZone : 'UTC';
+  let formatters = buildFormatters(timeZone);
 
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   // 整个 clock 只有这一个 interval（IP 数据到位后不重建，tick 读当前 formatter 即可）
@@ -304,8 +305,6 @@ export function initClock(): void {
   tick();
 
   function tick(): void {
-    if (!timeZone || !formatters) return; // IP 还没回来：什么都不写（空白，而不是新加坡）
-
     const now = new Date();
     const parts = formatters.time.formatToParts(now);
     const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? '--';
@@ -356,6 +355,7 @@ export function initClock(): void {
     timeZone = location.timeZone;
     formatters = buildFormatters(timeZone);
     tick();
+    if (!rawCity) return;
 
     // 英文页：只显示原始 city（不查 SPECIAL_CITY_ZH、不调 Translate Worker、不做任何小写化）
     if (getDocumentLang() !== 'zh') {
@@ -377,9 +377,10 @@ export function initClock(): void {
       return;
     }
 
-    // 中文页未命中：city 先保持空白，Worker 回来再只更新这一个节点
-    applyCity(panels, '');
-    void translateCity(rawCity).then((translated) => {
+    // 翻译只改善城市文案；请求过程中仍显示原始城市。
+    applyCity(panels, rawCity);
+    location.translation ??= translateCity(rawCity);
+    void location.translation.then((translated) => {
       if (translated) location.cityZh = translated;
       // 翻译失败 → 回退显示 ipwho.is 的原始英文城市名（时钟本身不受影响）
       applyCity(panels, translated ?? rawCity);

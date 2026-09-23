@@ -86,10 +86,10 @@ src/pages/en/** 与上面共用同一批 views，只是传 lang="en"
 `src/scripts/app.ts` 的 `boot()` 是**唯一的初始化顺序表**（顺序有讲究）：
 
 ```
-AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initClock()
+AppStore → initTheme() → initSystemMessages() → initLangSwitch()
        → MusicManager → initMusicUI() → initContact() → initIdentity()
        → initMiniLab() → initEasterEggs() → initThemeSwitcher() → initJourney()
-       → initEntryGate()
+       → initEntryGate() → initAudioUnlock() → initClock()
 ```
 
 - 项目在用 Astro ClientRouter（客户端路由）。**换页时脚本不会重新执行**，只会触发 `astro:page-load` → 再跑一次 `boot()`。
@@ -129,7 +129,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch() → initC
 | 主题切换（modern/baroque） | `src/scripts/theme.ts`、`src/scripts/theme-switch.ts`、`src/lib/themes.ts` | `ThemeManager`、`initTheme()`、`initThemeSwitcher()`、`setTheme()`、`toggle()` | `html[data-theme]`、`[data-theme-switch]` |
 | 全站状态 | `src/scripts/app-state.ts` | `AppStore.get()` / `set()` / `isUnlocked()` / `hasUnlocks()` | `'change'` 事件（detail: `{ state, previous }`） |
 | 焦点圈（仅键盘） | `src/scripts/input-modality.ts`、`src/styles/global.css` | `trackInputModality()` | `html[data-input]` |
-| LCD 时钟 | `src/components/LcdClock.astro`、`src/scripts/clock.ts` | `initClock()` | `[data-clock]`、`[data-clock-time]`、`[data-clock-date]`、`[data-clock-zone]` |
+| LCD 时钟 | `src/components/LcdClock.astro`、`src/scripts/clock.ts` | `initClock()`（浏览器时区即时显示，IP 时区异步覆盖） | `[data-clock]`、`[data-clock-time]`、`[data-clock-date]`、`[data-clock-zone]` |
 | 背景音乐播放器 | `src/components/MusicSystem.astro`、`src/scripts/music-manager.ts`、`music-ui.ts`、`src/lib/music.ts` | `MusicManager`、`initMusicUI()` | `[data-music]`、`[data-music-toggle/-progress/-volume/-state/-title/-subtitle/-time]` |
 | 播放进度记忆 | `src/lib/live-timeline.ts` | `savedPosition()` / `savePosition()` / `restartPosition()` | sessionStorage `space.position.v1.<id>` |
 | MiniLab 25 键 | `src/components/MiniLab.astro`、`src/scripts/minilab.ts`、`notes.ts` | `initMiniLab()`、`MiniLabController` | `[data-minilab*]`、`[data-midi]`、`data-word-*` |
@@ -350,7 +350,7 @@ function initMusicUI(music: MusicManager): void;
 - **F. 过期异步操作无害**：`switchToken` 在每次启动 / 切换 / 暂停 / 进出 About 时 +1；`await el.play()` 回来先对号，对不上就只许安静退场（旧元素已经不是当前曲目时顺手 `volume = 0; pause()`），绝不改 `shouldPlay`、不改 `this.el`、不停掉新的那次播放。
 - **G. 每首曲子各自一个 element、各自一条时间线**：`crossfadeTo()` 切走前把旧曲进度落到 `space.position.v1.track:<id>`（格式不变），新曲只在自己**第一次**被接管时 `restorePositionOnce()`；本次文档用过的元素里就是它自己的真实进度，反复切回来不会被 storage 覆盖。`force` 时**不再先 `await waitForCanPlay()`**（那会拖断用户手势链）：直接 `incoming.play()`（浏览器自己会等媒体 ready），旧曲在它真正起播前继续响，成功后再做原来的交叉淡入。autoplay 被拒时保留 `shouldPlay`，等下一次可信手势 / `canplay`。
 - **H. 显式播放按钮继续绕开全局 capture 解锁**：`audio-unlock.ts` 的 `EXPLICIT_AUDIO_CONTROL = '[data-music-toggle], [data-identity-play]'` —— 手势落在它们上面时 document capture 的 `unlockAll()` 不抢，交给按钮自己的 `click`（`music.toggle()` / `transport.start()`），第一击就生效。
-- **SAME VISIT 刷新的自动恢复怎么描述**：`initAudioUnlock({ gated:false })` 里 `music.init()` **只发一枪**（随后只补非 MP3 的琴 / 夜曲，不再 `retryIfIdle()`）。浏览器允许 → 立即接着放；浏览器拒绝 → 保持 `shouldPlay = true` + `ready`，等第一次真实 `pointerdown` / `keydown`（`unlockAll()`）或 `canplay` / `pageshow` / `visibilitychange` 再试。**这不是"一定允许无手势 autoplay"**，而是"主动尝试 + 保留意图 + 可重试"。
+- **SAME VISIT 刷新的自动恢复**：`initAudioUnlock({ gated:false })` 里 `music.init()` 只尝试一次；浏览器允许即续播，拒绝则保留 `shouldPlay` 等真实手势重试。鼠标在 `pointerdown`、触屏在 `pointerup`、键盘在 `keydown` 解锁；触屏 `pointerdown` 不具备可靠的瞬时用户激活。夜曲在采样等待结束时再次核对 AudioContext，避免 `running` 事件发生在 `loading` 中而永久停在 waiting。
 - 事件：`MusicManager` 派发普通 `'change'`（原生媒体事件只触发它，不写状态）；UI（`music-ui.ts`）每 260ms 重读 `getState()` / `getProgress()` 刷新面板，支持同页多个面板（`[data-music]` 循环绑定）。
 - **第一次起播不从 0 淡入**（`applyVolumeForStart()`）：元素刚建出来时 volume 是 0，老写法要淡入 `AUDIO.fadeInMs`（2.4 秒），曲子开头那一下会被压到几乎听不见的音量里（timeline 在走、声音没有 —— 本人报的"第一拍没播出来 / 像还没加载好 timeline 就先走了"）。现在**本次文档的第一次**直接摆到目标音量，之后保持原来的淡入。暂停保留 450ms 淡出，但任何淡出都能被 `play()` / `pause()` / 切曲 / About 可靠取消（连同它"淡出结束再 `pause()`"的 `done` 回调）。
 - 音量渐变用 `requestAnimationFrame`（`ramp()`），进度两头都 `clamp01`；`prefers-reduced-motion` 时直接跳到目标音量（不渐变）。
@@ -591,7 +591,7 @@ visitSession(): VisitSession;                  // 见 §5.15：这一趟的 id /
 
 - `initClock()`：对所有 `[data-clock]` 面板，每秒刷新 `[data-clock-time]` / `[data-clock-date]` / `[data-clock-zone]` / 城市名；秒变化时加 `.is-tick` 做很轻的 LCD 刷新感（reduced-motion 时跳过）。
 - **显示的是访客所在地，不再固定新加坡**：一次 IP 定位（`https://ipwho.is/`，`cache: 'no-store'` + `?_=时间戳` 明确绕开旧缓存）拿到 `city` 与 `timezone.id` 后，用 `Intl.DateTimeFormat` + 该 IANA 时区跑时钟（DST 交给浏览器），UTC 偏移由 `timeZoneName: 'longOffset'` 的 `GMT±HH:MM` 现算（拿不到时用"墙上时间与 UTC 之差"兜底），都不写死偏移、不维护 DST 表。
-- **定位回来之前一律空白**：不默认新加坡 / `UTC+08:00` / 任何时间文本（组件里那两个初始占位是零宽空格，只保住行高；`tick()` 在时区未知时直接 return）。IP 定位失败也保持空白，不回退新加坡。
+- **定位与显示解耦**：初始化即用浏览器 IANA 时区显示时间、日期与偏移；IP 定位成功后切换到其 IANA 时区，最终以 IP 为准。定位失败仍保留本地时钟，城市可以为空；翻译请求期间显示原始城市，失败也保留原名。单文档定位一次，硬刷新重新请求。
 - **城市名的三条路**（`applyLocation()`）：英文页直接显示 `ipwho.is` 的原始 `city`；中文页先查 `SPECIAL_CITY_ZH`（少量易错 / 固定译名，命中即用、**不发翻译请求**，例如 `seoul → 首尔` 防止被机翻成"汉城"）；未命中才异步调现有 Cloudflare Translate Worker（`ximu-translate.yanfangwei467.workers.dev`，`?sl=en&tl=zh-CN&q=<原始 city>`，返回 JSON 数组取 `data[0]`），失败回退显示原始英文城市名。翻译不阻塞时钟：时区 / 时间 / 日期 / 偏移在 IP 成功后立刻启用，城市名最后异步补。
 - 同一文档内只请求一次 IP（模块级 Promise 缓存）与最多一次翻译（`cityZh` 记在内存）；**没有 localStorage / sessionStorage**、不持久化 IP / 城市。
 - 定时器登记进 `global.timers`，换页时由 `clearTimers()` 清理。
@@ -900,6 +900,13 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-24 · 修复刷新音频恢复与 IP 时钟空白
+
+- 根因：夜曲加载 MIDI/采样时的 `loading` 守卫会忽略 AudioContext 变为 `running` 的事件；加载完成若已进入 `waiting` 却不再复查，就永远等不到下一次状态事件。触屏的瞬时激活在 `pointerup`，原统一解锁只监听 `pointerdown`/`keydown`。时钟把第三方 IP 定位失败与整个时钟空白绑在一起。
+- 修法：夜曲加载收尾时核对实际 AudioContext 状态并立即重试；统一解锁按鼠标/触屏正确的指针事件执行；`AudioContext.resume()` 被策略拒绝时等待下一次手势，不产生未处理 rejection。时钟立即用浏览器时区显示时间、日期、实时 UTC offset；IP 定位成功后以返回的 IANA 时区覆盖，城市翻译异步进行且失败回退原名。定位在音频初始化之后启动，单文档只请求一次，hard refresh 重新查询；请求限时 8 秒。
+- 文件：`src/scripts/nocturne-transport.ts`、`src/scripts/audio-unlock.ts`、`src/scripts/piano.ts`、`src/scripts/clock.ts`、`src/scripts/app.ts`、`src/components/LcdClock.astro`、`DEVELOPMENT.md`。无新增导出、DOM 钩子、storage key 或事件。
+- 验证：`npm test` 103/103；`npm run check` 112 个文件 0 错误、0 警告；`npm run build` 19 页通过。浏览器策略与手机行为待真人实测。
 
 ### 2026-09-22 · LCD 时钟改成访客所在地时间 + 中文城市名走现有 Translate Worker
 

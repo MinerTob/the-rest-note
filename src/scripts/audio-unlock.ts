@@ -33,8 +33,8 @@ import { identityPiano, primeIdentityPiano, usesIdentityPiano } from './identity
  * 这里不做任何 autoplay policy 绕过；也不看播放器 UI、不看元素可见性。
  */
 
-/** 手势只认这两个：指针按下与按键。不监听 scroll / wheel / touchmove。 */
-const GESTURES = ['pointerdown', 'keydown'] as const;
+/** 只认具备瞬时用户激活的鼠标按下、触屏抬起与按键。 */
+const GESTURES = ['pointerdown', 'pointerup', 'keydown'] as const;
 
 /**
  * "显式播放控制"：这两个按钮的 click 处理器自己就会起播（MP3 的 `music.toggle()`、
@@ -106,6 +106,9 @@ function bindGestureUnlock(): void {
   if (bound) return;
   bound = true;
   const onGesture = (event: Event): void => {
+    // 触屏的瞬时激活发生在 pointerup；pointerdown 只对鼠标可靠。
+    if (event.type === 'pointerdown' && event instanceof PointerEvent && event.pointerType !== 'mouse') return;
+    if (event.type === 'pointerup' && event instanceof PointerEvent && event.pointerType === 'mouse') return;
     // 显式播放按钮自己会在 click 里起播（仍在用户激活链里）：这一下全局解锁让开
     if (isExplicitAudioControlGesture(event)) return;
     unlockAll();

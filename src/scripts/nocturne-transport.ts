@@ -325,6 +325,10 @@ export class NocturneTransport {
     } finally {
       this.loading = false;
       this.notify();
+      // AudioContext 可能在 await 读谱/采样期间变为 running；当时的事件因
+      // loading 守卫被忽略。收尾时重新核对真实状态，避免永久停在 waiting。
+      if (this.desired && !this.playing && this.waiting && piano.isRunning && !document.hidden)
+        void this.begin();
     }
   }
 
