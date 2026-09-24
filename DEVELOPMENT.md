@@ -768,6 +768,7 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 - **已经进门**（`rest_note_entered === '1'`）：服务端不再做子路由重定向，站内 About → Intro / Blog → 文章 / Lab / 中英切换全部照常走 Astro 静态页面（SPA 换页仍然是 ClientRouter 的事）。
 - **静态资源绝不参与重定向**：`/_astro/*`、图片、CSS、JS、sitemap、RSS、favicon、robots 由后缀与前缀判定为静态，直接 `dist/` 分发。**防 path traversal**：`resolveInsideDist()` 先 `path.resolve` 规范化，再要求结果落在 `DIST_ROOT` 内（`/../..`、`%2e%2e%2f`、反斜杠变体都被拒）。
 - **缓存**：HTML 一律 `Cache-Control: no-cache` + `Vary: Cookie`（入口判定依赖 cookie，浏览器缓存住子页 HTML 就等于绕过网关）；`/_astro/` 是带 hash 的产物 → `immutable`；其它静态 → `max-age=3600`。
+- **媒体 Range**：`serveStatic()` 对单段 `Range: bytes=...` 返回 `206`、`Content-Range`、准确长度并流式输出对应字节；不可满足返回 `416`。普通静态请求仍为 `200`，`HEAD` 只发头。Chrome 在本地 `run.bat` 的 3000 端口刷新恢复、拖动 MP3 时需要这一能力；此前网关忽略 Range，始终整份 `200`，而 Astro dev 的 4321 端口本来就支持 `206`。
 - **`#fragment` 服务端看不见**：`/#about`、`/en/#about` 在服务器眼里只是 `/`，所以首页那四个 Journey hash 的早期清理仍然由 `BaseHead.astro` 在客户端做（见 §5.15）。
 - **`POST /api/enter`**：浏览器点"进入空间"时（同一次点击、不 await）打过来，网关回 `204 No Content` 并写 `rest_note_entered=1`；不返回页面、不管音频。别的方法 → `405`。
 - **启动**：`PORT` 读 `process.env.PORT`（本地默认 3000），监听 `0.0.0.0`；Node 直接跑 TypeScript（`node --experimental-strip-types`），所以没有构建步骤、没有框架依赖（不用 Express）。`SIGTERM` 时 `server.close()` 后退出。
@@ -900,6 +901,13 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-24 · 修复本地网关 MP3 Range 与 Chrome 拖动、刷新恢复
+
+- 现象：`run.bat` 实际启动的是 3000 端口 Node 网关。该端口对 `Range: bytes=1000000-1000100` 返回整文件 `200`，而 Astro dev 的 4321 端口返回正确的 `206`；先前只测 4321 误判了问题。Chrome 对 3000 端口的 MP3 刷新续播与拖动因此失效，Edge 表现不同。
+- 修法：撤回上一轮未提交的 `MusicManager` seek 守卫（它引入拖动回弹）；在 `server/index.ts` 静态分发增加单段 bytes Range，`206` / `416` 头和流式响应，保留既有入口、cookie、缓存策略。
+- 文件：`server/index.ts`、`DEVELOPMENT.md`。无新前端导出、DOM 钩子、storage key 或事件。
+- 验证：3000 原网关 Range → `200` 整文件；3001 修复版网关 Range → `206`（明确段、开放段、尾段），越界 → `416`，HEAD 段请求 → `206` 只带响应头。隔离 Chrome 访问修复版网关：DAO XIANG 85 秒恢复、拖至约 172 秒、再刷新仍约 172 秒；CANON 85 秒恢复、拖至约 212 秒、再刷新仍约 212 秒。`npm test` 103/103；`npm run check` 112 文件 0 错误、0 警告；`npm run build` 19 页。既有 3000 进程仍需重启 `run.bat` 才加载新服务端代码。
 
 ### 2026-09-24 · 修复刷新音频恢复与 IP 时钟空白
 

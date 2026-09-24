@@ -17,7 +17,9 @@
  * Node 直接跑 TypeScript（只剥类型，不做转换），所以这里不用任何构建步骤、也没有框架依赖。
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -145,6 +147,29 @@ function cacheControl(pathname: string, isHtml: boolean): string {
   return 'public, max-age=3600';
 }
 
+/** 单一 byte range；浏览器通过它从已保存的 MP3 位置恢复或拖动。 */
+function parseRange(value: string | undefined, size: number): { start: number; end: number } | null | 'unsatisfiable' {
+  if (!value) return null;
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(value.trim());
+  if (!match) return null;
+  const [, first, last] = match;
+  if (!first && !last) return null;
+  if (!first) {
+    const length = Number(last);
+    if (!Number.isSafeInteger(length)) return null;
+    if (length <= 0 || size === 0) return 'unsatisfiable';
+    return { start: Math.max(0, size - length), end: size - 1 };
+  }
+  const start = Number(first);
+  if (!Number.isSafeInteger(start)) return null;
+  if (start >= size) return 'unsatisfiable';
+  if (!last) return { start, end: size - 1 };
+  const end = Number(last);
+  if (!Number.isSafeInteger(end)) return null;
+  if (end < start) return 'unsatisfiable';
+  return { start, end: Math.min(end, size - 1) };
+}
+
 async function serveNotFound(
   res: ServerResponse,
   head: boolean,
@@ -169,6 +194,7 @@ async function serveNotFound(
 }
 
 async function serveStatic(
+  req: IncomingMessage,
   res: ServerResponse,
   pathname: string,
   head: boolean,
@@ -179,27 +205,47 @@ async function serveStatic(
     await serveNotFound(res, head, cookies);
     return;
   }
-  let body: Buffer;
+  let size: number;
   try {
-    body = await readFile(file);
+    size = (await stat(file)).size;
   } catch {
     await serveNotFound(res, head, cookies);
     return;
   }
   const isHtml = file.toLowerCase().endsWith('.html');
-  res.writeHead(200, {
+  const headers: Record<string, string | string[]> = {
     'Content-Type': contentType(file),
-    'Content-Length': String(body.byteLength),
     'Cache-Control': cacheControl(pathname, isHtml),
+    'Accept-Ranges': 'bytes',
     // 同一份 HTML 会因为 cookie 不同而拿到 302 或 200，共享缓存必须按 Cookie 分开
     ...(isHtml ? { Vary: 'Cookie' } : {}),
     ...cookieHeaders(cookies),
-  });
+  };
+  const rawRange = req.headers.range;
+  const range = parseRange(Array.isArray(rawRange) ? rawRange[0] : rawRange, size);
+  if (range === 'unsatisfiable') {
+    res.writeHead(416, { ...headers, 'Content-Range': `bytes */${size}`, 'Cache-Control': 'no-store' });
+    res.end();
+    return;
+  }
+  if (range) {
+    res.writeHead(206, {
+      ...headers,
+      'Content-Range': `bytes ${range.start}-${range.end}/${size}`,
+      'Content-Length': String(range.end - range.start + 1),
+    });
+  } else {
+    res.writeHead(200, { ...headers, 'Content-Length': String(size) });
+  }
   if (head) {
     res.end();
     return;
   }
-  res.end(body);
+  try {
+    await pipeline(createReadStream(file, range ?? undefined), res);
+  } catch {
+    res.destroy();
+  }
 }
 
 async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -315,7 +361,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       break;
   }
 
-  await serveStatic(res, pathname, head, setCookies);
+  await serveStatic(req, res, pathname, head, setCookies);
 }
 
 const server = createServer((req, res) => {
