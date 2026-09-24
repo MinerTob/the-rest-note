@@ -392,6 +392,7 @@ function getMidiBridge(): MidiBridge;
 - 输入统一汇到 `MiniLabController.press/release`，再由它决定发声（钢琴采样优先，`PianoEngine` 失败时退回 `KeysSynth`）并更新屏幕读数。
 - 电脑键盘映射在 `src/scripts/notes.ts`：`KEYBOARD_MAP`、`midiFromKey()`、`noteName()`、`midiFromName()`、`isBlackKey()`、`isCKey()`、`frequency()`、`MINILAB_KEYS`（有单测 `tests/notes.test.mjs`）。
 - 采样表在 `src/lib/piano.ts`：`PIANO_SAMPLES`、`nearestSample(midi, samples?)`、`playbackRateFor(sample, midi)`、`samplesForRange(min, max, samples?)`（决定"哪些采样必需"，`PianoEngine.requiredSamples` 用它）。
+- **iPhone 静音模式注意**：夜曲和 MiniLab 的钢琴采样走 `PianoEngine` / Web Audio，进度和瀑布流读的是 AudioContext 时钟；iOS WebKit 可以让时钟继续走，却因静音模式不向扬声器输出 Web Audio。背景 MP3 走 HTML 音频，可能仍有声音，二者因此看起来不同步。本人在 iPhone Chrome 上确认静音模式是夜曲无声与异常听感的关键条件；排查时先切换静音模式做对照，再看采样请求、场景激活和排程。WebKit 对这类表现及 `ambient` / `playback` 音频会话的说明见 https://bugs.webkit.org/show_bug.cgi?id=251532 与 https://bugs.webkit.org/show_bug.cgi?id=237322 。当前代码不主动改系统音频会话类型。
 - MIDI 权限在 Lab 页第一次交互时才申请（不在页面加载时打扰用户）。
 - MiniLab 不认识彩蛋：它只是收到 `egg:hint` 时把对应琴键点亮。
 
@@ -901,6 +902,14 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-24 · 记录 iPhone 静音模式下的夜曲无声现象
+
+- 现象：iPhone Chrome 首次进入 About 时，MIDI 进度条和瀑布流前进但钢琴无声；划走再回来后听感颤动。重启 iPhone、回退到 MP3 Range 修改前的版本仍能遇到；安卓正常。本人随后确认 iPhone 静音模式是关键条件，白天上课时可能会开启静音。
+- 原因：夜曲采样由 Web Audio 输出，而视觉进度按 AudioContext 时钟推进；iOS WebKit 默认音频会话可受静音模式控制，出现时钟在走、扬声器无声。HTML 背景 MP3 与 Web Audio 的静音行为不同，容易误判成 MIDI 文件或网络传输故障。WebKit 记录：https://bugs.webkit.org/show_bug.cgi?id=251532 、https://bugs.webkit.org/show_bug.cgi?id=237322 。划回后的具体颤动机制没有独立确认，不在此认定为场景或采样缺陷。
+- 处理：撤回排查期间尚未提交的 `navigator.audioSession.type = 'playback'` 试改；只补充本节和 §5.6 的排查说明。用户可以用静音开关直接对照；若以后要让钢琴在静音模式仍播放，再明确决定是否采用 WebKit 的 `playback` 会话。
+- 文件：`DEVELOPMENT.md`。无代码、导出函数、DOM 钩子、storage key 或自定义事件变更。
+- 验证：本人 iPhone 静音开关对照并确认该条件；`npm test` 103/103，`npm run check` 112 文件 0 错误、0 警告，`npm run build` 19 页。代码未改，线上行为保持现状。
 
 ### 2026-09-24 · 修复本地网关 MP3 Range 与 Chrome 拖动、刷新恢复
 
