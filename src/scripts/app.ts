@@ -47,12 +47,13 @@ function aboutOnScreen(journey: HTMLElement): boolean {
   );
 }
 
-function initJourney(root: HTMLElement, music: MusicManager): void {
+function initJourney(root: HTMLElement, music: MusicManager, initiallyInAbout: boolean): void {
   disposeJourney?.();
   const sections = [...root.querySelectorAll<HTMLElement>('[data-journey-section]')];
   const links = [...document.querySelectorAll<HTMLAnchorElement>('[data-section-target]')];
   const about = root.querySelector<HTMLElement>('[data-journey-section="about"]');
-  let aboutActive = false;
+  // boot() 已用这个结果让 MP3 为 About 让位；观察器必须接过同一状态。
+  let aboutActive = initiallyInAbout;
 
   /*
    * 顶栏那条蓝色下划线（nav active）判定。
@@ -315,7 +316,8 @@ function boot(): void {
    * 覆盖是 `visibility`（不占位、不改文档高度），摘掉它不动任何滚动位置。
    */
   delete document.documentElement.dataset.scrollPending;
-  global.music.setAboutActive(aboutFamily && (!journey || aboutOnScreen(journey)));
+  const initiallyInAbout = aboutFamily && (!journey || aboutOnScreen(journey));
+  global.music.setAboutActive(initiallyInAbout);
   initMusicUI(global.music);
 
   // 4) 交互组件
@@ -325,7 +327,7 @@ function boot(): void {
   initMiniLab();
   initEasterEggs(global.store, theme);
   initThemeSwitcher(global.store, theme);
-  if (journey) initJourney(journey, global.music);
+  if (journey) initJourney(journey, global.music, initiallyInAbout);
 
   /*
    * 音频解锁只有这一个入口（见 audio-unlock.ts）：

@@ -725,6 +725,7 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 
 - 判据是**覆盖度**而不是"露出 ÷ 区块高度"：区块比视口高时铺满视口就算 1，比视口矮时整块看得见才算 1。视口高度变化对它的影响比原来那条小得多。
 - 进出用**两个不同阈值**（0.55 / 0.25，中间 0.30 是迟滞带）：只有真的跨过去才切状态，抖动落在带子里就什么也不做。**没有 setTimeout / debounce** —— 不抖是因为判据本身稳，不是因为拖时间。
+- 刷新后初始位置在 About 时，`boot()` 的 `initiallyInAbout` 同时用于 `MusicManager.setAboutActive()` 和 `initJourney()` 的观察器初始状态。否则 MP3 已让位、观察器却从 idle 起步，滑出 About 时可能没有状态切换，也就不会触发 MP3 恢复。
 - 实测（无头 Chrome，393×852，关于区高 679px）：停在旧判据 0.35 的边界上，地址栏收起/展开（视口 852 ↔ 750，判据 0.35 ↔ 0.373）在修前让 `data-state` 连着翻了 **5** 次（pause → playing → pause → playing → pause，每次都 `allNotesOff()` + 重新排程，听起来就是"前几秒明显断续"）；修后同一条路径 **0** 次。真的走远（滚回博客区）仍然会停（`data-scene=idle`、`data-state=paused`）。
 - 排查读数：`[data-journey-section="about"][data-scene="active|idle"]`。
 
@@ -902,6 +903,14 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-24 · 修复 About 刷新后滑出区域不触发 MP3 自动恢复
+
+- 现象：iPhone 在 About 区刷新并启动夜曲后，滑回首页，MP3 保住了原进度但没有在离开 About 时自动接着播放。
+- 根因：`boot()` 已按刷新后的 About 位置令 `MusicManager` 让位，而 `initJourney()` 的局部 `aboutActive` 固定从 `false` 起步。观察器首次回调若没有重新跨过进入阈值，后续滑出时仍判 `false → false`，跳过 `music.setAboutActive(false)`。
+- 修法：将 `boot()` 用于音乐让位的同一个初始判定传给 `initJourney()`；离开阈值触发时，观察器立即通知 MP3 恢复。保留原有 0.55 / 0.25 迟滞，以免手机视口变化使夜曲反复暂停和启动。浏览器真实拒绝自动播放时仍由可信手势兜底。
+- 文件：`src/scripts/app.ts`、`DEVELOPMENT.md`。无新导出、DOM 钩子、storage key 或自定义事件。
+- 验证：`npm test`（103/103）、`npm run check`（112 文件，0 错误/警告）、`npm run build`（19 页面）均通过；iPhone Chrome 实际自动续播待本人复测。
 
 ### 2026-09-24 · 修复 About 刷新后背景 MP3 丢失原播放位置
 
