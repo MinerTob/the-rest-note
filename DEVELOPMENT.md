@@ -902,6 +902,12 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 
 ## 10. 功能日志（规定动作）
 
+### 2026-09-24 · 钢琴采样补载只处理缺失文件
+
+- 现象：手机端夜曲已开始演奏后可能断续。`PianoEngine.preload()` 虽然按缺失数安排后续轮次，每一轮实际又下载并解码整个采样清单；触屏解锁调用 `ensure()` 也可能提前启动下一轮，重复解码与夜曲排程争用手机资源。
+- 修法：每一轮的工作队列仅包含尚未解码的采样；保留原有并发上限、补载次数和失败时最近采样兜底。无新增导出、DOM 钩子、storage key 或事件。
+- 文件：`src/scripts/piano.ts`、`DEVELOPMENT.md`。验证：`npm test` 103/103；`npm run check` 112 文件 0 错误、0 警告；`npm run build` 19 页。手机真机声音待本人复测。
+
 ### 2026-09-24 · 修复本地网关 MP3 Range 与 Chrome 拖动、刷新恢复
 
 - 现象：`run.bat` 实际启动的是 3000 端口 Node 网关。该端口对 `Range: bytes=1000000-1000100` 返回整文件 `200`，而 Astro dev 的 4321 端口返回正确的 `206`；先前只测 4321 误判了问题。Chrome 对 3000 端口的 MP3 刷新续播与拖动因此失效，Edge 表现不同。
