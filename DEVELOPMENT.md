@@ -722,7 +722,7 @@ sceneDecision(active, coverage, enter = 0.55, leave = 0.25): boolean;   // 迟�
 SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只是"什么时候叫我们"）
 ```
 
-- 判据是**覆盖度**而不是"露出 ÷ 区块高度"：区块比视口高时铺满视口就算 1，比视口矮时整块看得见才算 1。视口高度变化对它的影响比原来那条小得多。IntersectionObserver 只负责触发回调；回调读取当前 `getBoundingClientRect()` 和 `window.innerHeight`，避免一次交付的旧记录把当前 About 状态覆盖。
+- 判据是**覆盖度**而不是"露出 ÷ 区块高度"：区块比视口高时铺满视口就算 1，比视口矮时整块看得见才算 1。视口高度变化对它的影响比原来那条小得多。
 - 进出用**两个不同阈值**（0.55 / 0.25，中间 0.30 是迟滞带）：只有真的跨过去才切状态，抖动落在带子里就什么也不做。**没有 setTimeout / debounce** —— 不抖是因为判据本身稳，不是因为拖时间。
 - 实测（无头 Chrome，393×852，关于区高 679px）：停在旧判据 0.35 的边界上，地址栏收起/展开（视口 852 ↔ 750，判据 0.35 ↔ 0.373）在修前让 `data-state` 连着翻了 **5** 次（pause → playing → pause → playing → pause，每次都 `allNotesOff()` + 重新排程，听起来就是"前几秒明显断续"）；修后同一条路径 **0** 次。真的走远（滚回博客区）仍然会停（`data-scene=idle`、`data-state=paused`）。
 - 排查读数：`[data-journey-section="about"][data-scene="active|idle"]`。
@@ -768,7 +768,6 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 - **已经进门**（`rest_note_entered === '1'`）：服务端不再做子路由重定向，站内 About → Intro / Blog → 文章 / Lab / 中英切换全部照常走 Astro 静态页面（SPA 换页仍然是 ClientRouter 的事）。
 - **静态资源绝不参与重定向**：`/_astro/*`、图片、CSS、JS、sitemap、RSS、favicon、robots 由后缀与前缀判定为静态，直接 `dist/` 分发。**防 path traversal**：`resolveInsideDist()` 先 `path.resolve` 规范化，再要求结果落在 `DIST_ROOT` 内（`/../..`、`%2e%2e%2f`、反斜杠变体都被拒）。
 - **缓存**：HTML 一律 `Cache-Control: no-cache` + `Vary: Cookie`（入口判定依赖 cookie，浏览器缓存住子页 HTML 就等于绕过网关）；`/_astro/` 是带 hash 的产物 → `immutable`；其它静态 → `max-age=3600`。
-- **媒体 Range**：`serveStatic()` 只对 `/music/` 下的背景 MP3 解析单段 `Range: bytes=...`，返回 `206`、`Content-Range`、准确长度并流式输出对应字节；不可满足返回 `416`。钢琴采样 `/audio/piano/*.mp3`、MIDI 乐谱及其他静态文件沿用整文件 `200`，忽略 Range 请求且不宣告 `Accept-Ranges`。`HEAD` 只发头。Chrome 在本地 `run.bat` 的 3000 端口刷新恢复、拖动背景 MP3 时需要 Range；钢琴采样通过 `fetch` + `decodeAudioData` 消费完整文件。
 - **`#fragment` 服务端看不见**：`/#about`、`/en/#about` 在服务器眼里只是 `/`，所以首页那四个 Journey hash 的早期清理仍然由 `BaseHead.astro` 在客户端做（见 §5.15）。
 - **`POST /api/enter`**：浏览器点"进入空间"时（同一次点击、不 await）打过来，网关回 `204 No Content` 并写 `rest_note_entered=1`；不返回页面、不管音频。别的方法 → `405`。
 - **启动**：`PORT` 读 `process.env.PORT`（本地默认 3000），监听 `0.0.0.0`；Node 直接跑 TypeScript（`node --experimental-strip-types`），所以没有构建步骤、没有框架依赖（不用 Express）。`SIGTERM` 时 `server.close()` 后退出。
@@ -901,27 +900,6 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
-
-### 2026-09-24 · 回退夜曲预排时间并隔离背景曲目的 Range 响应
-
-- 本人指出 iPhone 17 Pro 的 Chrome 上夜曲进度正常、前几个音符卡顿，且调预排时间没有效果。撤回 `4b1b1ff` 的 450ms 改动，夜曲恢复原来的 150ms。
-- 定位：`b54d1d3` 只改了 Node 静态网关，并把 Range/流式响应从背景 MP3 扩展到所有静态资源，包括 30 个由 `fetch` → `decodeAudioData` 加载的钢琴 MP3。对 30 个采样各测完整、开放、尾部和中间 Range 响应，共 120 次，响应字节都正确；因此不能把卡顿归因于服务器改坏文件内容。手机 WebKit 是否对采样发出 Range 请求仍需真机验证。
-- 调整：Range 和流式分发只用于 `/music/` 下的背景 MP3，继续支持它们的刷新续播与拖动；钢琴采样、MIDI 乐谱和其余静态资源恢复到 `b54d1d3` 之前的整文件 `200` 响应，避免采样 `fetch` 拿到可被视为成功的 `206` 部分内容。
-- 文件：`server/index.ts`、`src/scripts/nocturne-transport.ts`、`DEVELOPMENT.md`。无新导出、DOM 钩子、storage key 或事件。验证：30 个钢琴采样 × 普通/两种 Range 请求共 90 次均为完整 `200`；两首背景 MP3 的 Range 均为正确 `206`；Chrome 背景 MP3 跳到约 120 秒刷新后约 122 秒继续。`npm test` 103/103；`npm run check` 112 文件 0 错误、0 警告；`npm run build` 19 页。iPhone Chrome 听感待本人复测。
-
-### 2026-09-24 · 回退到 b54d1d3 后按场景迟滞方法修复旧观察记录
-
-- 按本人要求撤回 `a3ec56f` 与 `ff9fd3d` 的采样补载和预排窗口改动，恢复 `b54d1d3` 的实现作为起点。旧的 0.55 / 0.25 覆盖度迟滞仍保留。
-- 复现：开发日志里的慢速手机滚动测试保持 0 次状态翻转，但漏测了 IntersectionObserver 一次交付多条记录。构造“旧的离场记录 + 当前在场记录”同批到达：修前 About 实际仍在视口内（top≈80、bottom≈759），`data-scene` 却从 `active` 变 `idle`，夜曲从 `playing` 变 `paused`。
-- 修法：观察器只负责触发；每次按实时区块矩形和视口高度计算覆盖度，再交给原有 `sceneDecision()` 迟滞判定。无新导出、DOM 钩子、storage key 或事件。
-- 文件：`src/scripts/app.ts`、`DEVELOPMENT.md`。同批旧/新记录复测：`active/playing` 保持不变；原手机边界测试仍为 0 次翻转、真实离开仍暂停。`npm test` 103/103；`npm run check` 112 文件 0 错误、0 警告；`npm run build` 19 页。真机声音待复测。
-
-### 2026-09-24 · 修复本地网关 MP3 Range 与 Chrome 拖动、刷新恢复
-
-- 现象：`run.bat` 实际启动的是 3000 端口 Node 网关。该端口对 `Range: bytes=1000000-1000100` 返回整文件 `200`，而 Astro dev 的 4321 端口返回正确的 `206`；先前只测 4321 误判了问题。Chrome 对 3000 端口的 MP3 刷新续播与拖动因此失效，Edge 表现不同。
-- 修法：撤回上一轮未提交的 `MusicManager` seek 守卫（它引入拖动回弹）；在 `server/index.ts` 静态分发增加单段 bytes Range，`206` / `416` 头和流式响应，保留既有入口、cookie、缓存策略。
-- 文件：`server/index.ts`、`DEVELOPMENT.md`。无新前端导出、DOM 钩子、storage key 或事件。
-- 验证：3000 原网关 Range → `200` 整文件；3001 修复版网关 Range → `206`（明确段、开放段、尾段），越界 → `416`，HEAD 段请求 → `206` 只带响应头。隔离 Chrome 访问修复版网关：DAO XIANG 85 秒恢复、拖至约 172 秒、再刷新仍约 172 秒；CANON 85 秒恢复、拖至约 212 秒、再刷新仍约 212 秒。`npm test` 103/103；`npm run check` 112 文件 0 错误、0 警告；`npm run build` 19 页。既有 3000 进程仍需重启 `run.bat` 才加载新服务端代码。
 
 ### 2026-09-24 · 修复刷新音频恢复与 IP 时钟空白
 

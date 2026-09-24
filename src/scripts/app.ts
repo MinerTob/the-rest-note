@@ -177,15 +177,11 @@ function initJourney(root: HTMLElement, music: MusicManager): void {
    * 纯逻辑与实测数据见 lib/scene.ts 与 tests/scene.test.mjs。
    * 这里没有 setTimeout / debounce —— 不抖是因为判据本身稳，不是因为拖时间。
    */
-  const aboutObserver = about ? new IntersectionObserver(() => {
-    // IntersectionObserver 可能一次交付多条旧/新几何记录。只取 entries[0]
-    // 会让较早的“已离开”记录盖过此刻仍在屏幕里的 About，导致 pause/start 抖动。
-    // 回调只用作触发，判定始终读取当前视口与当前区块位置。
-    const rect = about.getBoundingClientRect();
+  const aboutObserver = about ? new IntersectionObserver(([entry]) => {
     const coverage = sceneCoverage({
-      viewportHeight: window.innerHeight,
-      top: rect.top,
-      bottom: rect.bottom,
+      viewportHeight: entry.rootBounds?.height ?? window.innerHeight,
+      top: entry.boundingClientRect.top,
+      bottom: entry.boundingClientRect.bottom,
     });
     const next = sceneDecision(aboutActive, coverage);
     if (next === aboutActive) return;

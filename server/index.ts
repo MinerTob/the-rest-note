@@ -17,9 +17,7 @@
  * Node 直接跑 TypeScript（只剥类型，不做转换），所以这里不用任何构建步骤、也没有框架依赖。
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
-import { pipeline } from 'node:stream/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -147,29 +145,6 @@ function cacheControl(pathname: string, isHtml: boolean): string {
   return 'public, max-age=3600';
 }
 
-/** 单一 byte range；浏览器通过它从已保存的 MP3 位置恢复或拖动。 */
-function parseRange(value: string | undefined, size: number): { start: number; end: number } | null | 'unsatisfiable' {
-  if (!value) return null;
-  const match = /^bytes=(\d*)-(\d*)$/i.exec(value.trim());
-  if (!match) return null;
-  const [, first, last] = match;
-  if (!first && !last) return null;
-  if (!first) {
-    const length = Number(last);
-    if (!Number.isSafeInteger(length)) return null;
-    if (length <= 0 || size === 0) return 'unsatisfiable';
-    return { start: Math.max(0, size - length), end: size - 1 };
-  }
-  const start = Number(first);
-  if (!Number.isSafeInteger(start)) return null;
-  if (start >= size) return 'unsatisfiable';
-  if (!last) return { start, end: size - 1 };
-  const end = Number(last);
-  if (!Number.isSafeInteger(end)) return null;
-  if (end < start) return 'unsatisfiable';
-  return { start, end: Math.min(end, size - 1) };
-}
-
 async function serveNotFound(
   res: ServerResponse,
   head: boolean,
@@ -194,7 +169,6 @@ async function serveNotFound(
 }
 
 async function serveStatic(
-  req: IncomingMessage,
   res: ServerResponse,
   pathname: string,
   head: boolean,
@@ -205,68 +179,27 @@ async function serveStatic(
     await serveNotFound(res, head, cookies);
     return;
   }
-  let size: number;
+  let body: Buffer;
   try {
-    size = (await stat(file)).size;
+    body = await readFile(file);
   } catch {
     await serveNotFound(res, head, cookies);
     return;
   }
   const isHtml = file.toLowerCase().endsWith('.html');
-  // HTMLAudioElement 的两首背景曲目需要 Range 来续播/拖动。
-  // 钢琴采样是 fetch 后交给 decodeAudioData 的完整文件，沿用原来的 200 响应。
-  const isBackgroundTrack = pathname.startsWith('/music/') && file.toLowerCase().endsWith('.mp3');
-  if (!isBackgroundTrack) {
-    let body: Buffer;
-    try {
-      body = await readFile(file);
-    } catch {
-      await serveNotFound(res, head, cookies);
-      return;
-    }
-    res.writeHead(200, {
-      'Content-Type': contentType(file),
-      'Content-Length': String(body.byteLength),
-      'Cache-Control': cacheControl(pathname, isHtml),
-      ...(isHtml ? { Vary: 'Cookie' } : {}),
-      ...cookieHeaders(cookies),
-    });
-    res.end(head ? undefined : body);
-    return;
-  }
-  const headers: Record<string, string | string[]> = {
+  res.writeHead(200, {
     'Content-Type': contentType(file),
+    'Content-Length': String(body.byteLength),
     'Cache-Control': cacheControl(pathname, isHtml),
-    'Accept-Ranges': 'bytes',
     // 同一份 HTML 会因为 cookie 不同而拿到 302 或 200，共享缓存必须按 Cookie 分开
     ...(isHtml ? { Vary: 'Cookie' } : {}),
     ...cookieHeaders(cookies),
-  };
-  const rawRange = req.headers.range;
-  const range = parseRange(Array.isArray(rawRange) ? rawRange[0] : rawRange, size);
-  if (range === 'unsatisfiable') {
-    res.writeHead(416, { ...headers, 'Content-Range': `bytes */${size}`, 'Cache-Control': 'no-store' });
-    res.end();
-    return;
-  }
-  if (range) {
-    res.writeHead(206, {
-      ...headers,
-      'Content-Range': `bytes ${range.start}-${range.end}/${size}`,
-      'Content-Length': String(range.end - range.start + 1),
-    });
-  } else {
-    res.writeHead(200, { ...headers, 'Content-Length': String(size) });
-  }
+  });
   if (head) {
     res.end();
     return;
   }
-  try {
-    await pipeline(createReadStream(file, range ?? undefined), res);
-  } catch {
-    res.destroy();
-  }
+  res.end(body);
 }
 
 async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -382,7 +315,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       break;
   }
 
-  await serveStatic(req, res, pathname, head, setCookies);
+  await serveStatic(res, pathname, head, setCookies);
 }
 
 const server = createServer((req, res) => {
