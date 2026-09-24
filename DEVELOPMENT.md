@@ -722,7 +722,7 @@ sceneDecision(active, coverage, enter = 0.55, leave = 0.25): boolean;   // 迟�
 SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只是"什么时候叫我们"）
 ```
 
-- 判据是**覆盖度**而不是"露出 ÷ 区块高度"：区块比视口高时铺满视口就算 1，比视口矮时整块看得见才算 1。视口高度变化对它的影响比原来那条小得多。
+- 判据是**覆盖度**而不是"露出 ÷ 区块高度"：区块比视口高时铺满视口就算 1，比视口矮时整块看得见才算 1。视口高度变化对它的影响比原来那条小得多。IntersectionObserver 只负责触发回调；回调读取当前 `getBoundingClientRect()` 和 `window.innerHeight`，避免一次交付的旧记录把当前 About 状态覆盖。
 - 进出用**两个不同阈值**（0.55 / 0.25，中间 0.30 是迟滞带）：只有真的跨过去才切状态，抖动落在带子里就什么也不做。**没有 setTimeout / debounce** —— 不抖是因为判据本身稳，不是因为拖时间。
 - 实测（无头 Chrome，393×852，关于区高 679px）：停在旧判据 0.35 的边界上，地址栏收起/展开（视口 852 ↔ 750，判据 0.35 ↔ 0.373）在修前让 `data-state` 连着翻了 **5** 次（pause → playing → pause → playing → pause，每次都 `allNotesOff()` + 重新排程，听起来就是"前几秒明显断续"）；修后同一条路径 **0** 次。真的走远（滚回博客区）仍然会停（`data-scene=idle`、`data-state=paused`）。
 - 排查读数：`[data-journey-section="about"][data-scene="active|idle"]`。
@@ -902,18 +902,12 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 
 ## 10. 功能日志（规定动作）
 
-### 2026-09-24 · 扩大夜曲音频时钟预排窗口，覆盖手机主线程卡顿
+### 2026-09-24 · 回退到 b54d1d3 后按场景迟滞方法修复旧观察记录
 
-- 复查旧问题：开发日志中手机滚动颤动曾由 About 场景反复激活造成；当前 393×852 复跑旧边界与地址栏高度变化，状态翻转仍为 0 次。用户听到的断续相同，但这次场景始终 `active`、夜曲始终 `playing`。
-- 实际路径：夜曲仅提前 0.15 秒排音。手机主线程因动画、采样解码等任务短暂停顿超过该窗口时，AudioContext 虽持续运行，后续音符却来不及排入。模拟每 500 毫秒占用主线程 220 毫秒，12 秒内 13 个音符迟到；正常负载为 0。
-- 修法：将 `NocturneTransport` 的预排窗口扩大到 0.45 秒；暂停和跳转仍由 `allNotesOff()` 立即取消已排音符，不延迟控件响应。无新增导出、DOM 钩子、storage key 或事件。
-- 文件：`src/scripts/nocturne-transport.ts`、`DEVELOPMENT.md`。复跑同一压力测试，迟到排程 13 → 0；旧手机场景边界测试 0 次状态翻转、真正离开仍暂停。`npm test` 103/103；`npm run check` 112 文件 0 错误、0 警告；`npm run build` 19 页。手机真机声音待复测。
-
-### 2026-09-24 · 钢琴采样补载只处理缺失文件
-
-- 现象：手机端夜曲已开始演奏后可能断续。`PianoEngine.preload()` 虽然按缺失数安排后续轮次，每一轮实际又下载并解码整个采样清单；触屏解锁调用 `ensure()` 也可能提前启动下一轮，重复解码与夜曲排程争用手机资源。
-- 修法：每一轮的工作队列仅包含尚未解码的采样；保留原有并发上限、补载次数和失败时最近采样兜底。无新增导出、DOM 钩子、storage key 或事件。
-- 文件：`src/scripts/piano.ts`、`DEVELOPMENT.md`。验证：`npm test` 103/103；`npm run check` 112 文件 0 错误、0 警告；`npm run build` 19 页。手机真机声音待本人复测。
+- 按本人要求撤回 `a3ec56f` 与 `ff9fd3d` 的采样补载和预排窗口改动，恢复 `b54d1d3` 的实现作为起点。旧的 0.55 / 0.25 覆盖度迟滞仍保留。
+- 复现：开发日志里的慢速手机滚动测试保持 0 次状态翻转，但漏测了 IntersectionObserver 一次交付多条记录。构造“旧的离场记录 + 当前在场记录”同批到达：修前 About 实际仍在视口内（top≈80、bottom≈759），`data-scene` 却从 `active` 变 `idle`，夜曲从 `playing` 变 `paused`。
+- 修法：观察器只负责触发；每次按实时区块矩形和视口高度计算覆盖度，再交给原有 `sceneDecision()` 迟滞判定。无新导出、DOM 钩子、storage key 或事件。
+- 文件：`src/scripts/app.ts`、`DEVELOPMENT.md`。同批旧/新记录复测：`active/playing` 保持不变；原手机边界测试仍为 0 次翻转、真实离开仍暂停。`npm test` 103/103；`npm run check` 112 文件 0 错误、0 警告；`npm run build` 19 页。真机声音待复测。
 
 ### 2026-09-24 · 修复本地网关 MP3 Range 与 Chrome 拖动、刷新恢复
 

@@ -226,9 +226,8 @@ export class PianoEngine extends EventTarget {
     this.loading = (async () => {
       let ok = 0;
 
-      // 只补缺失的采样。重复解码已加载的整套音频会占用手机主线程，
-      // 让正在演奏的夜曲错过排程窗口，听起来像断续或重新起音。
-      const queue = needed.filter((sample) => !this.buffers.has(sample.midi));
+      // 并发 4 个，别一次打满
+      const queue = [...needed];
       const workers = Array.from({ length: 4 }, async () => {
         for (;;) {
           const sample = queue.shift();
