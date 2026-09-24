@@ -344,7 +344,7 @@ function initMusicUI(music: MusicManager): void;
 
 **其余不变量**
 
-- **C. `currentTime` 只有两个主动写入点**：① 接管一个 element 时恢复一次（`restorePositionOnce()`，每个 element 一生只做一次，元数据没到就挂**一个** `loadedmetadata` 等它）；② 用户拖进度条（`seekToRatio()`）。`play()` / `resume()` / `retryIfIdle()` / `canplay` / `pageshow` / `visibilitychange` **都不许**在起播前"同步一遍保存位置" —— 同一个元素停在哪儿就是哪儿，这就是"同一首暂停后继续不会跳回旧位置"的根据。
+- **C. `currentTime` 只有两个主动写入点**：① 接管一个 element 时恢复一次（`restorePositionOnce()`，每个 element 一生只做一次；第一次接管时先记下保存位置，等 `loadedmetadata` / `durationchange` / `canplay` 给出有效时长再 seek）；② 用户拖进度条（`seekToRatio()`，同时取消尚未完成的自动恢复）。在恢复完成前，`timeupdate`、About 让位、暂停、切歌都不能拿新元素暂时的 0 秒覆盖原保存位置。`play()` / `resume()` / `retryIfIdle()` / `pageshow` / `visibilitychange` 不在起播前反复同步保存位置 —— 同一个元素恢复一次后，真实进度就是准绳。
 - **D. About / MIDI 只抢音频焦点**：`setAboutActive(true)` 把音量归零并暂停所有主题 MP3、作废在飞的启动与切换，但**不动 `shouldPlay`**；`setAboutActive(false)` 只看 `shouldPlay` 决定要不要恢复（不再有"进入前想不想播"的第二份意图）。About 期间换主题仍然会把当前曲目切到新主题曲（恢复它自己的保存位置），只是保持暂停，离开 About 后按 `shouldPlay` 接着放。
 - **E. 自动恢复只有一条路、同一时刻最多一条在飞**：`init()` / `retryIfIdle()`（`canplay` / `pageshow` / `visibilitychange` / `audio-unlock` 都汇到这里）最终都进 `requestAutoStart()`，条件统一为 `shouldPlay && !inAbout && autoStart && !isPlaying()`；已有启动在飞就直接返回。`play()` 与它共用同一个"在飞"登记位 —— 入场页那次点击里 `music.play()` 紧跟着的 `audioUnlock() → retryIfIdle()` 因此不会在同一个元素上并发第二次 `el.play()`。
 - **F. 过期异步操作无害**：`switchToken` 在每次启动 / 切换 / 暂停 / 进出 About 时 +1；`await el.play()` 回来先对号，对不上就只许安静退场（旧元素已经不是当前曲目时顺手 `volume = 0; pause()`），绝不改 `shouldPlay`、不改 `this.el`、不停掉新的那次播放。
@@ -902,6 +902,14 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-24 · 修复 About 刷新后背景 MP3 丢失原播放位置
+
+- 现象：iPhone 在首页 About 区刷新、重新启动夜曲后，向上回到 Home 时背景 MP3 不一定自动接上；点击播放后有时从 0 开始，而非刷新前的位置。
+- 根因：刷新后若先处于 About，`MusicManager` 因让位而尚未创建 MP3 元素；离开 About 才新建元素并调用 `play()`。旧 `restorePositionOnce()` 只等一次 `loadedmetadata`，若当时 `duration` 仍不可用便永久放弃恢复。新元素随后从 0 产生的 `timeupdate`，或再次进入 About 时的保存，又会把原保存位置覆盖，后续点击也只能从 0 播。iPhone 的媒体元数据时序使这条竞态更容易遇到；自动续播还受浏览器手势策略约束。
+- 修法：第一次接管元素时固定原保存位置；持续监听元数据和时长变化，直到时长有效且 seek 成功。恢复完成之前不把临时的 0 秒写回时间线；用户主动拖动时取消等待中的自动恢复，以用户选择为准。不改 MIDI、静音模式、Range 处理或自动播放策略。
+- 文件：`src/scripts/music-manager.ts`、`DEVELOPMENT.md`。无新导出、DOM 钩子、storage key 或自定义事件。
+- 验证：`npm test`（103/103）、`npm run check`（112 文件，0 错误/警告）、`npm run build`（19 页面）均通过；iPhone Chrome 实际恢复位置待本人复测。
 
 ### 2026-09-24 · 记录 iPhone 静音模式下的夜曲无声现象
 

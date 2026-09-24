@@ -137,6 +137,8 @@ export class MusicManager extends EventTarget {
   private readonly positionRestored = new WeakSet<HTMLAudioElement>();
   /** 已经为这个 element 挂过 loadedmetadata 等待（防止重复挂一堆监听） */
   private readonly positionRestorePending = new WeakSet<HTMLAudioElement>();
+  /** 用户手动 seek 时要取消尚未完成的自动恢复，不能稍后把用户的选择盖掉 */
+  private readonly cancelPositionRestore = new WeakMap<HTMLAudioElement, () => void>();
   /** 交叉淡入淡出自己的 rAF 与延时：下一次切换 / 暂停 / 播放前要先把它们停掉 */
   private fadeFrames: (() => void)[] = [];
   private pauseTimer = 0;
@@ -230,7 +232,7 @@ export class MusicManager extends EventTarget {
 
     const el = this.el;
     if (el) {
-      savePosition("track:" + this.trackId, el.currentTime);
+      if (this.positionRestored.has(el)) savePosition("track:" + this.trackId, el.currentTime);
       this.fadeFrame = ramp(
         el.volume,
         0,
@@ -363,7 +365,8 @@ export class MusicManager extends EventTarget {
 
     if (active) {
       for (const el of this.elements.values()) {
-        if (el === this.el) savePosition("track:" + this.trackId, el.currentTime);
+        if (el === this.el && this.positionRestored.has(el))
+          savePosition("track:" + this.trackId, el.currentTime);
         el.volume = 0;
         el.pause();
       }
@@ -443,6 +446,7 @@ export class MusicManager extends EventTarget {
     if (!Number.isFinite(el.duration) || el.duration <= 0) return;
     const next = clamp01(ratio) * el.duration;
     el.currentTime = next;
+    this.finishPositionRestore(el);
     savePosition("track:" + this.trackId, next);
     this.emit();
   }
@@ -508,7 +512,8 @@ export class MusicManager extends EventTarget {
 
     const previous = this.el;
     // 旧曲的进度存在它自己的元素里，切走之前落盘
-    if (previous) savePosition("track:" + this.trackId, previous.currentTime);
+    if (previous && this.positionRestored.has(previous))
+      savePosition("track:" + this.trackId, previous.currentTime);
 
     const incoming = this.elementFor(next);
     // 新曲只需要"接管时恢复一次"；本次文档用过的元素里就是它自己的真实进度
@@ -621,35 +626,43 @@ export class MusicManager extends EventTarget {
     return el;
   }
 
+  /** 恢复完成后拆掉等待监听；显式拖动也用它取消尚未完成的自动恢复。 */
+  private finishPositionRestore(el: HTMLAudioElement): void {
+    this.positionRestored.add(el);
+    this.positionRestorePending.delete(el);
+    this.cancelPositionRestore.get(el)?.();
+    this.cancelPositionRestore.delete(el);
+  }
+
   /**
-   * 一个元素一生只从 storage 恢复一次进度（元数据还没到就挂**一次** loadedmetadata 等它）。
-   *
-   * 这是 `currentTime` 的两个写入点之一（另一个是用户拖进度条的 `seekToRatio()`）。
-   * 之所以要"只一次"：同一个元素自己停在哪儿就是真相，反复用保存值覆盖它，
-   * 就会出现"暂停 → 播放跳回旧位置""切回上一首又从头放"这类问题。
+   * 保存的位置在第一次接管元素时取快照，等浏览器给出有效时长才 seek。
+   * iOS 的 loadedmetadata 可能先于有效 duration；只监听一次会永久错过恢复。
+   * 在恢复完成前也不能把从 0 起播的 timeupdate 写回 storage 覆盖这份快照。
    */
   private restorePositionOnce(el: HTMLAudioElement, id: string): void {
-    if (this.positionRestored.has(el)) return;
-
-    if (Number.isFinite(el.duration) && el.duration > 0) {
-      el.currentTime = savedPosition("track:" + id, el.duration);
-      this.positionRestored.add(el);
+    if (this.positionRestored.has(el) || this.positionRestorePending.has(el)) return;
+    const saved = savedPosition("track:" + id, 0);
+    if (saved === 0) {
+      this.finishPositionRestore(el);
       return;
     }
 
-    if (this.positionRestorePending.has(el)) return;
+    const tryRestore = (): void => {
+      if (el.readyState < 1 || !Number.isFinite(el.duration) || el.duration <= 0) return;
+      try {
+        el.currentTime = saved % el.duration;
+      } catch {
+        return; // 资源尚不可 seek；下一个媒体事件再试。
+      }
+      this.finishPositionRestore(el);
+    };
+    const events = ["loadedmetadata", "durationchange", "canplay"] as const;
     this.positionRestorePending.add(el);
-    el.addEventListener(
-      "loadedmetadata",
-      () => {
-        this.positionRestorePending.delete(el);
-        if (this.positionRestored.has(el)) return;
-        if (!Number.isFinite(el.duration) || el.duration <= 0) return;
-        el.currentTime = savedPosition("track:" + id, el.duration);
-        this.positionRestored.add(el);
-      },
-      { once: true },
-    );
+    for (const event of events) el.addEventListener(event, tryRestore);
+    this.cancelPositionRestore.set(el, () => {
+      for (const event of events) el.removeEventListener(event, tryRestore);
+    });
+    tryRestore();
   }
 
   /**
@@ -674,7 +687,8 @@ export class MusicManager extends EventTarget {
     });
 
     el.addEventListener("timeupdate", () => {
-      if (this.el === el && !el.paused) savePosition("track:" + track.id, el.currentTime);
+      if (this.el === el && !el.paused && this.positionRestored.has(el))
+        savePosition("track:" + track.id, el.currentTime);
     });
 
     /*
