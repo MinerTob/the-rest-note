@@ -25,8 +25,9 @@ import type { PianoEngine } from './piano';
 const TIMELINE = NOCTURNE_TIMELINE;
 const FIRST = 21;
 const LAST = 108;
-/** 提前多少秒把音符排进音频时钟（太短会漏音，太长会让暂停按钮迟钝） */
-const LOOKAHEAD = 0.15;
+/** 提前排入 AudioContext 的窗口。手机主线程短暂停顿时，已排好的音仍会准时响；
+ * 暂停、跳转会通过 allNotesOff() 立即掐掉窗口内的音。 */
+const LOOKAHEAD = 0.45;
 /** 时钟滴答：排程 + 存进度 + 通知 UI */
 const TICK_MS = 25;
 /** 曲子末尾留一点空白再从头来（和原来一致） */
