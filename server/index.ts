@@ -213,6 +213,27 @@ async function serveStatic(
     return;
   }
   const isHtml = file.toLowerCase().endsWith('.html');
+  // HTMLAudioElement 的两首背景曲目需要 Range 来续播/拖动。
+  // 钢琴采样是 fetch 后交给 decodeAudioData 的完整文件，沿用原来的 200 响应。
+  const isBackgroundTrack = pathname.startsWith('/music/') && file.toLowerCase().endsWith('.mp3');
+  if (!isBackgroundTrack) {
+    let body: Buffer;
+    try {
+      body = await readFile(file);
+    } catch {
+      await serveNotFound(res, head, cookies);
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': contentType(file),
+      'Content-Length': String(body.byteLength),
+      'Cache-Control': cacheControl(pathname, isHtml),
+      ...(isHtml ? { Vary: 'Cookie' } : {}),
+      ...cookieHeaders(cookies),
+    });
+    res.end(head ? undefined : body);
+    return;
+  }
   const headers: Record<string, string | string[]> = {
     'Content-Type': contentType(file),
     'Cache-Control': cacheControl(pathname, isHtml),

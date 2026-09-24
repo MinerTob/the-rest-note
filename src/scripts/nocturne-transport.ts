@@ -25,8 +25,8 @@ import type { PianoEngine } from './piano';
 const TIMELINE = NOCTURNE_TIMELINE;
 const FIRST = 21;
 const LAST = 108;
-/** 给手机短暂的主线程阻塞留出余量；暂停/拖动会立即取消已排音符。 */
-const LOOKAHEAD = 0.45;
+/** 提前多少秒把音符排进音频时钟（太短会漏音，太长会让暂停按钮迟钝） */
+const LOOKAHEAD = 0.15;
 /** 时钟滴答：排程 + 存进度 + 通知 UI */
 const TICK_MS = 25;
 /** 曲子末尾留一点空白再从头来（和原来一致） */
