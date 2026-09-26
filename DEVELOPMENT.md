@@ -726,6 +726,7 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 - 判据是**覆盖度**而不是"露出 ÷ 区块高度"：区块比视口高时铺满视口就算 1，比视口矮时整块看得见才算 1。视口高度变化对它的影响比原来那条小得多。
 - 进出用**两个不同阈值**（0.55 / 0.25，中间 0.30 是迟滞带）：只有真的跨过去才切状态，抖动落在带子里就什么也不做。**没有 setTimeout / debounce** —— 不抖是因为判据本身稳，不是因为拖时间。
 - 刷新后初始位置在 About 时，`boot()` 的 `initiallyInAbout` 同时用于 `MusicManager.setAboutActive()` 和 `initJourney()` 的观察器初始状态。否则 MP3 已让位、观察器却从 idle 起步，滑出 About 时可能没有状态切换，也就不会触发 MP3 恢复。
+- About 与 MP3 的交接在 `scroll` 的下一帧按实时几何位置计算，`pointerup` 时同步再算一次（触屏离开边界时让 `play()` 留在可信手势内）；IntersectionObserver 补没有滚动事件的布局变化。三条入口共用 `updateAboutScene()` 和同一迟滞状态，避免第一次滑出只等异步观察器回调。
 - 实测（无头 Chrome，393×852，关于区高 679px）：停在旧判据 0.35 的边界上，地址栏收起/展开（视口 852 ↔ 750，判据 0.35 ↔ 0.373）在修前让 `data-state` 连着翻了 **5** 次（pause → playing → pause → playing → pause，每次都 `allNotesOff()` + 重新排程，听起来就是"前几秒明显断续"）；修后同一条路径 **0** 次。真的走远（滚回博客区）仍然会停（`data-scene=idle`、`data-state=paused`）。
 - 排查读数：`[data-journey-section="about"][data-scene="active|idle"]`。
 
@@ -903,6 +904,14 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-26 · 修复手机刷新 About 后第一次滑出仍无 MP3 声音
+
+- 现象：刷新后夜曲能重新播放，但第一次滑出 About 时 MP3 不立刻响；再滑回 About、第二次滑出才响。
+- 根因：此前虽然同步了初始场景状态，离开判定仍只由异步 IntersectionObserver 回调驱动。iPhone 首次滚动的回调可能晚于触屏抬起，MP3 的 `play()` 失去这次用户激活；第二次手势才可能恢复。
+- 修法：共用一个实时 `updateAboutScene()`；滚动下一帧更新，在 `pointerup` 同步检查离开边界，使该次交接的 MP3 播放尝试处于可信手势内；IntersectionObserver 负责布局变化兜底。保留 0.55 / 0.25 迟滞以及现有进度恢复逻辑，不通过静音播放绕过浏览器策略。
+- 文件：`src/scripts/app.ts`、`DEVELOPMENT.md`。无新导出、DOM 钩子、storage key 或自定义事件。
+- 验证：`npm test`（103/103）、`npm run check`（112 文件，0 错误/警告）、`npm run build`（19 页面）均通过；iPhone Chrome 实际首次滑出续播待本人复测。
 
 ### 2026-09-24 · 修复 About 刷新后滑出区域不触发 MP3 自动恢复
 

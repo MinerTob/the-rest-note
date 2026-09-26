@@ -77,6 +77,7 @@ function initJourney(root: HTMLElement, music: MusicManager, initiallyInAbout: b
   const header = document.querySelector<HTMLElement>('.site-header');
   let activeSectionId = '';
   let rafId = 0;
+  let updateAboutScene = (): void => {};
 
   const updateActiveSection = (): void => {
     rafId = 0;
@@ -113,7 +114,10 @@ function initJourney(root: HTMLElement, music: MusicManager, initiallyInAbout: b
 
   const scheduleActiveSection = (): void => {
     if (rafId) return;
-    rafId = requestAnimationFrame(updateActiveSection);
+    rafId = requestAnimationFrame(() => {
+      updateActiveSection();
+      updateAboutScene();
+    });
   };
   window.addEventListener('scroll', scheduleActiveSection, { passive: true });
   window.addEventListener('resize', scheduleActiveSection);
@@ -178,11 +182,13 @@ function initJourney(root: HTMLElement, music: MusicManager, initiallyInAbout: b
    * 纯逻辑与实测数据见 lib/scene.ts 与 tests/scene.test.mjs。
    * 这里没有 setTimeout / debounce —— 不抖是因为判据本身稳，不是因为拖时间。
    */
-  const aboutObserver = about ? new IntersectionObserver(([entry]) => {
+  updateAboutScene = (): void => {
+    if (!about) return;
+    const rect = about.getBoundingClientRect();
     const coverage = sceneCoverage({
-      viewportHeight: entry.rootBounds?.height ?? window.innerHeight,
-      top: entry.boundingClientRect.top,
-      bottom: entry.boundingClientRect.bottom,
+      viewportHeight: window.innerHeight,
+      top: rect.top,
+      bottom: rect.bottom,
     });
     const next = sceneDecision(aboutActive, coverage);
     if (next === aboutActive) return;
@@ -197,12 +203,20 @@ function initJourney(root: HTMLElement, music: MusicManager, initiallyInAbout: b
       setIdentityActive(false);
       music.setAboutActive(false);
     }
-  }, { threshold: [...SCENE_THRESHOLDS] }) : undefined;
+  };
+  // 滚动时直接读实时位置；观察器只补布局变化而未触发 scroll 的情况。
+  const aboutObserver = about ? new IntersectionObserver(updateAboutScene, {
+    threshold: [...SCENE_THRESHOLDS],
+  }) : undefined;
   if (about && aboutObserver) aboutObserver.observe(about);
+  // 触屏抬起时同步完成交接，让 play() 留在真实用户激活链里。
+  window.addEventListener('pointerup', updateAboutScene, { capture: true, passive: true });
+  updateAboutScene();
 
   disposeJourney = () => {
     window.removeEventListener('scroll', scheduleActiveSection);
     window.removeEventListener('resize', scheduleActiveSection);
+    window.removeEventListener('pointerup', updateAboutScene, true);
     if (rafId) cancelAnimationFrame(rafId);
     rafId = 0;
     aboutObserver?.disconnect();
