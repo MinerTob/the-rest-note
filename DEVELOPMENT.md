@@ -349,7 +349,7 @@ function initMusicUI(music: MusicManager): void;
 - **D. About / MIDI 只抢音频焦点**：`setAboutActive(true)` 把音量归零并暂停所有主题 MP3、作废在飞的启动与切换，但**不动 `shouldPlay`**；`setAboutActive(false)` 只看 `shouldPlay` 决定要不要恢复（不再有"进入前想不想播"的第二份意图）。About 期间换主题仍然会把当前曲目切到新主题曲（恢复它自己的保存位置），只是保持暂停，离开 About 后按 `shouldPlay` 接着放。
 - **E. 自动恢复只有一条路、同一时刻最多一条在飞**：`init()` / `retryIfIdle()`（`canplay` / `pageshow` / `visibilitychange` / `audio-unlock` 都汇到这里）最终都进 `requestAutoStart()`，条件统一为 `shouldPlay && !inAbout && autoStart && !isPlaying()`；已有启动在飞就直接返回。`play()` 与它共用同一个"在飞"登记位 —— 入场页那次点击里 `music.play()` 紧跟着的 `audioUnlock() → retryIfIdle()` 因此不会在同一个元素上并发第二次 `el.play()`。
 - **F. 过期异步操作无害**：`switchToken` 在每次启动 / 切换 / 暂停 / 进出 About 时 +1；`await el.play()` 回来先对号，对不上就只许安静退场（旧元素已经不是当前曲目时顺手 `volume = 0; pause()`），绝不改 `shouldPlay`、不改 `this.el`、不停掉新的那次播放。
-- **G. 每首曲子各自一个 element、各自一条时间线**：`crossfadeTo()` 切走前把旧曲进度落到 `space.position.v1.track:<id>`（格式不变），新曲只在自己**第一次**被接管时 `restorePositionOnce()`；本次文档用过的元素里就是它自己的真实进度，反复切回来不会被 storage 覆盖。`force` 时**不再先 `await waitForCanPlay()`**（那会拖断用户手势链）：直接 `incoming.play()`（浏览器自己会等媒体 ready），旧曲在它真正起播前继续响，成功后再做原来的交叉淡入。autoplay 被拒时保留 `shouldPlay`，等下一次可信手势 / `canplay`。
+- **G. 每首曲子各自一个 element、各自一条时间线**：`crossfadeTo()` 切走前把旧曲进度落到 `space.position.v1.track:<id>`（格式不变），新曲只在自己**第一次**被接管时 `restorePositionOnce()`；本次文档用过的元素里就是它自己的真实进度，反复切回来不会被 storage 覆盖。`force` 时**不再先 `await waitForCanPlay()`**（那会拖断用户手势链）：直接 `incoming.play()`（浏览器自己会等媒体 ready）。主指针为粗指针的触控设备上，切换开始就暂停旧曲，新曲拿到目标音量后再播放；桌面仍在新曲成功启动后交叉淡出旧曲。autoplay 被拒时保留 `shouldPlay`，等下一次可信手势 / `canplay`。
 - **H. 显式播放按钮继续绕开全局 capture 解锁**：`audio-unlock.ts` 的 `EXPLICIT_AUDIO_CONTROL = '[data-music-toggle], [data-identity-play]'` —— 手势落在它们上面时 document capture 的 `unlockAll()` 不抢，交给按钮自己的 `click`（`music.toggle()` / `transport.start()`），第一击就生效。
 - **SAME VISIT 刷新的自动恢复**：`initAudioUnlock({ gated:false })` 里 `music.init()` 只尝试一次；浏览器允许即续播，拒绝则保留 `shouldPlay` 等真实手势重试。鼠标在 `pointerdown`、触屏在 `pointerup`、键盘在 `keydown` 解锁；触屏 `pointerdown` 不具备可靠的瞬时用户激活。夜曲在采样等待结束时再次核对 AudioContext，避免 `running` 事件发生在 `loading` 中而永久停在 waiting。
 - **iPhone About 刷新后的接续**：夜曲播放/重播的真实点击先唤醒钢琴 AudioContext，再由 `prepareAboutMedia(context)` 创建并加载原生 MP3 元素，同时在这条已获用户手势的 AudioContext 中异步解码当前 MP3。离开 About 首先照旧尝试原生 `play()`；若 WebKit 因滑动回调没有激活而拒绝，解码已完成时由共用 AudioContext 在原进度接续，未完成则在解码完成后核对焦点与播放意图再接续。首次入场、普通手动播放仍直接走原生 `play()`，不等待整首解码；不以静音播放解锁。音量、进度拖动、暂停、换曲、离开 About 家族均同步或清理接续声源。整首文件尚未下载完时，首次滑出仍可能有网络等待。
@@ -907,6 +907,12 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-27 · 触控设备切主题时立即暂停旧曲
+
+- 根因：切主题时旧曲原本在新曲成功启动后淡出 `AUDIO.crossfadeMs`（2 秒）才暂停；手机上网页音量渐变不明显，听感像两首曲子重叠、旧曲没有及时停。
+- 修法：`crossfadeTo()` 依据 `(pointer: coarse)` 判断主输入。触控设备切换一开始即暂停旧曲，新曲开始前直接设置目标音量；电脑继续原有淡入淡出、播放失败处理及进度保存逻辑。About 中仍保持静音让位。
+- 文件：`src/scripts/music-manager.ts`、`DEVELOPMENT.md`（§5.5 / 本条）。无新增接口、DOM 钩子、storage key 或事件。`npm test` 103/103、`npm run check` 0 错误/警告、`npm run build` 19 页。
 
 ### 2026-09-27 · Lab 客户端导航后提前加载钢琴采样
 

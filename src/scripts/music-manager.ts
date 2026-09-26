@@ -664,6 +664,7 @@ export class MusicManager extends EventTarget {
     const incoming = this.elementFor(next);
     // 新曲只需要"接管时恢复一次"；本次文档用过的元素里就是它自己的真实进度
     this.restorePositionOnce(incoming, next.id);
+    const immediateSwitch = window.matchMedia('(pointer: coarse)').matches;
 
     if (incoming === previous) {
       this.trackId = next.id;
@@ -681,7 +682,8 @@ export class MusicManager extends EventTarget {
       element.pause();
     }
     // 进来的那首可能还留着残影（音量没归零就不会淡入）
-    incoming.volume = 0;
+    const target = this.muted || this.ducked ? 0 : this.volume;
+    incoming.volume = !this.inAbout && immediateSwitch ? target : 0;
 
     if (this.inAbout) {
       // About 期间只换"当前曲目"，不抢 MIDI 焦点：离开 About 再由 shouldPlay 决定
@@ -695,6 +697,9 @@ export class MusicManager extends EventTarget {
     }
 
     let started = false;
+    // 触控设备上 HTMLMediaElement.volume 的渐变反馈不可靠；直接停掉旧曲，
+    // 避免听到旧曲继续响而看不出淡出的效果。桌面仍保留完整交叉淡出。
+    if (immediateSwitch) previous?.pause();
     if (this.shouldPlay) {
       try {
         await incoming.play();
@@ -719,10 +724,11 @@ export class MusicManager extends EventTarget {
     if (started) this.mediaError = false;
     this.syncState();
 
-    const target = this.muted || this.ducked ? 0 : this.volume;
-
     if (!started) {
       // 没在放（用户暂停 / 被浏览器拦下）：音量先摆好，不做淡入；旧曲停掉
+      incoming.volume = target;
+      previous?.pause();
+    } else if (immediateSwitch) {
       incoming.volume = target;
       previous?.pause();
     } else {
