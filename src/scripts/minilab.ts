@@ -26,12 +26,14 @@ export type MiniLabController = {
 export type NoteSource = 'pointer' | 'keyboard' | 'midi';
 
 /**
- * **必须在用户手势里调用**：把 MiniLab 这架琴的 AudioContext 建起来并开始预载采样。
+ * 把 MiniLab 这架琴的 AudioContext 建起来并开始预载采样。
  *
  * 为什么需要：这架琴的采样原来是从"第一次按琴键"那一刻才开始加载的（同一个手势里），
  * 于是"按键"永远跑在"采样"前面 —— 第一声只能拿合成器顶上，听起来就不是这台钢琴（本人反馈）。
- * 现在入场页点"进入"时就顺手把它预热（那是一次干净的用户手势），走到实验室时采样已经就位，
- * 第一声就是真实采样。只在真的有 MiniLab 的页面上动作，其它页面不受影响。
+ * 入场页若已有键盘可在真实手势中预热；从首页经 ClientRouter 到 Lab 时，
+ * app.ts 在音乐启动请求之后也会调它，提前下载/解码。若浏览器暂时挂起
+ * AudioContext，首键的 prime() 仍在真实手势里调用 ensure() 唤醒。
+ * 只在真的有 MiniLab 的页面上动作，其它页面不受影响。
  */
 export function primeMiniLabPiano(): void {
   if (!document.querySelector('[data-minilab]')) return;

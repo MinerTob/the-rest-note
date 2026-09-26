@@ -393,6 +393,7 @@ function getMidiBridge(): MidiBridge;
 ```
 
 - 输入统一汇到 `MiniLabController.press/release`，再由它决定发声（钢琴采样优先，`PianoEngine` 失败时退回 `KeysSynth`）并更新屏幕读数。
+- 从首页经 ClientRouter 进入 Lab 时，入场按钮当时看不到 MiniLab，`primeMiniLabPiano()` 的 DOM 守卫会跳过。`app.ts` 现在在 Lab 的 `initMiniLab()` 完成、`initAudioUnlock()` 发出背景音乐启动请求之后，调用原有 `primeMiniLabPiano()` 提前下载/解码采样；首键的 `prime()` 仍在真实手势里唤醒被浏览器挂起的 AudioContext。加载未完成就立刻按键时仍由合成器兜底，避免静音。
 - 电脑键盘映射在 `src/scripts/notes.ts`：`KEYBOARD_MAP`、`midiFromKey()`、`noteName()`、`midiFromName()`、`isBlackKey()`、`isCKey()`、`frequency()`、`MINILAB_KEYS`（有单测 `tests/notes.test.mjs`）。
 - 采样表在 `src/lib/piano.ts`：`PIANO_SAMPLES`、`nearestSample(midi, samples?)`、`playbackRateFor(sample, midi)`、`samplesForRange(min, max, samples?)`（决定"哪些采样必需"，`PianoEngine.requiredSamples` 用它）。
 - **iPhone 静音模式注意**：夜曲和 MiniLab 的钢琴采样走 `PianoEngine` / Web Audio，进度和瀑布流读的是 AudioContext 时钟；iOS WebKit 可以让时钟继续走，却因静音模式不向扬声器输出 Web Audio。背景 MP3 走 HTML 音频，可能仍有声音，二者因此看起来不同步。本人在 iPhone Chrome 上确认静音模式是夜曲无声与异常听感的关键条件；排查时先切换静音模式做对照，再看采样请求、场景激活和排程。WebKit 对这类表现及 `ambient` / `playback` 音频会话的说明见 https://bugs.webkit.org/show_bug.cgi?id=251532 与 https://bugs.webkit.org/show_bug.cgi?id=237322 。当前代码不主动改系统音频会话类型。
@@ -906,6 +907,12 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-27 · Lab 客户端导航后提前加载钢琴采样
+
+- 根因：首页入场时尚无 `[data-minilab]`，入场按钮调用的 `primeMiniLabPiano()` 因 DOM 守卫直接返回；ClientRouter 到 Lab 后只初始化控制器，直到首键才 `ensure()`，因此首音采样尚未就绪时落到合成器兜底。
+- 修法：Lab 页面 boot 中完成统一音频启动后调用已有 `primeMiniLabPiano()`，仅在页面确有 MiniLab 时预载；首键仍在真实手势中 `ensure()` 以恢复 AudioContext。保留采样未就绪时的合成器兜底与现有 MIDI、MP3 启动顺序。
+- 文件：`src/scripts/app.ts`、`src/scripts/minilab.ts`、`DEVELOPMENT.md`（§5.6 / 本条）。无新增导出、DOM 钩子、storage key 或自定义事件。`npm test` 103/103、`npm run check` 0 错误/警告、`npm run build` 19 页；首键音色仍需设备与网络环境实测。
 
 ### 2026-09-27 · 修复 About 刷新后首次滑出 MP3 停在 READY
 

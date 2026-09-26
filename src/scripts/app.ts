@@ -3,7 +3,7 @@ import { AppStore } from './app-state';
 import { initClock } from './clock';
 import { initEasterEggs } from './easter-eggs';
 import { initLangSwitch, markIncomingLanguageText } from './lang';
-import { initMiniLab } from './minilab';
+import { initMiniLab, primeMiniLabPiano } from './minilab';
 import { initMusicUI } from './music-ui';
 import { initContact } from './contact';
 import { initIdentity, disposeIdentity, setIdentityActive } from './identity-player';
@@ -343,6 +343,9 @@ function boot(): void {
    */
   const gated = initEntryGate(global.music);
   initAudioUnlock({ gated });
+  // 从首页经 ClientRouter 进入 Lab 时，入场手势看不到尚未挂载的 MiniLab。
+  // 音乐启动请求已经发出后再预载 Lab 采样；首键手势仍会唤醒 AudioContext。
+  if (!gated) primeMiniLabPiano();
   // 第三方定位请求最后才发，避免与音频启动争用首轮网络资源。
   initClock();
 }
