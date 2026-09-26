@@ -130,10 +130,10 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch()
 | 全站状态 | `src/scripts/app-state.ts` | `AppStore.get()` / `set()` / `isUnlocked()` / `hasUnlocks()` | `'change'` 事件（detail: `{ state, previous }`） |
 | 焦点圈（仅键盘） | `src/scripts/input-modality.ts`、`src/styles/global.css` | `trackInputModality()` | `html[data-input]` |
 | LCD 时钟 | `src/components/LcdClock.astro`、`src/scripts/clock.ts` | `initClock()`（浏览器时区即时显示，IP 时区异步覆盖） | `[data-clock]`、`[data-clock-time]`、`[data-clock-date]`、`[data-clock-zone]` |
-| 背景音乐播放器 | `src/components/MusicSystem.astro`、`src/scripts/music-manager.ts`、`music-ui.ts`、`src/lib/music.ts` | `MusicManager`（`prepareAboutMedia()`）、`initMusicUI()` | `[data-music]`、`[data-music-toggle/-progress/-volume/-state/-title/-subtitle/-time]` |
+| 背景音乐播放器 | `src/components/MusicSystem.astro`、`src/scripts/music-manager.ts`、`music-ui.ts`、`src/lib/music.ts` | `MusicManager`（`prepareAboutMedia(context)` / `releaseAboutMedia()`）、`initMusicUI()` | `[data-music]`、`[data-music-toggle/-progress/-volume/-state/-title/-subtitle/-time]` |
 | 播放进度记忆 | `src/lib/live-timeline.ts` | `savedPosition()` / `savePosition()` / `restartPosition()` | sessionStorage `space.position.v1.<id>` |
 | MiniLab 25 键 | `src/components/MiniLab.astro`、`src/scripts/minilab.ts`、`notes.ts` | `initMiniLab()`、`MiniLabController` | `[data-minilab*]`、`[data-midi]`、`data-word-*` |
-| 钢琴采样引擎 | `src/scripts/piano.ts`、`src/lib/piano.ts` | `PianoEngine`、`nearestSample()`、`playbackRateFor()`、`samplesForRange()` | 事件 `piano:state` / `piano:context` / `piano:progress` |
+| 钢琴采样引擎 | `src/scripts/piano.ts`、`src/lib/piano.ts` | `PianoEngine`（`audioContext` / `prioritize()` / `waitForNotes()`）、`nearestSample()`、`playbackRateFor()`、`samplesForRange()` | 事件 `piano:state` / `piano:context` / `piano:progress` |
 | 合成器（无采样兜底） | `src/scripts/synth.ts` | `KeysSynth.unlock()` / `noteOn()` / `noteOff()` / `allNotesOff()` | — |
 | 真实 MIDI 键盘 | `src/scripts/midi.ts` | `MidiBridge`、`getMidiBridge()` | 事件 `midi:noteon` / `midi:noteoff` / `midi:change` |
 | 彩蛋（隐藏曲目） | `src/lib/easter-eggs.ts`、`src/lib/sequences.ts`、`src/scripts/easter-eggs.ts` | `EASTER_EGGS`、`HOLD_TO_ARM` / `isArmChord()`（入口和弦）、`createSequenceDetector()`、`createSequenceSession()`、`EasterEggManager`（`toggleHint()` / `holdNote()` / `releaseNote()`） | `[data-note]`（琴键）、事件 `minilab:note` / `minilab:release` / `egg:hint` / `egg:accept` / `egg:miss` |
@@ -345,14 +345,14 @@ function initMusicUI(music: MusicManager): void;
 
 **其余不变量**
 
-- **C. `currentTime` 只有两个主动写入点**：① 接管一个 element 时恢复一次（`restorePositionOnce()`，每个 element 一生只做一次；第一次接管时先记下保存位置，等 `loadedmetadata` / `durationchange` / `canplay` 给出有效时长再 seek）；② 用户拖进度条（`seekToRatio()`，同时取消尚未完成的自动恢复）。在恢复完成前，`timeupdate`、About 让位、暂停、切歌都不能拿新元素暂时的 0 秒覆盖原保存位置。`play()` / `resume()` / `retryIfIdle()` / `pageshow` / `visibilitychange` 不在起播前反复同步保存位置 —— 同一个元素恢复一次后，真实进度就是准绳。
+- **C. 进度写入受控**：① 接管 element 时恢复一次（`restorePositionOnce()`）；② 用户拖进度条（`seekToRatio()`，取消待完成的恢复）；③ About 的 AudioContext 接续与原生播放器交接时同步一次位置。在恢复完成前，`timeupdate`、About 让位、暂停、切歌都不能拿新元素暂时的 0 秒覆盖原保存位置。其余自动重试不反复写入 `currentTime`。
 - **D. About / MIDI 只抢音频焦点**：`setAboutActive(true)` 把音量归零并暂停所有主题 MP3、作废在飞的启动与切换，但**不动 `shouldPlay`**；`setAboutActive(false)` 只看 `shouldPlay` 决定要不要恢复（不再有"进入前想不想播"的第二份意图）。About 期间换主题仍然会把当前曲目切到新主题曲（恢复它自己的保存位置），只是保持暂停，离开 About 后按 `shouldPlay` 接着放。
 - **E. 自动恢复只有一条路、同一时刻最多一条在飞**：`init()` / `retryIfIdle()`（`canplay` / `pageshow` / `visibilitychange` / `audio-unlock` 都汇到这里）最终都进 `requestAutoStart()`，条件统一为 `shouldPlay && !inAbout && autoStart && !isPlaying()`；已有启动在飞就直接返回。`play()` 与它共用同一个"在飞"登记位 —— 入场页那次点击里 `music.play()` 紧跟着的 `audioUnlock() → retryIfIdle()` 因此不会在同一个元素上并发第二次 `el.play()`。
 - **F. 过期异步操作无害**：`switchToken` 在每次启动 / 切换 / 暂停 / 进出 About 时 +1；`await el.play()` 回来先对号，对不上就只许安静退场（旧元素已经不是当前曲目时顺手 `volume = 0; pause()`），绝不改 `shouldPlay`、不改 `this.el`、不停掉新的那次播放。
 - **G. 每首曲子各自一个 element、各自一条时间线**：`crossfadeTo()` 切走前把旧曲进度落到 `space.position.v1.track:<id>`（格式不变），新曲只在自己**第一次**被接管时 `restorePositionOnce()`；本次文档用过的元素里就是它自己的真实进度，反复切回来不会被 storage 覆盖。`force` 时**不再先 `await waitForCanPlay()`**（那会拖断用户手势链）：直接 `incoming.play()`（浏览器自己会等媒体 ready），旧曲在它真正起播前继续响，成功后再做原来的交叉淡入。autoplay 被拒时保留 `shouldPlay`，等下一次可信手势 / `canplay`。
 - **H. 显式播放按钮继续绕开全局 capture 解锁**：`audio-unlock.ts` 的 `EXPLICIT_AUDIO_CONTROL = '[data-music-toggle], [data-identity-play]'` —— 手势落在它们上面时 document capture 的 `unlockAll()` 不抢，交给按钮自己的 `click`（`music.toggle()` / `transport.start()`），第一击就生效。
 - **SAME VISIT 刷新的自动恢复**：`initAudioUnlock({ gated:false })` 里 `music.init()` 只尝试一次；浏览器允许即续播，拒绝则保留 `shouldPlay` 等真实手势重试。鼠标在 `pointerdown`、触屏在 `pointerup`、键盘在 `keydown` 解锁；触屏 `pointerdown` 不具备可靠的瞬时用户激活。夜曲在采样等待结束时再次核对 AudioContext，避免 `running` 事件发生在 `loading` 中而永久停在 waiting。
-- **iPhone About 刷新后的媒体准备尝试**：这时 MP3 元素原本要等滑出 About 才创建。夜曲播放/重播按钮的真实 `click` 先调 `prepareAboutMedia()`，只创建原有元素、调用 `load()`，让元数据与进度恢复提前发生；此时不调用 `play()`，不改变 MP3 意图、音量或夜曲焦点。离开 About 仍走同一条 `requestAutoStart()`；浏览器若拒绝有声自动播放，仍保持 READY 等真实点击，不伪装成已播放。只在元素尚不存在时准备，避免重新 `load()` 重置已播放的进度。
+- **iPhone About 刷新后的接续**：夜曲播放/重播的真实点击先唤醒钢琴 AudioContext，再由 `prepareAboutMedia(context)` 创建并加载原生 MP3 元素，同时在这条已获用户手势的 AudioContext 中异步解码当前 MP3。离开 About 首先照旧尝试原生 `play()`；若 WebKit 因滑动回调没有激活而拒绝，解码已完成时由共用 AudioContext 在原进度接续，未完成则在解码完成后核对焦点与播放意图再接续。首次入场、普通手动播放仍直接走原生 `play()`，不等待整首解码；不以静音播放解锁。音量、进度拖动、暂停、换曲、离开 About 家族均同步或清理接续声源。整首文件尚未下载完时，首次滑出仍可能有网络等待。
 - 事件：`MusicManager` 派发普通 `'change'`（原生媒体事件只触发它，不写状态）；UI（`music-ui.ts`）每 260ms 重读 `getState()` / `getProgress()` 刷新面板，支持同页多个面板（`[data-music]` 循环绑定）。
 - **第一次起播不从 0 淡入**（`applyVolumeForStart()`）：元素刚建出来时 volume 是 0，老写法要淡入 `AUDIO.fadeInMs`（2.4 秒），曲子开头那一下会被压到几乎听不见的音量里（timeline 在走、声音没有 —— 本人报的"第一拍没播出来 / 像还没加载好 timeline 就先走了"）。现在**本次文档的第一次**直接摆到目标音量，之后保持原来的淡入。暂停保留 450ms 淡出，但任何淡出都能被 `play()` / `pause()` / 切曲 / About 可靠取消（连同它"淡出结束再 `pause()`"的 `done` 回调）。
 - 音量渐变用 `requestAnimationFrame`（`ramp()`），进度两头都 `clamp01`；`prefers-reduced-motion` 时直接跳到目标音量（不渐变）。
@@ -375,7 +375,8 @@ function initMiniLab(): void;
 // piano.ts（采样引擎）
 class PianoEngine extends EventTarget {
   scheduleNote(...); noteOn(midi, velocity?); noteOff(midi, release?); allNotesOff();
-  preload(): Promise<void>; ensure(): void;
+  preload(): Promise<void>; ensure(): void; prioritize(midis): void; waitForNotes(midis): Promise<void>;
+  readonly audioContext: AudioContext | null;
   getState(): 'idle'|'loading'|'ready'|'failed';
   getLoadedRatio(): number; get requiredSamples(): PianoSample[];
   setVolume(v); dispose();
@@ -904,6 +905,13 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-26 · 修复返回锚点、夜曲开头采样等待与 iPhone 滑出 About 的 MP3 接续
+
+- 根因：文章页返回链接指向独立 `/blog/`；About 的 ClientRouter 返回会临时摘下 hash，旧实现仅在滚动记录仍可取出时才接回，因而可能只剩 `/`。夜曲等待全部钢琴采样这一整轮下载后才开始。iPhone 上滑动结束后的观察器虽正确判定离开 About，却不属于 WebKit 认可的有声 HTML media 播放手势，`play()` 被拒后 MP3 留在 READY。
+- 修法：文章返回指向首页 `#blog`；About 的 hash 恢复独立于 scroll 记录；钢琴下载优先处理当前进度开头两秒的音，够用即演奏，其余后台完成；夜曲真实点击后异步准备同一 AudioContext 的 MP3 缓冲，滑出时原生播放若被拒则在该已启动的上下文按保存进度接续。首次进入与手动点击仍走原生媒体路径，不等待 MP3 解码。
+- 文件：`src/scripts/app.ts`、`identity-player.ts`、`music-manager.ts`、`nocturne-transport.ts`、`piano.ts`、`src/views/PostPage.astro`、`DEVELOPMENT.md`。§3 / §5.5 / §5.6 已同步新增导出接口；无新 DOM 钩子、storage key、自定义事件。
+- 验证：`npm test` 103/103；`npm run check` 0 错误、0 警告；`npm run build` 19 页。桌面本地浏览器实点自我介绍返回为 `/#about`、文章返回为 `/#blog`；iPhone Chrome 滑出播放仍待设备实测。
 
 ### 2026-09-26 · 按本人要求将代码恢复到 30bf15f
 

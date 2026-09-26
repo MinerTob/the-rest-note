@@ -53,6 +53,7 @@ export class PianoEngine extends EventTarget {
   private voices = new Map<number, Voice>();
   private state: PianoState = "idle";
   private loading: Promise<void> | null = null;
+  private sampleQueue: PianoSample[] = [];
   /** 已经下过几轮：给"补下漏掉的那几个"收口，免得一直空转 */
   private attempts = 0;
   /** 补下那一轮的定时器：dispose 要收掉 */
@@ -76,6 +77,10 @@ export class PianoEngine extends EventTarget {
   }
   get currentTime(): number {
     return this.ctx?.currentTime ?? 0;
+  }
+  /** About 已由真实手势唤醒的音频时钟，供背景音乐离开 About 时接续。 */
+  get audioContext(): AudioContext | null {
+    return this.ctx;
   }
   get isRunning(): boolean {
     return this.ctx?.state === "running";
@@ -227,7 +232,8 @@ export class PianoEngine extends EventTarget {
       let ok = 0;
 
       // 并发 4 个，别一次打满
-      const queue = [...needed];
+      const queue = needed.filter((sample) => !this.buffers.has(sample.midi));
+      this.sampleQueue = queue;
       const workers = Array.from({ length: 4 }, async () => {
         for (;;) {
           const sample = queue.shift();
@@ -240,6 +246,7 @@ export class PianoEngine extends EventTarget {
             if (ctx !== this.ctx) return;
             this.buffers.set(sample.midi, buffer);
             ok += 1;
+            if (this.state === "loading") this.setState("ready");
             this.emit("piano:progress");
           } catch {
             /* 单个采样失败不影响其它 */
@@ -249,6 +256,7 @@ export class PianoEngine extends EventTarget {
 
       await Promise.all(workers);
       if (ctx !== this.ctx) return;
+      this.sampleQueue = [];
 
       this.setState(this.buffers.size > 0 ? "ready" : "failed");
       /*
@@ -267,6 +275,28 @@ export class PianoEngine extends EventTarget {
     })();
 
     return this.loading;
+  }
+
+  /** 乐谱到位后把即将演奏的采样移到下载队首，完整音域继续在后台加载。 */
+  prioritize(midis: readonly number[]): void {
+    const wanted = new Set(midis.map((midi) => nearestSample(midi).midi));
+    this.sampleQueue.sort((a, b) => Number(wanted.has(b.midi)) - Number(wanted.has(a.midi)));
+  }
+
+  /** 等待开头的音色可用；失败时等本轮结束，由已有的最近采样兜底。 */
+  waitForNotes(midis: readonly number[]): Promise<void> {
+    this.prioritize(midis);
+    const ready = () => midis.every((midi) => this.buffers.has(nearestSample(midi).midi));
+    if (ready()) return Promise.resolve();
+    return new Promise((resolve) => {
+      const finish = () => {
+        this.removeEventListener("piano:progress", check);
+        resolve();
+      };
+      const check = () => { if (ready()) finish(); };
+      this.addEventListener("piano:progress", check);
+      void this.preload().then(finish, finish);
+    });
   }
 
   setVolume(value: number): void {
@@ -364,6 +394,7 @@ export class PianoEngine extends EventTarget {
     this.allNotesOff();
     this.voices.clear();
     this.buffers.clear();
+    this.sampleQueue = [];
     this.loading = null;
     if (this.master) this.master.disconnect();
     if (this.ctx) void this.ctx.close();

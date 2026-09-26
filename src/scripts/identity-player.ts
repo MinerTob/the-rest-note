@@ -6,6 +6,7 @@ import { takeLanguageSwap } from './lang';
 import { visitSession } from './visit-session';
 import { nocturneTransport } from './nocturne-transport';
 import { getGlobal } from './global';
+import { identityPiano } from './identity-audio';
 
 const FIRST = 21,
   LEAD = 2.4;
@@ -338,8 +339,8 @@ export function initIdentity(): void {
         pause();
       } else {
         wantsPlayback = true;
-        getGlobal().music?.prepareAboutMedia();
         start();
+        getGlobal().music?.prepareAboutMedia(identityPiano().audioContext);
       }
     },
     { signal },
@@ -372,12 +373,12 @@ export function initIdentity(): void {
     "click",
     () => {
       wantsPlayback = true;
-      getGlobal().music?.prepareAboutMedia();
       needsAnimation = true;
       clearLayout();
       delete root.dataset.settled;
       physics.reset();
       transport.restart();
+      getGlobal().music?.prepareAboutMedia(identityPiano().audioContext);
     },
     { signal },
   );

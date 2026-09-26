@@ -294,7 +294,12 @@ export class NocturneTransport {
     piano.ensure();
     try {
       await this.load();
-      await piano.preload();
+      // 首段所需的采样一到就开弹；其余音域继续在后台下载。
+      const opening = this.resumeOffset();
+      const upcoming = this.notes.filter((note) => note.end > opening);
+      const firstNotes = upcoming.filter((note) => note.start < opening + 2);
+      await piano.waitForNotes((firstNotes.length ? firstNotes : upcoming.slice(0, 4))
+        .map((note) => note.midi));
       if (!this.desired || this.playing || document.hidden) return;
       /*
        * 采样只要不是"全军覆没"就开始弹 —— 缺的那几个音本来就由最近的采样顶替

@@ -374,6 +374,7 @@ document.addEventListener('astro:before-swap', (event) => {
     }
   } else {
     stopNocturneTransport();
+    getGlobal().music?.releaseAboutMedia();
     releaseIdentityPiano();
   }
 
@@ -399,19 +400,19 @@ document.addEventListener('astro:after-swap', () => {
   if (restored !== null) {
     restoreScroll(restored);
     pendingRestore = restored;
-    if (pendingHash) {
-      // 地址栏把 `#锚点` 接回去（路由那次已经被我们拿掉，不然它会滚一遍）
-      try {
-        history.replaceState(
-          history.state,
-          '',
-          `${window.location.pathname}${window.location.search}${pendingHash}`,
-        );
-      } catch {
-        /* 忽略非法状态 */
-      }
-      pendingHash = '';
+  }
+  // 落点记忆可能被其它初始化路径先取走；URL 锚点仍必须独立接回。
+  if (pendingHash) {
+    try {
+      history.replaceState(
+        history.state,
+        '',
+        `${window.location.pathname}${window.location.search}${pendingHash}`,
+      );
+    } catch {
+      /* 忽略非法状态 */
     }
+    pendingHash = '';
   }
 });
 

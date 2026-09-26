@@ -157,6 +157,15 @@ export class MusicManager extends EventTarget {
   private startInFlight: Promise<boolean> | null = null;
   /** 后台预热另一套主题曲子的定时器 */
   private warmTimer = 0;
+  /** 只供 About 手势之后的滑出接续使用；正常入场和手动播放仍走原生 audio。 */
+  private aboutContext: AudioContext | null = null;
+  private aboutBuffer: AudioBuffer | null = null;
+  private aboutLoading: Promise<void> | null = null;
+  private aboutSource: AudioBufferSourceNode | null = null;
+  private aboutGain: GainNode | null = null;
+  private aboutStartedAt = 0;
+  private aboutOffset = 0;
+  private aboutTrackId = '';
 
   constructor(store: AppStore, options: { autoStart?: boolean } = {}) {
     super();
@@ -211,6 +220,13 @@ export class MusicManager extends EventTarget {
     const token = this.switchToken;
     const el = this.ensureElement();
     this.restorePositionOnce(el, this.trackId);
+    // 如果滑出时由共用 AudioContext 接上了，显式点击应从同一位置交回原生播放器。
+    if (this.aboutSource && el.readyState >= 1) {
+      try {
+        el.currentTime = this.aboutPosition();
+        this.finishPositionRestore(el);
+      } catch { /* 元数据尚未可 seek；保持 Web Audio 声源直到原生播放成功。 */ }
+    }
     const running = this.startElement(el, token);
     // 登记在飞：同一次手势里紧随其后的 audioUnlock() → retryIfIdle() 会因此让开
     this.trackStartInFlight(running);
@@ -229,6 +245,7 @@ export class MusicManager extends EventTarget {
     writeBool(KEY.paused, true);
     this.switchToken += 1;
     this.stopFades();
+    this.stopAboutSource(true);
 
     const el = this.el;
     if (el) {
@@ -330,7 +347,12 @@ export class MusicManager extends EventTarget {
     try {
       await el.play();
     } catch {
-      if (token === this.switchToken) this.emit();
+      if (token === this.switchToken) {
+        // iOS 的滑动观察器不是播放手势；原生 play 被拒后，用夜曲点击时已唤醒的
+        // 同一个 AudioContext 接续。缓冲尚在下载时，由下载完成事件再核对意图。
+        this.startAboutSource(token);
+        this.emit();
+      }
       return false;
     }
 
@@ -343,6 +365,7 @@ export class MusicManager extends EventTarget {
     }
 
     this.mediaError = false;
+    this.stopAboutSource(false);
     this.applyVolumeForStart();
     this.emit();
     return true;
@@ -364,6 +387,7 @@ export class MusicManager extends EventTarget {
     this.stopFades();
 
     if (active) {
+      this.stopAboutSource(true);
       for (const el of this.elements.values()) {
         if (el === this.el && this.positionRestored.has(el))
           savePosition("track:" + this.trackId, el.currentTime);
@@ -406,10 +430,91 @@ export class MusicManager extends EventTarget {
    * iPhone 在 About 刷新后尚无 MP3 元素。夜曲播放按钮的真实点击里，只让
    * 原有元素开始加载并恢复进度；不调用 play()，不占夜曲的音频焦点。
    */
-  prepareAboutMedia(): void {
-    if (!this.inAbout || !this.shouldPlay || !this.autoStart || this.el) return;
+  prepareAboutMedia(context: AudioContext | null): void {
+    if (!this.inAbout || !this.shouldPlay || !this.autoStart) return;
+    const newElement = !this.el;
     const el = this.ensureElement();
-    try { el.load(); } catch { /* 离开 About 时仍可按原路径尝试播放。 */ }
+    if (newElement) {
+      try { el.load(); } catch { /* 离开 About 时仍可按原路径尝试播放。 */ }
+    }
+    if (!context || context.state === 'closed') return;
+    if (this.aboutContext === context && (this.aboutBuffer || this.aboutLoading)) return;
+    this.aboutContext = context;
+    context.addEventListener('statechange', () => {
+      if (context.state === 'running' && !this.inAbout && !this.isPlaying())
+        this.startAboutSource(this.switchToken);
+    });
+    this.aboutTrackId = this.trackId;
+    this.aboutBuffer = null;
+    const trackId = this.trackId;
+    this.aboutLoading = (async () => {
+      try {
+        const response = await fetch(this.track.src, { cache: 'force-cache' });
+        if (!response.ok) return;
+        const data = await response.arrayBuffer();
+        const buffer = await context.decodeAudioData(data);
+        if (this.aboutContext !== context || this.aboutTrackId !== trackId) return;
+        this.aboutBuffer = buffer;
+        if (!this.inAbout && this.shouldPlay && !this.isPlaying())
+          this.startAboutSource(this.switchToken);
+      } catch {
+        /* 原生播放器和下一次真实手势仍然可用。 */
+      } finally {
+        this.aboutLoading = null;
+      }
+    })();
+  }
+
+  private aboutPosition(): number {
+    const duration = this.aboutBuffer?.duration ?? 0;
+    if (!duration) return this.aboutOffset;
+    const elapsed = this.aboutSource && this.aboutContext
+      ? this.aboutContext.currentTime - this.aboutStartedAt : 0;
+    return (this.aboutOffset + elapsed) % duration;
+  }
+
+  private stopAboutSource(save: boolean): void {
+    if (!this.aboutSource) return;
+    const position = this.aboutPosition();
+    const source = this.aboutSource;
+    this.aboutSource = null;
+    try { source.stop(); } catch { /* 已自然结束 */ }
+    source.disconnect();
+    this.aboutGain?.disconnect();
+    this.aboutGain = null;
+    if (save) {
+      this.aboutOffset = position;
+      if (this.el?.readyState && this.el.readyState >= 1) {
+        try {
+          this.el.currentTime = position;
+          this.finishPositionRestore(this.el);
+        } catch { /* 媒体尚未可 seek，保存位置仍会在下次元数据到位时恢复。 */ }
+      }
+      savePosition('track:' + this.trackId, position);
+    }
+  }
+
+  private startAboutSource(token: number): void {
+    const ctx = this.aboutContext;
+    const buffer = this.aboutBuffer;
+    if (!ctx || ctx.state !== 'running' || !buffer || this.aboutSource ||
+        token !== this.switchToken || this.inAbout || !this.shouldPlay ||
+        this.aboutTrackId !== this.trackId) return;
+    const el = this.ensureElement();
+    const position = el.readyState >= 1 && !this.positionRestorePending.has(el)
+      ? el.currentTime : savedPosition('track:' + this.trackId, 0);
+    this.aboutOffset = position % buffer.duration;
+    const source = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    source.buffer = buffer;
+    source.loop = true;
+    gain.gain.value = this.muted || this.ducked ? 0 : this.volume;
+    source.connect(gain).connect(ctx.destination);
+    this.aboutSource = source;
+    this.aboutGain = gain;
+    this.aboutStartedAt = ctx.currentTime;
+    source.start(0, this.aboutOffset);
+    this.emit();
   }
 
   /**
@@ -432,6 +537,15 @@ export class MusicManager extends EventTarget {
   setDucked(value: boolean): void {
     this.ducked = this.inAbout || value;
     this.applyVolume(true);
+    if (this.aboutGain) this.aboutGain.gain.value = this.muted || this.ducked ? 0 : this.volume;
+  }
+
+  /** About 家族彻底离开时，钢琴 AudioContext 会关闭，先交回原生播放位置。 */
+  releaseAboutMedia(): void {
+    this.stopAboutSource(true);
+    this.aboutContext = null;
+    this.aboutBuffer = null;
+    this.aboutTrackId = '';
   }
 
   isMuted(): boolean {
@@ -440,6 +554,12 @@ export class MusicManager extends EventTarget {
 
   /** 只读当前元素的事实；不按保存位置 / 不按任何缓存伪造进度 */
   getProgress(): { currentTime: number; duration: number; ratio: number } {
+    if (this.aboutSource && this.aboutBuffer) {
+      const duration = this.aboutBuffer.duration;
+      const currentTime = this.aboutPosition();
+      savePosition('track:' + this.trackId, currentTime);
+      return { currentTime, duration, ratio: currentTime / duration };
+    }
     const el = this.el;
     const duration = el && Number.isFinite(el.duration) ? el.duration : 0;
     const currentTime = el?.currentTime ?? 0;
@@ -452,6 +572,16 @@ export class MusicManager extends EventTarget {
 
   /** 用户拖进度条：`currentTime` 的另一个（也是唯一另一个）写入点 */
   seekToRatio(ratio: number): void {
+    if (this.aboutSource && this.aboutBuffer) {
+      const next = clamp01(ratio) * this.aboutBuffer.duration;
+      this.stopAboutSource(false);
+      this.aboutOffset = next;
+      const el = this.ensureElement();
+      if (el.readyState >= 1) { el.currentTime = next; this.finishPositionRestore(el); }
+      savePosition('track:' + this.trackId, next);
+      this.startAboutSource(this.switchToken);
+      return;
+    }
     const el = this.ensureElement();
     if (!Number.isFinite(el.duration) || el.duration <= 0) return;
     const next = clamp01(ratio) * el.duration;
@@ -469,12 +599,14 @@ export class MusicManager extends EventTarget {
       this.setMuted(false);
     }
     this.applyVolume();
+    if (this.aboutGain) this.aboutGain.gain.value = this.muted || this.ducked ? 0 : this.volume;
   }
 
   setMuted(value: boolean): void {
     this.muted = value;
     writeBool(KEY.muted, value);
     this.applyVolume();
+    if (this.aboutGain) this.aboutGain.gain.value = this.muted || this.ducked ? 0 : this.volume;
     this.emit();
   }
 
@@ -485,7 +617,8 @@ export class MusicManager extends EventTarget {
   /** 真实在不在响：直接看元素，不信任何缓存 */
   isPlaying(): boolean {
     const el = this.el;
-    return !!el && !el.paused && !el.ended && el.readyState >= 2;
+    return Boolean(this.aboutSource && this.aboutContext?.state === 'running') ||
+      (!!el && !el.paused && !el.ended && el.readyState >= 2);
   }
 
   /* ---------------- 切曲（每首曲子各自的 element + 各自的进度） ---------------- */
@@ -518,6 +651,9 @@ export class MusicManager extends EventTarget {
 
     // 连续快速切换时只有最后一次算数：拿到自己的号，中途被顶替就作废
     const token = (this.switchToken += 1);
+    this.stopAboutSource(true);
+    this.aboutBuffer = null;
+    this.aboutTrackId = '';
     this.stopFades();
 
     const previous = this.el;
