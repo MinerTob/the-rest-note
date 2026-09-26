@@ -122,7 +122,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch()
 
 | 功能 | 入口文件 | 关键函数 / 类 | DOM / 事件钩子 |
 | --- | --- | --- | --- |
-| 头部导航 | `src/components/Header.astro` | 纯模板 | `.site-header`、`[data-section-target]` |
+| 头部导航 | `src/components/Header.astro`、`src/scripts/app.ts` | `headerLink()`、触屏拖动点击守卫 | `.site-header .nav__link`、`[data-section-target]` |
 | 页脚 | `src/components/Footer.astro` | 纯模板 | — |
 | 现代主题背景 + 面板玻璃材质 | `src/styles/tokens.css`、`src/styles/global.css` | `--bg-image` / `--paper*`（全站同一片淡蓝底）、`--liquid-*` token 与 `.glass--liquid`（时钟 / 播放器 / 联系方式用的面板材质，与顶栏同款透明玻璃） | `html[data-theme]`（modern / baroque 两套值） |
 | 语言切换 + 文字滑出/滑入 | `src/scripts/lang.ts`、`src/styles/global.css`、`src/scripts/app.ts` | `initLangSwitch()`、`swapChrome()`、`collectTextElements()`、`markIncomingLanguageText()`、`markLanguageSwap()` / `takeLanguageSwap()`（切语言这一趟的记号）、`restoreScrollAfterSwap()` / `restoreScrollAfterLoad()`（保留滚动位置） | `[data-lang-switch]`、`html[data-lang]`、`.lang-slide-out` / `.lang-slide-in`、sessionStorage `space.lang-scroll` / `space.lang-swap` |
@@ -718,6 +718,8 @@ visitBoundary({ navigation, sessionToken, entryToken }): 'new' | 'same';
 
 ### 5.16 长页场景激活（关于区什么时候算"在观看区域"）
 
+- **手机下拉刷新与固定导航**：`app.ts` 在 document capture 阶段追踪顶栏链接上的 `pointerdown`、位移、取消与 `click`。有位移的拖动或新 document 中缺少对应 `pointerdown` 的触屏 click 会被拦下；正常轻点、鼠标和键盘（`click.detail === 0`）照常。iOS Chrome 下拉刷新手势结束时可能给刷新后的固定顶栏补一个 click，手指落在 Blog 链接附近就把任何刷新变成 `/#blog`。此守卫不靠延迟，也不改路由或滚动恢复。
+
 **文件**：`src/lib/scene.ts`（纯逻辑）、`src/scripts/app.ts` 的 `initJourney()`、有单测 `tests/scene.test.mjs`
 
 ```ts
@@ -905,6 +907,13 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-27 · 阻止手机下拉刷新误触固定顶栏
+
+- 现象：本人在无痕窗口、本地与线上均观察到只有手机下拉刷新会跳到 `/#blog`；普通刷新不触发。顶栏 Blog 链接固定在触屏手势结束的区域，误触会调用现有导航点击逻辑并写入该 hash。
+- 修法：只在触屏导航 click 缺少本 document 对应 pointerdown、或指针已明显移动时拦下；正常点按及键盘/鼠标不受影响。使用现有 `.site-header .nav__link`，无新 storage key、事件或 DOM 属性。
+- 文件：`src/scripts/app.ts`、`DEVELOPMENT.md`（§3 / §5.16 / 本条）。不改 Entry Gate、AudioContext、MP3/MIDI、场景阈值、ClientRouter 的位置恢复。
+- 验证：`npm test` 103/103；`npm run check` 0 错误、0 警告；`npm run build` 19 页。手机下拉刷新需本人实机确认；当前浏览器自动化被本地 URL 策略阻止，未将桌面刷新测试冒充为 iPhone 实测。
 
 ### 2026-09-26 · 修复返回锚点、夜曲开头采样等待与 iPhone 滑出 About 的 MP3 接续
 

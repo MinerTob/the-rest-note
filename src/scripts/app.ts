@@ -36,6 +36,45 @@ let pendingRestore: number | null = null;
 /** 恢复落点时从路由手里拿掉的 `#锚点`，位置放好后再接回地址栏 */
 let pendingHash = '';
 
+/*
+ * iOS Chrome 的下拉刷新可能把手指抬起的那一下送到新文档的固定导航上。
+ * 那次 click 没有在这份文档里对应的 pointerdown，曾把任意刷新都变成 /#blog。
+ * 只拦触屏导航的这种孤立/拖动 click；键盘激活（detail=0）与鼠标照常使用。
+ */
+let headerPress: { link: HTMLAnchorElement; id: number; x: number; y: number } | null = null;
+const headerLink = (target: EventTarget | null): HTMLAnchorElement | null =>
+  target instanceof Element ? target.closest<HTMLAnchorElement>('.site-header .nav__link') : null;
+const movedHeaderPress = (event: PointerEvent): boolean =>
+  headerPress !== null && headerPress.id === event.pointerId &&
+  Math.hypot(event.clientX - headerPress.x, event.clientY - headerPress.y) > 12;
+
+document.addEventListener('pointerdown', (event) => {
+  const link = headerLink(event.target);
+  headerPress = link ? { link, id: event.pointerId, x: event.clientX, y: event.clientY } : null;
+}, true);
+document.addEventListener('pointermove', (event) => {
+  if (movedHeaderPress(event)) headerPress = null;
+}, true);
+document.addEventListener('pointerup', (event) => {
+  if (movedHeaderPress(event)) headerPress = null;
+}, true);
+document.addEventListener('pointercancel', () => { headerPress = null; }, true);
+document.addEventListener('click', (event) => {
+  const link = headerLink(event.target);
+  if (!link) return;
+  const pointerType = 'pointerType' in event ? (event as PointerEvent).pointerType : '';
+  const sourceCapabilities = (event as MouseEvent & {
+    sourceCapabilities?: { firesTouchEvents?: boolean };
+  }).sourceCapabilities;
+  const touchClick = pointerType === 'touch' || sourceCapabilities?.firesTouchEvents === true ||
+    (navigator.maxTouchPoints > 0 && pointerType !== 'mouse' && event.detail > 0);
+  const sameDocumentTap = headerPress?.link === link;
+  headerPress = null;
+  if (!touchClick || event.detail === 0 || sameDocumentTap) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}, true);
+
 /** 关于区这一刻算不算"在观看区域"（与 initJourney 的迟滞判据共用进入阈值） */
 function aboutOnScreen(journey: HTMLElement): boolean {
   const section = journey.querySelector<HTMLElement>('[data-journey-section="about"]');
