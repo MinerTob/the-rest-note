@@ -20,6 +20,7 @@ export function identityPiano(): PianoEngine {
     IDENTITY_PIANO_RANGE.first,
     IDENTITY_PIANO_RANGE.last,
     IDENTITY_PIANO_RANGE.gain,
+    true,
   ));
 }
 
