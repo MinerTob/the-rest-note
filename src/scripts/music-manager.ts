@@ -372,7 +372,7 @@ export class MusicManager extends EventTarget {
   /** A Nocturne play gesture authorizes this same AudioContext for the next MP3 handover. */
   prepareSharedTrack(): void {
     const ctx = sharedAudioContext();
-    if (!this.inAbout || !this.shouldPlay || !ctx) return;
+    if (!this.inAbout || !this.shouldPlay || !this.autoStart || !ctx) return;
     if (!this.sharedContextBound) {
       this.sharedContextBound = true;
       ctx.addEventListener('statechange', () => {

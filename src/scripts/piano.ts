@@ -155,7 +155,7 @@ export class PianoEngine extends EventTarget {
    * 必须在用户手势里调用一次。
    * 浏览器不允许在交互之前创建/恢复 AudioContext。
    */
-  ensure(): void {
+  ensure(options: { preload?: boolean } = {}): void {
     /*
      * 上下文已经被关掉（dispose 之后又被引用、或系统回收）—— 整套重来。
      * 只认 `failed` 就返回是另一种死法：状态还写着 ready，声音却永远出不来。
@@ -198,7 +198,7 @@ export class PianoEngine extends EventTarget {
     if (this.ctx.state !== "running") void this.ctx.resume().catch(() => {
       // 自动恢复可能被浏览器策略拒绝；下次真实手势会再次 ensure()。
     });
-    void this.preload();
+    if (options.preload !== false) void this.preload();
   }
 
   /**

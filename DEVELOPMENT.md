@@ -132,7 +132,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch()
 | LCD 时钟 | `src/components/LcdClock.astro`、`src/scripts/clock.ts` | `initClock()`（浏览器时区即时显示，IP 时区异步覆盖） | `[data-clock]`、`[data-clock-time]`、`[data-clock-date]`、`[data-clock-zone]` |
 | 背景音乐播放器 | `src/components/MusicSystem.astro`、`src/scripts/music-manager.ts`、`shared-music.ts`、`shared-audio-context.ts`、`music-ui.ts`、`src/lib/music.ts` | `MusicManager`、`SharedMusic`、`initMusicUI()` | `[data-music]`、`[data-music-toggle/-progress/-volume/-state/-title/-subtitle/-time]` |
 | 播放进度记忆 | `src/lib/live-timeline.ts` | `savedPosition()` / `savePosition()` / `restartPosition()` | sessionStorage `space.position.v1.<id>` |
-| MiniLab 25 键 | `src/components/MiniLab.astro`、`src/scripts/minilab.ts`、`notes.ts` | `initMiniLab()`、`MiniLabController` | `[data-minilab*]`、`[data-midi]`、`data-word-*` |
+| MiniLab 25 键 | `src/components/MiniLab.astro`、`src/scripts/minilab.ts`、`notes.ts` | `initMiniLab()`、`primeMiniLabPiano()`、`MiniLabController` | `[data-minilab*]`、`[data-midi]`、`data-word-*` |
 | 钢琴采样引擎 | `src/scripts/piano.ts`、`src/scripts/shared-audio-context.ts`、`src/lib/piano.ts` | `PianoEngine`、`ensureSharedAudioContext()`、`sharedAudioContext()`、`configureSharedPlaybackSession()`、`nearestSample()`、`playbackRateFor()`、`samplesForRange()` | 事件 `piano:state` / `piano:context` / `piano:progress` |
 | 合成器（无采样兜底） | `src/scripts/synth.ts` | `KeysSynth.unlock()` / `noteOn()` / `noteOff()` / `allNotesOff()` | — |
 | 真实 MIDI 键盘 | `src/scripts/midi.ts` | `MidiBridge`、`getMidiBridge()` | 事件 `midi:noteon` / `midi:noteoff` / `midi:change` |
@@ -144,7 +144,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch()
 | 自我介绍页（第十个标签的去处） | `src/views/IntroPage.astro`、`src/pages/about/intro/index.astro`、`src/content/pages/intro.zh.md` / `intro.en.md`、`src/lib/pages.ts` | `getPage('intro', lang)`、`render(entry)`、`introRoutes` | `[data-identity-link]`（写在 About 页的标签上） |
 | 联系方式 / 复制 | `src/components/ContactTiles.astro`、`ContactPanel*.astro`、`src/scripts/contact.ts`、`src/lib/contact.ts` | `initContact()`、`CONTACT`、`isInteractive()` | `[data-contact]`、`[data-contact-row]`、`[data-contact-copy]` |
 | 系统提示 LCD | `src/components/SystemMessage.astro`、`src/scripts/system-message.ts` | `initSystemMessages()` | `[data-system-message]`、window 事件 `space:message` |
-| 入场页 | `src/components/EntryGate.astro`、`src/scripts/entry-gate.ts` | `initEntryGate()` | `[data-entry-gate]`、`[data-entry-button]`、`[data-entry-copy]` |
+| 入场页 | `src/components/EntryGate.astro`、`src/scripts/entry-gate.ts`、`src/scripts/audio-unlock.ts` | `initEntryGate()`、`audioUnlock()` | `[data-entry-gate]`、`[data-entry-button]`、`[data-entry-copy]` |
 | **访问会话 / 入场边界** | `src/scripts/visit-session.ts`、`src/lib/visit.ts`、`src/scripts/entry-gate.ts`、`identity-player.ts` | `visitSession()`（`token` / `isNew` / `hasEntered()` / `markEntered()`）、`visitBoundary()`、`navigationKind()`、`readEntryToken()` / `stampEntryToken()` | sessionStorage `rest-note.visit`、`rest-note.entry-passed`、`history.state.restNoteVisit`、`html[data-visit]` |
 | 首页 Journey 长页 | `src/views/JourneyPage.astro`、`src/scripts/app.ts` 里的 `initJourney()`、`src/lib/scene.ts` | `initJourney()`、`updateActiveSection()`（导航蓝杠：视口观察线）、`sceneCoverage()`、`sceneDecision()` | `[data-journey]`、`[data-journey-section]`、`[data-journey-section="about"][data-scene]` |
 | 博客列表 / 标签 | `src/views/BlogIndexPage.astro`、`src/lib/content.ts` | `getPosts()`、`collectTags()` | — |
@@ -582,7 +582,7 @@ visitSession(): VisitSession;                  // 见 §5.15：这一趟的 id /
 - **不要拿"这次文档加载算不算新访问"当拦人的判据**：整份文档里那个值是不变的，而站内换页（ClientRouter 不换文档）时 HTML 会整块换新、入场页元素跟着长出来 —— 那样写会在每次站内换页后又冒出入场页。
 - 进入方式：点击 `[data-entry-button]`。这个 click 处理器里**必须直接调用** `music.play()`（浏览器自动播放策略要求音频解锁发生在可信手势里，见代码注释）。
 - **点"进入"之后一定落在首页最顶上（`#home`）**：遮罩收起时把地址里遗留的锚点（浏览器恢复标签页时常见的 `#about` / `#blog`）去掉，并 `scrollTo(0, 0)`；因为 `html` 有 `scroll-behavior: smooth`，必须用 `behavior: 'instant'`，否则会当着他的面滑一大段。**要补三次**（立即 / 下一帧 / 260ms 后）：Safari 常在遮罩收起之后才把上次的滚动位置恢复回来，只滚一次会被它盖掉；后两次都跳过"有 `#锚点`"的情况 —— 那是用户自己点的站内跳转，不能抢。站内导航走客户端路由，不经过这里。
-- 同一个 click 处理器里还调两个"必须在用户手势里做"的动作：`requestMotionAccess()`（`identity-motion.ts`，申请"运动与方向"权限，见 §5.8）和 `primeIdentityPiano()`（`identity-audio.ts`，把"关于"那架钢琴的 AudioContext 建起来并开始预载采样，见 §5.14）。两者都只在真正需要它们的页面生效，桌面 / 不需要 / 已经做过时静默返回，不影响入场。
+- 同一个 click 处理器里还调必须留在用户手势里的 `requestMotionAccess()` 与 `audioUnlock({ preloadSamples: false })`，并以 `primeMiniLabPiano({ preload: false })` 唤醒两架琴的 AudioContext。钢琴采样下载等 `music.play()` 结算后才启动，避免入站 MP3 与数十个采样请求竞争连接；这是播放事件决定的顺序，不靠定时器。`primeIdentityPiano()` 与 `primeMiniLabPiano()` 的默认调用仍会加载采样，后续真实手势与乐器操作也能重试。
 - 锁定期间 body 加 `.entry-locked`，除 gate 和 `.ambient` 外的直接子元素设为 `inert`。
 - **文案语言跟当前文档的页面语言走，不看 `navigator.language`**（`applyPageLanguage()`）：读 `<html data-lang>`（`BaseLayout.astro` 按页面 `lang` 渲染），`'en'` → 英文，其它 → 中文；按现有 `[data-entry-copy]` + `data-zh` / `data-en` 换文字，`aria-label` 与 `gate.dataset.language` 同一个语言。系统语言是中文的人打开 `/en/`，看到的就是英文入场页 —— NEW VISIT 的入口语言已由 `BaseHead.astro` 按 URL 归一化（见 §5.15），两边必须同一个语言，谁都不许拿系统语言覆盖路由。入场页 HTML 里那段英文兜底文案在 `.is-ready` 之前不显示（`opacity: 0`），所以不存在"先闪一下英文再换中文"。
 - **点"进入"时同时给服务端网关盖章**（`void fetch('/api/enter', { method: 'POST', credentials: 'same-origin' })`，见 §5.18）：让网关写 `rest_note_entered=1`，之后站内进子页才不会被 302 回首页。**只发不等**：`markEntered()` 之后立刻发、不 await，紧接着的 `music.play()` / `audioUnlock()` 必须留在这一次点击的同步可信手势里 —— 一旦 `await`，iOS 就丢了 trusted user activation，音频解锁会失败（硬约束）。fetch 失败也不影响进站：本地 `hasEntered()` 那套仍然管用。
@@ -905,6 +905,14 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-26 · 优先入站 MP3，钢琴采样随后预载
+
+- 现象：共用音频上下文版本上线后，初次打开网址、点击进入，背景音乐要等很久才响。
+- 根因：入场点击中 `music.play()` 刚发起，随后同一任务立即让 About 与 MiniLab 两架琴分别启动多路采样下载；首次 MP3 数据与采样争用首轮网络和解码资源。若新访问时恢复过 About 视口，夜曲链还可能在闸门未开时准备第二份完整 MP3。入场逻辑原先只在 `data-scene='active'` 时清 About 让位，观察器尚未写此值的窗口也可能漏掉。
+- 修法：入场点击仍同步播放 MP3、创建并唤醒两架琴的 AudioContext，以保留 iOS 可信手势；采样下载改为 MP3 播放请求结算后再开始。`prepareSharedTrack()` 在 Entry Gate 自动起播闸门关闭时不下载/解码 MP3。进入网站时无条件清除 About 让位，避免初始场景标记竞态。没有用固定延迟。
+- 文件：`src/scripts/entry-gate.ts`、`audio-unlock.ts`、`identity-audio.ts`、`minilab.ts`、`piano.ts`、`music-manager.ts`、`DEVELOPMENT.md`。导出函数 `audioUnlock()`、`primeIdentityPiano()`、`primeMiniLabPiano()` 和 `PianoEngine.ensure()` 增加可选预载参数；DOM 钩子、存储 key、自定义事件不变。
+- 验证：`npm test`（103/103）、`npm run check`（114 文件、0 错误/警告）、`npm run build`（19 页）均通过；实际入站延迟待手机/桌面端复测。
 
 ### 2026-09-26 · 夜曲点击后共用音频上下文接续背景 MP3
 
