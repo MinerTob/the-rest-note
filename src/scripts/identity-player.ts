@@ -5,7 +5,6 @@ import { identityRevealPlan, type MidiNote } from "@/lib/identity-midi";
 import { takeLanguageSwap } from './lang';
 import { visitSession } from './visit-session';
 import { nocturneTransport } from './nocturne-transport';
-import { getGlobal } from './global';
 
 const FIRST = 21,
   LEAD = 2.4;
@@ -338,7 +337,6 @@ export function initIdentity(): void {
         pause();
       } else {
         wantsPlayback = true;
-        getGlobal().music?.prepareAboutMedia();
         start();
       }
     },
@@ -372,7 +370,6 @@ export function initIdentity(): void {
     "click",
     () => {
       wantsPlayback = true;
-      getGlobal().music?.prepareAboutMedia();
       needsAnimation = true;
       clearLayout();
       delete root.dataset.settled;

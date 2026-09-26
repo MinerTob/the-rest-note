@@ -403,16 +403,6 @@ export class MusicManager extends EventTarget {
   }
 
   /**
-   * iPhone 在 About 刷新后尚无 MP3 元素。夜曲播放按钮的真实点击里，只让
-   * 原有元素开始加载并恢复进度；不调用 play()，不占夜曲的音频焦点。
-   */
-  prepareAboutMedia(): void {
-    if (!this.inAbout || !this.shouldPlay || !this.autoStart || this.el) return;
-    const el = this.ensureElement();
-    try { el.load(); } catch { /* 离开 About 时仍可按原路径尝试播放。 */ }
-  }
-
-  /**
    * 现场推导，不缓存。`active` 必然意味着当前元素真的在响 ——
    * 不会出现"状态说在播、元素其实停着"的分裂。
    */
