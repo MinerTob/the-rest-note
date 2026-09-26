@@ -33,9 +33,9 @@ export type NoteSource = 'pointer' | 'keyboard' | 'midi';
  * 现在入场页点"进入"时就顺手把它预热（那是一次干净的用户手势），走到实验室时采样已经就位，
  * 第一声就是真实采样。只在真的有 MiniLab 的页面上动作，其它页面不受影响。
  */
-export function primeMiniLabPiano(options: { preload?: boolean } = {}): void {
+export function primeMiniLabPiano(): void {
   if (!document.querySelector('[data-minilab]')) return;
-  getGlobal().piano?.ensure(options);
+  getGlobal().piano?.ensure();
 }
 
 export function initMiniLab(): void {

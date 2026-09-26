@@ -4,7 +4,6 @@ import { NOCTURNE_TIMELINE, restartPosition, savePosition, savedPosition } from 
 import { getGlobal } from './global';
 import { identityPiano, rampIdentityVolume } from './identity-audio';
 import type { PianoEngine } from './piano';
-import { configureSharedPlaybackSession } from './shared-audio-context';
 
 /**
  * 夜曲播放器（transport）—— About / 自我介绍 / 首页关于区**共用同一台**，跨页不重建。
@@ -156,7 +155,6 @@ export class NocturneTransport {
 
   /** 开始 / 继续（真正出声要在用户手势里，这里只管"想播"并尝试） */
   start(): void {
-    configureSharedPlaybackSession();
     this.desired = true;
     void this.begin();
   }
@@ -169,7 +167,6 @@ export class NocturneTransport {
 
   /** 从头演奏（"重播"按钮） */
   restart(): void {
-    configureSharedPlaybackSession();
     this.suspend();
     this.offset = 0;
     this.cursor = 0;
@@ -295,7 +292,6 @@ export class NocturneTransport {
     this.waiting = false;
     this.notify();
     piano.ensure();
-    getGlobal().music?.prepareSharedTrack();
     try {
       await this.load();
       await piano.preload();

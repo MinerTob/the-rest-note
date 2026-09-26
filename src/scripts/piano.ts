@@ -5,13 +5,12 @@ import {
   type PianoSample,
 } from "@/lib/piano";
 import { MINILAB_FIRST_MIDI, MINILAB_KEY_COUNT } from "./notes";
-import { ensureSharedAudioContext } from './shared-audio-context';
 
 /**
  * Piano Sound Engine
  * ------------------------------------------------------------
  * 只做一件事：把 MIDI 音高变成钢琴声。
- * MiniLab 有独立上下文；identity 钢琴与 About 切回来的 MP3 共用一个上下文。
+ * 它不碰背景音乐，背景音乐也不碰它 —— 两条链路完全独立。
  *
  * 用法：
  *   const piano = new PianoEngine();
@@ -65,12 +64,10 @@ export class PianoEngine extends EventTarget {
   private firstMidi: number;
   private lastMidi: number;
   private outputGain: number;
-  private readonly onContextStateChange = () => this.emit('piano:context');
   constructor(
     firstMidi = MINILAB_FIRST_MIDI,
     lastMidi = MINILAB_FIRST_MIDI + MINILAB_KEY_COUNT - 1,
     outputGain = 1,
-    private readonly sharedContext = false,
   ) {
     super();
     this.firstMidi = firstMidi;
@@ -155,7 +152,7 @@ export class PianoEngine extends EventTarget {
    * 必须在用户手势里调用一次。
    * 浏览器不允许在交互之前创建/恢复 AudioContext。
    */
-  ensure(options: { preload?: boolean } = {}): void {
+  ensure(): void {
     /*
      * 上下文已经被关掉（dispose 之后又被引用、或系统回收）—— 整套重来。
      * 只认 `failed` 就返回是另一种死法：状态还写着 ready，声音却永远出不来。
@@ -181,9 +178,10 @@ export class PianoEngine extends EventTarget {
         this.setState("failed");
         return;
       }
-      this.ctx = this.sharedContext ? ensureSharedAudioContext() : new Ctor();
-      if (!this.ctx) return;
-      this.ctx.addEventListener('statechange', this.onContextStateChange);
+      this.ctx = new Ctor();
+      this.ctx.addEventListener("statechange", () =>
+        this.emit("piano:context"),
+      );
       this.master = this.ctx.createGain();
       this.master.gain.value = this.volume * this.outputGain;
       this.master.connect(this.ctx.destination);
@@ -198,7 +196,7 @@ export class PianoEngine extends EventTarget {
     if (this.ctx.state !== "running") void this.ctx.resume().catch(() => {
       // 自动恢复可能被浏览器策略拒绝；下次真实手势会再次 ensure()。
     });
-    if (options.preload !== false) void this.preload();
+    void this.preload();
   }
 
   /**
@@ -368,8 +366,7 @@ export class PianoEngine extends EventTarget {
     this.buffers.clear();
     this.loading = null;
     if (this.master) this.master.disconnect();
-    this.ctx?.removeEventListener('statechange', this.onContextStateChange);
-    if (this.ctx && !this.sharedContext) void this.ctx.close();
+    if (this.ctx) void this.ctx.close();
     this.ctx = null;
     this.master = null;
     this.state = "idle";

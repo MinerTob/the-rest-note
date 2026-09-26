@@ -1,7 +1,6 @@
 import type { MusicManager } from './music-manager';
 import { requestMotionAccess } from './identity-motion';
 import { audioUnlock } from './audio-unlock';
-import { primeIdentityPiano } from './identity-audio';
 import { primeMiniLabPiano } from './minilab';
 import { getMidiBridge } from './midi';
 import { stopNocturneTransport } from './nocturne-transport';
@@ -101,13 +100,15 @@ export function initEntryGate(music: MusicManager): boolean {
      * 下面那次 play() 不出声。只有这一页真在关于区（`data-scene="active"`）时才需要，
      * 别的页面 `inAbout` 本来就是 false，不必动。
      */
-    music.setAboutActive(false);
+    if (document.querySelector('[data-journey-section="about"][data-scene="active"]')) {
+      music.setAboutActive(false);
+    }
 
     // 用户点了"进入"：先解除闸门，后面那一下 play() 与解锁才不会被它挡住
     music.setAutoStart(true);
 
     // 这一下必须留在可信手势里：它才是自动播放策略认的那次启动
-    const musicStart = music.play();
+    void music.play();
 
     /*
      * 同一个可信手势里解锁整套音频（见 audio-unlock.ts）：把"第一次手势就解锁"
@@ -115,32 +116,24 @@ export function initEntryGate(music: MusicManager): boolean {
      * （iOS 只允许在手势里做，晚了会挂起）、再按各自意图恢复。
      * MP3 上面那一下已经起播，这里是幂等的。
      */
-    audioUnlock({ preloadSamples: false });
+    audioUnlock();
 
     // 运动与方向权限也只能在用户手势里申请。这里是全站人人都要做的那一次点击，
     // 同意之后 About 页的摇晃彩蛋当趟就能用（iOS 上不在这里问，用户到了那一页
     // 还得先碰标签才可能拿到权限，实测就是"摇了没反应"）。
     requestMotionAccess();
 
-    // 同一手势里先唤醒 MiniLab 音频上下文；采样等 MP3 起播后再下载。
-    primeMiniLabPiano({ preload: false });
-
-    // Keep the trusted gesture for creating/resuming both AudioContexts, but let
-    // the entry MP3 obtain its first audible data before 30+ piano sample requests.
-    // This is tied to actual playback settlement, not a guessed timeout.
-    const preloadPianos = () => {
-      primeIdentityPiano();
-      primeMiniLabPiano();
-    };
-    void musicStart.then(preloadPianos, preloadPianos);
+    // 同一手势里也把 MiniLab 那架琴预热：它的采样原来要等你第一次按琴键才开始下载，
+    // 于是第一声只能拿合成器顶上（本人反馈"第一声不是真实音源"）。现在走到实验室前就绪。
+    primeMiniLabPiano();
 
     /*
      * 紧接着在**同一个可信入场手势**里申请 Web MIDI 权限。
      *
      * 为什么必须放在这里：实体 MIDI 键盘在拿到 `MIDIAccess` 之前，网页根本收不到它的按键事件，
      * 所以"实体 MIDI 第一次按键"没法当触发手势；而入场页这一次点击是全站人人都会做的可信手势。
-     * 此时上面那句 `primeMiniLabPiano()` 已唤醒音频上下文；采样在 MP3 起播后预热，
-     * Lab 里的 prime() 仍作为重试兜底。
+     * 此时上面那句 `primeMiniLabPiano()` 已经开始预热 PianoEngine 的真实钢琴采样，所以之后
+     * 实体键盘一响就是采样音源，不需要先碰网页模拟琴键（Lab 里的 prime() 仍作为重试兜底）。
      *
      * 不 await：`requestMIDIAccess({ sysex:false })` 由浏览器处理权限，这里不等它 ——
      * 本次点击后面的收尾（遮罩动画、拉回顶部等）继续留在同一个同步任务里。

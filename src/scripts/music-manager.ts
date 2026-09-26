@@ -10,8 +10,6 @@ import { savedPosition, savePosition } from "@/lib/live-timeline";
 import { THEMES, trackForTheme } from "@/lib/themes";
 import { readBool, readNumber, writeBool, writeNumber } from "./storage";
 import type { AppStore } from "./app-state";
-import { SharedMusic } from './shared-music';
-import { ensureSharedAudioContext, sharedAudioContext } from './shared-audio-context';
 
 /**
  * 背景音乐（主题曲）—— **单一事实来源**版
@@ -23,8 +21,9 @@ import { ensureSharedAudioContext, sharedAudioContext } from './shared-audio-con
  *      与同一首时的 `resume()`）改写。浏览器事件（pause / playing / canplay /
  *      error）、autoplay 被拒、About 让位、visibilitychange / pageshow、
  *      `retryIfIdle()` 通通**不许**碰它 —— 它们只影响"此刻能不能响"。
- *   2. **实际在不在播放**读取当前音频后端：普通页面的 HTMLAudioElement，
- *      或夜曲点击后共用 AudioContext 上的 buffer source。`active` 必须有运行中的后端。
+ *   2. **实际在不在播放**只看当前那一个 `HTMLAudioElement`（`isPlaying()` 直接读
+ *      `el.paused` / `readyState`）。所以 `getState() === "active"` 必然意味着
+ *      元素真的在响，不存在"UI 说在播、元素其实停着"的分裂。
  *
  * 由此派生三条不变量（详见 DEVELOPMENT.md §5.5）：
  *   · `currentTime` 只在两处被主动写：**接管一个 element 时恢复一次**（
@@ -98,9 +97,6 @@ export class MusicManager extends EventTarget {
   private store: AppStore;
   /** 当前曲目的那一个 <audio>：**"在不在播"的唯一事实** */
   private el: HTMLAudioElement | null = null;
-  private readonly shared = new SharedMusic();
-  private sharedPreferred = false;
-  private sharedContextBound = false;
   private trackId: string = DEFAULT_TRACK_ID;
   private volume: number;
   private muted: boolean;
@@ -213,11 +209,6 @@ export class MusicManager extends EventTarget {
     }
 
     const token = this.switchToken;
-    if (this.sharedPreferred) {
-      ensureSharedAudioContext();
-      this.trackStartInFlight(this.startShared(token));
-      return;
-    }
     const el = this.ensureElement();
     this.restorePositionOnce(el, this.trackId);
     const running = this.startElement(el, token);
@@ -238,13 +229,10 @@ export class MusicManager extends EventTarget {
     writeBool(KEY.paused, true);
     this.switchToken += 1;
     this.stopFades();
-    const sharedWasPlaying = this.shared.hasSource;
-    this.shared.stop();
 
     const el = this.el;
     if (el) {
-      if (!sharedWasPlaying && this.positionRestored.has(el))
-        savePosition("track:" + this.trackId, el.currentTime);
+      if (this.positionRestored.has(el)) savePosition("track:" + this.trackId, el.currentTime);
       this.fadeFrame = ramp(
         el.volume,
         0,
@@ -316,10 +304,6 @@ export class MusicManager extends EventTarget {
 
     this.switchToken += 1;
     const token = this.switchToken;
-    if (this.sharedPreferred) {
-      this.trackStartInFlight(this.startShared(token));
-      return;
-    }
     const el = this.ensureElement();
     this.restorePositionOnce(el, this.trackId);
     this.trackStartInFlight(this.startElement(el, token));
@@ -327,14 +311,9 @@ export class MusicManager extends EventTarget {
 
   /** 登记一次"启动在飞"，结束（成功或失败）后只由它自己释放这个位置 */
   private trackStartInFlight(running: Promise<boolean>): void {
-    const token = this.switchToken;
     this.startInFlight = running;
     const clear = (): void => {
-      if (this.startInFlight !== running) return;
-      this.startInFlight = null;
-      // An About enter/leave can invalidate a fetch while it is in flight.
-      // Resume the latest intent after that stale attempt has fully settled.
-      if (token !== this.switchToken && this.sharedPreferred) this.retryIfIdle();
+      if (this.startInFlight === running) this.startInFlight = null;
     };
     void running.then(clear, clear);
   }
@@ -369,47 +348,6 @@ export class MusicManager extends EventTarget {
     return true;
   }
 
-  /** A Nocturne play gesture authorizes this same AudioContext for the next MP3 handover. */
-  prepareSharedTrack(): void {
-    const ctx = sharedAudioContext();
-    if (!this.inAbout || !this.shouldPlay || !this.autoStart || !ctx) return;
-    if (!this.sharedContextBound) {
-      this.sharedContextBound = true;
-      ctx.addEventListener('statechange', () => {
-        if (ctx.state === 'running') this.retryIfIdle();
-      });
-    }
-    this.sharedPreferred = true;
-    void this.shared.prepare(this.track).then((ready) => {
-      if (ready && !this.inAbout && this.shouldPlay && !this.isPlaying()) this.retryIfIdle();
-    });
-  }
-
-  private async startShared(token: number): Promise<boolean> {
-    const track = this.track;
-    const ready = await this.shared.prepare(track);
-    if (token !== this.switchToken || this.inAbout || !this.shouldPlay || this.trackId !== track.id)
-      return false;
-    if (ready && this.shared.start(track, this.muted || this.ducked ? 0 : this.volume)) {
-      this.el?.pause();
-      this.mediaError = false;
-      this.emit();
-      return true;
-    }
-    const ctx = sharedAudioContext();
-    if (ready && ctx && ctx.state !== 'running') {
-      this.emit();
-      return false;
-    }
-    // Decoding or Web Audio may fail; the existing HTML player remains usable.
-    this.sharedPreferred = false;
-    const el = this.ensureElement();
-    this.restorePositionOnce(el, this.trackId);
-    const started = await this.startElement(el, token);
-    if (started) this.shared.stop();
-    return started;
-  }
-
   /* ---------------- About / MIDI：只抢音频焦点 ---------------- */
 
   /**
@@ -426,10 +364,8 @@ export class MusicManager extends EventTarget {
     this.stopFades();
 
     if (active) {
-      const sharedWasPlaying = this.shared.hasSource;
-      this.shared.stop();
       for (const el of this.elements.values()) {
-        if (!sharedWasPlaying && el === this.el && this.positionRestored.has(el))
+        if (el === this.el && this.positionRestored.has(el))
           savePosition("track:" + this.trackId, el.currentTime);
         el.volume = 0;
         el.pause();
@@ -467,6 +403,16 @@ export class MusicManager extends EventTarget {
   }
 
   /**
+   * iPhone 在 About 刷新后尚无 MP3 元素。夜曲播放按钮的真实点击里，只让
+   * 原有元素开始加载并恢复进度；不调用 play()，不占夜曲的音频焦点。
+   */
+  prepareAboutMedia(): void {
+    if (!this.inAbout || !this.shouldPlay || !this.autoStart || this.el) return;
+    const el = this.ensureElement();
+    try { el.load(); } catch { /* 离开 About 时仍可按原路径尝试播放。 */ }
+  }
+
+  /**
    * 现场推导，不缓存。`active` 必然意味着当前元素真的在响 ——
    * 不会出现"状态说在播、元素其实停着"的分裂。
    */
@@ -475,7 +421,7 @@ export class MusicManager extends EventTarget {
     if (!this.shouldPlay) return "paused";
     if (this.inAbout) return "paused";
     if (this.isPlaying()) return "active";
-    return this.el || this.sharedPreferred ? "ready" : "idle";
+    return this.el ? "ready" : "idle";
   }
 
   getVolume(): number {
@@ -494,11 +440,6 @@ export class MusicManager extends EventTarget {
 
   /** 只读当前元素的事实；不按保存位置 / 不按任何缓存伪造进度 */
   getProgress(): { currentTime: number; duration: number; ratio: number } {
-    if (this.sharedPreferred && this.shared.activeTrackId === this.trackId && this.shared.duration > 0) {
-      const duration = this.shared.duration;
-      const currentTime = this.shared.position;
-      return { currentTime, duration, ratio: currentTime / duration };
-    }
     const el = this.el;
     const duration = el && Number.isFinite(el.duration) ? el.duration : 0;
     const currentTime = el?.currentTime ?? 0;
@@ -511,12 +452,6 @@ export class MusicManager extends EventTarget {
 
   /** 用户拖进度条：`currentTime` 的另一个（也是唯一另一个）写入点 */
   seekToRatio(ratio: number): void {
-    if (this.sharedPreferred && this.shared.activeTrackId !== this.trackId) return;
-    if (this.sharedPreferred && this.shared.duration > 0) {
-      this.shared.seek(this.track, clamp01(ratio) * this.shared.duration);
-      this.emit();
-      return;
-    }
     const el = this.ensureElement();
     if (!Number.isFinite(el.duration) || el.duration <= 0) return;
     const next = clamp01(ratio) * el.duration;
@@ -549,7 +484,6 @@ export class MusicManager extends EventTarget {
 
   /** 真实在不在响：直接看元素，不信任何缓存 */
   isPlaying(): boolean {
-    if (this.shared.isPlaying) return true;
     const el = this.el;
     return !!el && !el.paused && !el.ended && el.readyState >= 2;
   }
@@ -576,25 +510,6 @@ export class MusicManager extends EventTarget {
     const { ms = AUDIO.crossfadeMs, force = false } = options;
     const next = getTrack(trackId);
     if (!next) return false;
-
-    if (this.sharedPreferred) {
-      const token = (this.switchToken += 1);
-      this.stopFades();
-      if (force) {
-        this.shouldPlay = true;
-        writeBool(KEY.paused, false);
-      }
-      this.trackId = next.id;
-      this.syncState();
-      this.emit();
-      if (this.inAbout || !this.shouldPlay) {
-        this.shared.stop();
-      } else {
-        // Keep the old buffer audible while the next MP3 is fetched and decoded.
-        this.trackStartInFlight(this.startShared(token));
-      }
-      return true;
-    }
 
     if (force) {
       this.shouldPlay = true;
@@ -856,7 +771,6 @@ export class MusicManager extends EventTarget {
   }
 
   private applyVolume(immediate = false): void {
-    this.shared.setVolume(this.muted || this.ducked ? 0 : this.volume);
     const el = this.el;
     if (!el) return;
 

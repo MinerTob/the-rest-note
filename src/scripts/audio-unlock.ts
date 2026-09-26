@@ -72,9 +72,9 @@ let bound = false;
  * 连发两次启动请求（历史 commit 404cf58 定位过这个竞争）。
  * 手势那一路仍然走完整的 `unlockAll()`。
  */
-function unlockNonMusic(preloadSamples = true): void {
+function unlockNonMusic(): void {
   // 琴：建 / 唤醒 AudioContext（手势之外调用也无害，只是可能仍是 suspended）
-  primeIdentityPiano({ preload: preloadSamples });
+  primeIdentityPiano();
 
   // 琴真的在跑了，夜曲又"想播"却没在播：接上（上下文刚醒时它自己的监听也会接）
   const transport = getGlobal().nocturne;
@@ -88,8 +88,8 @@ function unlockNonMusic(preloadSamples = true): void {
  * （它自己判断 `shouldPlay` / About 让位 / 入场页闸门，并保证同一时刻只有一条
  * 自动启动在飞）。真实手势里调用是安全的：手势本身不等于"要出声"。
  */
-function unlockAll(preloadSamples = true): void {
-  unlockNonMusic(preloadSamples);
+function unlockAll(): void {
+  unlockNonMusic();
   getGlobal().music?.retryIfIdle();
 }
 
@@ -122,9 +122,9 @@ function bindGestureUnlock(): void {
  * **必须在用户手势里调用**（入场页"进入"）：挂上"等手势"那条，
  * 并且立刻按各自意图解锁一次。入场页在调用它之前已经放开闸门。
  */
-export function audioUnlock(options: { preloadSamples?: boolean } = {}): void {
+export function audioUnlock(): void {
   bindGestureUnlock();
-  unlockAll(options.preloadSamples !== false);
+  unlockAll();
 }
 
 /**

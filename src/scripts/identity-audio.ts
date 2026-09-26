@@ -20,7 +20,6 @@ export function identityPiano(): PianoEngine {
     IDENTITY_PIANO_RANGE.first,
     IDENTITY_PIANO_RANGE.last,
     IDENTITY_PIANO_RANGE.gain,
-    true,
   ));
 }
 
@@ -41,9 +40,9 @@ export function usesIdentityPiano(): boolean {
  * 以及页面第一次 pointerdown / keydown（没走入场页的刷新 / 站内换页）。
  * 这里不再自己挂 document 监听 —— 以前和 MusicManager 的手势兜底重复，两个入口。
  */
-export function primeIdentityPiano(options: { preload?: boolean } = {}): void {
+export function primeIdentityPiano(): void {
   if (!usesIdentityPiano()) return;
-  identityPiano().ensure(options);
+  identityPiano().ensure();
 }
 
 /** 下一张页面不再需要这架琴：停声、断开节点、关掉 AudioContext */
