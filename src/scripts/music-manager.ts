@@ -166,6 +166,8 @@ export class MusicManager extends EventTarget {
   private aboutStartedAt = 0;
   private aboutOffset = 0;
   private aboutTrackId = '';
+  /** 滑出 About 后等待原生 MP3 或同一 AudioContext 声源接管。 */
+  private aboutHandoffPending = false;
 
   constructor(store: AppStore, options: { autoStart?: boolean } = {}) {
     super();
@@ -207,6 +209,7 @@ export class MusicManager extends EventTarget {
    * About 让位期间只记意图、不抢 MIDI 的音频焦点。
    */
   async play(): Promise<void> {
+    this.aboutHandoffPending = false;
     this.shouldPlay = true;
     writeBool(KEY.paused, false);
     this.stopFades();
@@ -241,6 +244,7 @@ export class MusicManager extends EventTarget {
    * `done`（那次 `el.pause()`）一起取消。
    */
   pause(): void {
+    this.aboutHandoffPending = false;
     this.shouldPlay = false;
     writeBool(KEY.paused, true);
     this.switchToken += 1;
@@ -365,6 +369,7 @@ export class MusicManager extends EventTarget {
     }
 
     this.mediaError = false;
+    this.aboutHandoffPending = false;
     this.stopAboutSource(false);
     this.applyVolumeForStart();
     this.emit();
@@ -387,6 +392,7 @@ export class MusicManager extends EventTarget {
     this.stopFades();
 
     if (active) {
+      this.aboutHandoffPending = false;
       this.stopAboutSource(true);
       for (const el of this.elements.values()) {
         if (el === this.el && this.positionRestored.has(el))
@@ -405,6 +411,11 @@ export class MusicManager extends EventTarget {
       return;
     }
     if (this.shouldPlay) {
+      this.aboutHandoffPending = Boolean(this.aboutContext && this.aboutContext.state !== 'closed');
+      if (this.aboutHandoffPending && this.aboutBuffer) {
+        this.startAboutSource(this.switchToken);
+        if (this.aboutSource) return;
+      }
       this.requestAutoStart();
       return;
     }
@@ -441,7 +452,7 @@ export class MusicManager extends EventTarget {
     if (this.aboutContext === context && (this.aboutBuffer || this.aboutLoading)) return;
     this.aboutContext = context;
     context.addEventListener('statechange', () => {
-      if (context.state === 'running' && !this.inAbout && !this.isPlaying())
+      if (context.state === 'running' && this.aboutHandoffPending && !this.inAbout)
         this.startAboutSource(this.switchToken);
     });
     this.aboutTrackId = this.trackId;
@@ -455,7 +466,7 @@ export class MusicManager extends EventTarget {
         const buffer = await context.decodeAudioData(data);
         if (this.aboutContext !== context || this.aboutTrackId !== trackId) return;
         this.aboutBuffer = buffer;
-        if (!this.inAbout && this.shouldPlay && !this.isPlaying())
+        if (this.aboutHandoffPending && !this.inAbout && this.shouldPlay)
           this.startAboutSource(this.switchToken);
       } catch {
         /* 原生播放器和下一次真实手势仍然可用。 */
@@ -504,6 +515,9 @@ export class MusicManager extends EventTarget {
     const position = el.readyState >= 1 && !this.positionRestorePending.has(el)
       ? el.currentTime : savedPosition('track:' + this.trackId, 0);
     this.aboutOffset = position % buffer.duration;
+    // 原生 play() 在 iOS 可能长期 pending：它的 paused/readyState 不足以证明
+    // 已经出声。备用声源接管时先停原生元素，防止稍后突然双重播放。
+    el.pause();
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
     source.buffer = buffer;
@@ -513,7 +527,16 @@ export class MusicManager extends EventTarget {
     this.aboutSource = source;
     this.aboutGain = gain;
     this.aboutStartedAt = ctx.currentTime;
-    source.start(0, this.aboutOffset);
+    try {
+      source.start(0, this.aboutOffset);
+    } catch {
+      this.aboutSource = null;
+      this.aboutGain = null;
+      source.disconnect();
+      gain.disconnect();
+      return;
+    }
+    this.aboutHandoffPending = false;
     this.emit();
   }
 
@@ -542,6 +565,7 @@ export class MusicManager extends EventTarget {
 
   /** About 家族彻底离开时，钢琴 AudioContext 会关闭，先交回原生播放位置。 */
   releaseAboutMedia(): void {
+    this.aboutHandoffPending = false;
     this.stopAboutSource(true);
     this.aboutContext = null;
     this.aboutBuffer = null;

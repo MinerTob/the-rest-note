@@ -102,6 +102,7 @@ export function initIdentity(): void {
   let disposed = false,
     seeking = false,
     wantsPlayback = true,
+    preparedAboutMedia = false,
     frame = 0,
     rendering = false,
     sceneActive = true,
@@ -328,7 +329,14 @@ export function initIdentity(): void {
       restart.disabled = false;
       progress.disabled = false;
     }
-    if (snapshot.state === "playing") startRendering();
+    if (snapshot.state === "playing") {
+      // 自动进入 About、刷新恢复和手动播放都会来到这里；每次起播只准备一次。
+      if (!preparedAboutMedia) {
+        preparedAboutMedia = true;
+        getGlobal().music?.prepareAboutMedia(identityPiano().audioContext);
+      }
+      startRendering();
+    } else preparedAboutMedia = false;
     draw();
   });
   play.addEventListener(
@@ -340,7 +348,6 @@ export function initIdentity(): void {
       } else {
         wantsPlayback = true;
         start();
-        getGlobal().music?.prepareAboutMedia(identityPiano().audioContext);
       }
     },
     { signal },
@@ -378,7 +385,6 @@ export function initIdentity(): void {
       delete root.dataset.settled;
       physics.reset();
       transport.restart();
-      getGlobal().music?.prepareAboutMedia(identityPiano().audioContext);
     },
     { signal },
   );

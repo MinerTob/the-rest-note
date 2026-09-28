@@ -333,7 +333,7 @@ class MusicManager extends EventTarget {
   getProgress(): { currentTime, duration, ratio };
   seekToRatio(ratio): void;
   setAboutActive(active: boolean): void;      // 只抢音频焦点（duck + 暂停），不改用户意图
-  prepareAboutMedia(): void;                   // 夜曲点击时只预备原有 MP3 元素，不播放
+  prepareAboutMedia(context): void;            // 夜曲真实进入 playing 时准备 MP3 元素与备用缓冲，不播放
 }
 function initMusicUI(music: MusicManager): void;
 ```
@@ -352,7 +352,7 @@ function initMusicUI(music: MusicManager): void;
 - **G. 每首曲子各自一个 element、各自一条时间线**：`crossfadeTo()` 切走前把旧曲进度落到 `space.position.v1.track:<id>`（格式不变），新曲只在自己**第一次**被接管时 `restorePositionOnce()`；本次文档用过的元素里就是它自己的真实进度，反复切回来不会被 storage 覆盖。`force` 时**不再先 `await waitForCanPlay()`**（那会拖断用户手势链）：直接 `incoming.play()`（浏览器自己会等媒体 ready）。主指针为粗指针的触控设备上，切换开始就暂停旧曲，新曲拿到目标音量后再播放；桌面仍在新曲成功启动后交叉淡出旧曲。autoplay 被拒时保留 `shouldPlay`，等下一次可信手势 / `canplay`。
 - **H. 显式播放按钮继续绕开全局 capture 解锁**：`audio-unlock.ts` 的 `EXPLICIT_AUDIO_CONTROL = '[data-music-toggle], [data-identity-play]'` —— 手势落在它们上面时 document capture 的 `unlockAll()` 不抢，交给按钮自己的 `click`（`music.toggle()` / `transport.start()`），第一击就生效。
 - **SAME VISIT 刷新的自动恢复**：`initAudioUnlock({ gated:false })` 里 `music.init()` 只尝试一次；浏览器允许即续播，拒绝则保留 `shouldPlay` 等真实手势重试。鼠标在 `pointerdown`、触屏在 `pointerup`、键盘在 `keydown` 解锁；触屏 `pointerdown` 不具备可靠的瞬时用户激活。夜曲在采样等待结束时再次核对 AudioContext，避免 `running` 事件发生在 `loading` 中而永久停在 waiting。
-- **iPhone About 刷新后的接续**：夜曲播放/重播的真实点击先唤醒钢琴 AudioContext，再由 `prepareAboutMedia(context)` 创建并加载原生 MP3 元素，同时在这条已获用户手势的 AudioContext 中异步解码当前 MP3。离开 About 首先照旧尝试原生 `play()`；若 WebKit 因滑动回调没有激活而拒绝，解码已完成时由共用 AudioContext 在原进度接续，未完成则在解码完成后核对焦点与播放意图再接续。首次入场、普通手动播放仍直接走原生 `play()`，不等待整首解码；不以静音播放解锁。音量、进度拖动、暂停、换曲、离开 About 家族均同步或清理接续声源。整首文件尚未下载完时，首次滑出仍可能有网络等待。
+- **iPhone About 刷新后的接续**：夜曲实际进入 `playing` 时（包括场景自动起播、刷新恢复与按钮启动）由 `prepareAboutMedia(context)` 创建并加载原生 MP3 元素，同时在共用钢琴 AudioContext 中异步解码当前 MP3。离开 About 时，若缓冲已就绪且上下文运行，直接从原进度用该上下文接续；缓冲仍在路上时原生 `play()` 也会尝试，解码完成可接管仍悬而未决的原生请求。接管前暂停原生元素，避免迟到的 `play()` 造成双声源。首次入场、普通手动播放仍直接走原生 `play()`；不以静音播放解锁。音量、进度拖动、暂停、换曲、离开 About 家族均同步或清理接续声源。整首文件尚未下载完时，首次滑出仍可能有网络等待。
 - 事件：`MusicManager` 派发普通 `'change'`（原生媒体事件只触发它，不写状态）；UI（`music-ui.ts`）每 260ms 重读 `getState()` / `getProgress()` 刷新面板，支持同页多个面板（`[data-music]` 循环绑定）。
 - **第一次起播不从 0 淡入**（`applyVolumeForStart()`）：元素刚建出来时 volume 是 0，老写法要淡入 `AUDIO.fadeInMs`（2.4 秒），曲子开头那一下会被压到几乎听不见的音量里（timeline 在走、声音没有 —— 本人报的"第一拍没播出来 / 像还没加载好 timeline 就先走了"）。现在**本次文档的第一次**直接摆到目标音量，之后保持原来的淡入。暂停保留 450ms 淡出，但任何淡出都能被 `play()` / `pause()` / 切曲 / About 可靠取消（连同它"淡出结束再 `pause()`"的 `done` 回调）。
 - 音量渐变用 `requestAnimationFrame`（`ramp()`），进度两头都 `clamp01`；`prefers-reduced-motion` 时直接跳到目标音量（不渐变）。
@@ -907,6 +907,12 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-28 · 修复 About 刷新后夜曲滑出时 MP3 未接续
+
+- 根因：以前只有夜曲播放/重播按钮会调用 `prepareAboutMedia()`；刷新后夜曲从场景与 AudioContext 自动进入 `playing` 时没有准备 MP3 备用缓冲。另一个竞态是原生 `audio.play()` 在 iPhone 上可能长时间 pending，`paused` / `readyState` 的组合会让缓冲完成回调误以为它已实际出声，因而跳过备用接续。
+- 修法：夜曲每次实际进入 `playing` 时统一准备一次 MP3 缓冲；离开 About 时缓冲已就绪则直接用共用 AudioContext 接续，尚在解码时仍尝试原生播放，并用独立的待接续标记决定缓冲完成后是否接管。备用声源开始前暂停原生元素，防止迟到的播放请求与其重叠。
+- 文件：`src/scripts/identity-player.ts`、`src/scripts/music-manager.ts`、`DEVELOPMENT.md`（§5.5 / 本条）。未新增导出、DOM 钩子、storage key 或自定义事件。`npm test` 103/103、`npm run check` 0 错误/警告、`npm run build` 19 页；iPhone 端最终听感需实机复测。
 
 ### 2026-09-27 · 触控设备切主题时立即暂停旧曲
 
