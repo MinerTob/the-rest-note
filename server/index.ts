@@ -2,15 +2,13 @@
  * 极薄 Node Web Service 网关（**不是 Astro SSR**）
  * ------------------------------------------------------------------
  * Astro 照旧 `npm run build` 出 `dist/` 静态文件；这个进程只做四件事：
- *   1. HTTP 入口判断（谁在请求、要的是不是站内 HTML 页面）；
- *   2. 中英文 NEW VISIT 入口重定向（未进门时的子路由 → 本语言首页）；
- *   3. Entry Gate 的服务端 session cookie（`rest_note_visit` / `rest_note_entered`）；
- *   4. 从 `dist/` 分发静态文件（HTML / `_astro/*` / 图片 / CSS / JS / sitemap / RSS / ...）。
+ *   1. 健康检查与 Entry Gate 的 session cookie 接口；
+ *   2. 从 `dist/` 分发静态文件（HTML / `_astro/*` / 图片 / CSS / JS / sitemap / RSS / ...）。
  *
  * **前端逻辑一律不上服务器**：MIDI、AudioContext、scene、scroll、SPA 换页、Entry Gate 的
  * 动画与音频解锁都还在浏览器里（见 DEVELOPMENT.md §5.15 / §5.11）。
- * 服务端只认真实 HTTP 入口 —— #fragment 不会发过来，所以首页那四个 Journey hash
- * 仍然由 `BaseHead.astro` 的早期脚本在客户端兜底。
+ * 地址栏输入与刷新都可能带相同的 HTTP 导航头，所以 NEW VISIT 入口归一化
+ * 交给 `BaseHead.astro` 的早期脚本，网关不重定向子路由。
  *
  * 生产启动（package.json 的 `start:server`）：
  *   node --experimental-strip-types server/index.ts
@@ -26,8 +24,6 @@ import {
   ENTER_PATH,
   decideEntry,
   isHtmlPagePath,
-  isLanguageHomePath,
-  languageHome,
 } from './entry-router.ts';
 import {
   enteredCookie,
@@ -138,7 +134,7 @@ function cookieHeaders(cookies: string[]): Record<string, string | string[]> {
 }
 
 /**
- * HTML 一律 `no-cache`：入口判定依赖 cookie，浏览器缓存住子页 HTML 就等于绕过网关。
+ * HTML 一律 `no-cache`：刷新要重新取得当前页面，NEW/SAME 判定留给浏览器。
  * `_astro/` 里是带 hash 的构建产物，可以永久缓存。
  */
 function cacheControl(pathname: string, isHtml: boolean): string {
@@ -217,7 +213,6 @@ async function serveStatic(
     'Content-Type': contentType(file),
     'Cache-Control': cacheControl(pathname, isHtml),
     'Accept-Ranges': 'bytes',
-    // 同一份 HTML 会因为 cookie 不同而拿到 302 或 200，共享缓存必须按 Cookie 分开
     ...(isHtml ? { Vary: 'Cookie' } : {}),
     ...cookieHeaders(cookies),
   };
@@ -286,39 +281,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return;
   }
 
-  /*
-   * 外部子路由的轻量入口归一化：**只看这一次是否"明确的新外部顶层导航"**
-   *   · 站内 HTML 页面 + GET/HEAD；
-   *   · `Sec-Fetch-Mode: navigate` + `Sec-Fetch-Dest: document`（顶层文档导航）；
-   *   · `Sec-Fetch-Site: none`（地址栏 / 书签）或 `cross-site`（外站链接进来）；
-   *   · 而且目标不是语言首页（`/`、`/en`、`/en/`）。
-   * 都成立就直接 302 回本语言首页 —— 这是**纯 pathname 重定向**：
-   * 不读不写任何 cookie、不碰服务端 session（`rest_note_visit` / `rest_note_entered` 都不动）、
-   * 也不改任何客户端状态。重定向后的首页由客户端 visitSession() / Entry Gate 自己判定。
-   *
-   * 刷新当前子页（`Sec-Fetch-Site: same-origin`）、站内 ClientRouter 导航（不是文档请求）、
-   * 静态资源与 `/api/enter`（不是 HTML 页面 / 不是 GET|HEAD）都不会走到这里。
-   */
-  const externalDocumentNavigation =
-    isHtmlPagePath(pathname) &&
-    (method === 'GET' || method === 'HEAD') &&
-    req.headers['sec-fetch-mode'] === 'navigate' &&
-    req.headers['sec-fetch-dest'] === 'document' &&
-    (req.headers['sec-fetch-site'] === 'none' ||
-      req.headers['sec-fetch-site'] === 'cross-site');
-
-  if (externalDocumentNavigation && !isLanguageHomePath(pathname)) {
-    res.writeHead(302, {
-      Location: languageHome(pathname),
-      'Cache-Control': 'no-store',
-    });
-    res.end();
-    return;
-  }
-
   const secure = isSecureRequest(req);
   const cookies = readEntryCookies(req.headers.cookie);
-  const decision = decideEntry({ method, pathname, entered: cookies.entered });
+  const decision = decideEntry({ method, pathname });
 
   /*
    * 服务端访问 id：HTML 页面与 /api/enter 上补发，静态资源不掺和（省掉每条资源一个 Set-Cookie）。
@@ -345,16 +310,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         ...cookieHeaders(setCookies),
       });
       res.end('405 Method Not Allowed\n');
-      return;
-    }
-    case 'redirect': {
-      // 未进门就要子页面：回本语言首页。不带 query、不记原路由（用户点了"进入"就停在首页）
-      res.writeHead(302, {
-        Location: decision.location,
-        'Cache-Control': 'no-store',
-        ...cookieHeaders(setCookies),
-      });
-      res.end();
       return;
     }
     case 'static':

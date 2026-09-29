@@ -96,7 +96,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch()
   所以每个绑定都必须幂等（用 `dataset.ready === '1'` 之类的守卫），或在 `astro:before-swap` 里注销。
 - 跨页面存活的系统（音乐、主题）挂在 `src/scripts/global.ts` 的 `getGlobal()` 单例上（实际挂在 `window`）。
 - `clearTimers()` 在每次 boot 开头清掉上一页留下的定时器。
-- **生产环境的 HTTP 入口在浏览器之前**：`server/` 那个 Node 网关（§5.18）先决定"这个请求该 302 回首页还是直接发 HTML"，浏览器这边的一切都跑在它之后。仅静态托管（不跑网关）时没有服务端那半，NEW VISIT 的子路由只能靠客户端跳走。
+- **生产环境的 HTTP 入口在浏览器之前**：`server/` 网关（§5.18）正常返回子页 HTML；`BaseHead.astro` 的首帧前脚本再依据浏览器导航类型与历史访问章处理 NEW VISIT。刷新不能在服务端按 Fetch Metadata 或入场 cookie 猜测。
 
 ### 2.3 数据流
 
@@ -586,7 +586,7 @@ visitSession(): VisitSession;                  // 见 §5.15：这一趟的 id /
 - 同一个 click 处理器里还调两个"必须在用户手势里做"的动作：`requestMotionAccess()`（`identity-motion.ts`，申请"运动与方向"权限，见 §5.8）和 `primeIdentityPiano()`（`identity-audio.ts`，把"关于"那架钢琴的 AudioContext 建起来并开始预载采样，见 §5.14）。两者都只在真正需要它们的页面生效，桌面 / 不需要 / 已经做过时静默返回，不影响入场。
 - 锁定期间 body 加 `.entry-locked`，除 gate 和 `.ambient` 外的直接子元素设为 `inert`。
 - **文案语言跟当前文档的页面语言走，不看 `navigator.language`**（`applyPageLanguage()`）：读 `<html data-lang>`（`BaseLayout.astro` 按页面 `lang` 渲染），`'en'` → 英文，其它 → 中文；按现有 `[data-entry-copy]` + `data-zh` / `data-en` 换文字，`aria-label` 与 `gate.dataset.language` 同一个语言。系统语言是中文的人打开 `/en/`，看到的就是英文入场页 —— NEW VISIT 的入口语言已由 `BaseHead.astro` 按 URL 归一化（见 §5.15），两边必须同一个语言，谁都不许拿系统语言覆盖路由。入场页 HTML 里那段英文兜底文案在 `.is-ready` 之前不显示（`opacity: 0`），所以不存在"先闪一下英文再换中文"。
-- **点"进入"时同时给服务端网关盖章**（`void fetch('/api/enter', { method: 'POST', credentials: 'same-origin' })`，见 §5.18）：让网关写 `rest_note_entered=1`，之后站内进子页才不会被 302 回首页。**只发不等**：`markEntered()` 之后立刻发、不 await，紧接着的 `music.play()` / `audioUnlock()` 必须留在这一次点击的同步可信手势里 —— 一旦 `await`，iOS 就丢了 trusted user activation，音频解锁会失败（硬约束）。fetch 失败也不影响进站：本地 `hasEntered()` 那套仍然管用。
+- **点"进入"时保留服务端入场记录接口**（`void fetch('/api/enter', { method: 'POST', credentials: 'same-origin' })`，见 §5.18）：网关写 `rest_note_entered=1`，但它不再决定子页是否重定向。**只发不等**：`markEntered()` 之后立刻发、不 await，紧接着的 `music.play()` / `audioUnlock()` 必须留在这一次点击的同步可信手势里。fetch 失败也不影响进站。
 - `app.ts` 里：`if (!initEntryGate(music)) music.init();` —— 有入场页时由入场页负责解锁音频。
 - 收尾去掉遗留锚点时用 `history.replaceState(history.state, ...)`：`history.state` 上有这一趟访问的 id（`restNoteVisit`）和 Astro 的 `index` / 滚动位置，传 `null` 会把它们抹掉，于是"带着 `#锚点` 进站 → 进站 → 刷新"会被当成新访问。
 
@@ -685,37 +685,29 @@ visitBoundary({ navigation, sessionToken, entryToken }): 'new' | 'same';
 1. **每次 boot 都要补盖一次章**：Astro 的客户端路由换页时是 `history.pushState({ index, scrollX, scrollY })`，会把条目上原有的字段整个换掉。不补盖的话，"站内换页之后再刷新"会被当成新的一趟，凭空多一次入场页。
 2. **`history.replaceState` 一律带 `history.state` 走**：入场页收尾去掉遗留 `#锚点` 时传 `null`，会把章和 Astro 的滚动位置一起抹掉（见 §5.11）。
 
-**NEW VISIT 的入口归一化：服务端管 HTTP 入口，客户端只兜 `#fragment`**
+**NEW VISIT 的入口归一化：由浏览器在首帧前判定**
 
 语义（本人定的最终版）：**NEW VISIT 不许直接落在子页面**。中文一律进 `/`，英文（`/en/` 及其下）一律进 `/en/`；在首页显示 Entry Gate，用户点过"进入空间"之后就停在首页，**不再跳回原来的子页**。
 
-这一条现在有**两个执行者，各管一半**（不许再各自实现一遍对方那半）：
-
-| 谁 | 管什么 | 在哪 |
-| --- | --- | --- |
-| 服务端网关（生产） | "未进门的子路由 → 本语言首页"：`302`，`rest_note_entered === '1'` 之后不再拦 | `server/entry-router.ts` `decideEntry()`，见 §5.18 |
-| 客户端（`<head>` 早期脚本） | **`#fragment`**：`/#about`、`/en/#blog` 服务端根本看不见 | `src/components/BaseHead.astro` |
-
-客户端那段 `is:inline` 同步脚本（紧跟 viewport meta、在主题脚本之前）现在只做：
+服务端网关一律正常返回子页 HTML：`Sec-Fetch-Site` 和服务端入场 cookie 都无法可靠区分地址栏输入与当前页刷新。`src/components/BaseHead.astro` 中紧跟 viewport meta 的 `is:inline` 同步脚本在首帧前做统一判定：
 
 1. 判 NEW / SAME（照抄 `lib/visit.ts` 的 `visitBoundary()`）：没有 session token → NEW；`navigate` → NEW；`reload` → `history.state.restNoteVisit === session token` 才算 SAME，否则 NEW；`back_forward` → SAME；拿不到 / 认不出 type → NEW。`sessionStorage` / `history.state` / `performance` 的读取都包在 try/catch 里。
-2. **SAME VISIT 立即早退**，一个字节都不改：刷新子页就留在子页、站内点击文章 / About → Intro / 返回 / 前进后退 / 语言切换都照旧。
-3. NEW VISIT 时判"这一页是不是本语言的首页"，用的是和服务端**同一条规矩**（pathname 的第一个非空 segment）：
+2. **SAME VISIT 立即早退**，一个字节都不改：刷新子页就留在子页，前进后退照旧。整份 document 只判一次，ClientRouter 站内点击文章 / About → Intro / 返回 / 语言切换即使重跑内联脚本也不会被误判。
+3. NEW VISIT 时判"这一页是不是本语言的首页"（pathname 的第一个非空 segment）：
    ```js
    var parts = location.pathname.split('/').filter(Boolean);
    var isEnglish = parts[0] === 'en';
    var isLanguageHome = isEnglish ? parts.length === 1 : parts.length === 0;
    ```
-   `'/'`、`'/en'`、`'/en/'` → 首页；`'/blog/...'`、`'/en/blog/...'`、`'/about/intro/...'` → 子页（这里什么都不做）。
+   `'/'`、`'/en'`、`'/en/'` → 首页；`'/blog/...'`、`'/en/blog/...'`、`'/about/intro/...'` → 子页。
    - 首页 + hash 是 `#home` / `#blog` / `#lab` / `#about` → `history.replaceState(history.state, '', pathname + search)`，**只抹 hash**，search / pathname / `history.state` 不动。
-   - 子页 → **什么都不做**（`location.replace(target)` 那一支本轮已删：同一件事留两套实现迟早漂移）。
+   - 子页 → `location.replace()` 到 `/` 或 `/en/`，不保留 query/hash、不返回原子页；目标首页照常出现 Entry Gate。
 4. 不写 sessionStorage、不建新的 visit token、不碰 Entry Gate / 音频。
 
-- **为什么还剩客户端这一半**：`#fragment` 不会发给服务器，所以浏览器解析到 section id 时那次原生 fragment 定位只能靠 `<head>` 里的同步脚本来挡（不等 DOMContentLoaded / `astro:page-load` / `requestAnimationFrame` / `app.ts` 的 `boot()`）。关于区 observer、夜曲、身份物理都是被那一下带起来的。
-- **为什么子页那一半搬到服务端**：放在 HTTP 层可以在**任何 HTML 进浏览器之前**就 302，子页连一帧都不会渲染；客户端 `location.replace()` 总要先把子页 HTML 下载并解析一段。
-- **静态资源**：`/_astro/`、图片、favicon、sitemap、`rss.xml`、`robots.txt` 不经过 `BaseHead.astro`（`rss.xml` 是 `src/pages/rss.xml.ts` 的 API 路由、sitemap 由集成生成），服务端侧也按后缀 / 前缀判定为静态，永不参与重定向（§5.18）。
+- **为什么在 `<head>` 中同步执行**：`#fragment` 不发给服务器，且子页面是否刷新只有浏览器能判断。脚本在页面内容解析前运行，避免子页或 About 场景闪现；代价是 NEW VISIT 子页要先取得 HTML 才能跳首页。
+- **静态资源**：`/_astro/`、图片、favicon、sitemap、`rss.xml`、`robots.txt` 不经过 `BaseHead.astro`，不参与入口判定。
 - **只有这一处客户端判定**：`app.ts` 里既没有重定向逻辑也没有第二份 NEW/SAME 判定；`boot()` 里 NEW VISIT 的 `restoreScroll(0)`、SAME VISIT 的落点恢复都照旧。
-- **服务端 302 之后那一趟仍是 NEW**：`location.replace()`（旧客户端方案）与 HTTP 302 报的都是 `navigate`，目标首页本来就是这个语言首页，所以不会再跳、也不会死循环 —— Entry Gate 正常在首页出现（语言由 `<html data-lang>` 决定，见 §5.11）。
+- **跳转后的首页仍是 NEW**：`location.replace()` 产生新文档，目标已是语言首页，所以不会循环；Entry Gate 正常出现。浏览器若把重新输入同一 URL 报为 `reload` 且同时保留访问章，则无法与真实刷新区分，优先保留刷新当前页的语义。
 
 ### 5.16 长页场景激活（关于区什么时候算"在观看区域"）
 
@@ -753,14 +745,14 @@ SCENE_THRESHOLDS;   // IntersectionObserver 的 threshold 网格（41 档，只�
 
 **文件**：`server/index.ts`（HTTP 与静态分发）、`server/entry-router.ts`（纯判定）、`server/visit-cookie.ts`（两个 cookie）；启动脚本 `npm run start:server`
 
-Astro 照旧只做静态构建（`npm run build` → `dist/`）。生产用 **Render Web Service** 起一个极薄 Node 进程，它只负责四件事：HTTP 入口判断、中英文 NEW VISIT 入口重定向、Entry Gate 的服务端 session cookie、从 `dist/` 分发静态文件。**前端逻辑一律不上服务器**：MIDI / AudioContext / scene / scroll / SPA 换页 / 入场页动画与音频解锁都还在浏览器里。
+Astro 照旧只做静态构建（`npm run build` → `dist/`）。生产用 **Render Web Service** 起一个极薄 Node 进程，负责健康检查、保留 Entry Gate 的服务端 session cookie 接口，以及从 `dist/` 分发静态文件。NEW VISIT 入口判定在浏览器 `<head>` 中执行（§5.15），网关不重定向子页面。
 
 ```ts
 // entry-router.ts（纯函数，不认识 res / fs）
 languageHome(pathname): '/' | '/en/';        // 第一段是 en → '/en/'，否则 '/'
 isHtmlPagePath(pathname): boolean;           // '/_astro/'、'/api/'、带静态后缀 → false
 isLanguageHomePath(pathname): boolean;       // '/'、'/en'、'/en/' → true
-decideEntry({ method, pathname, entered }): EntryDecision;   // enter | method-not-allowed | redirect | static
+decideEntry({ method, pathname }): EntryDecision;   // enter | method-not-allowed | static
 
 // visit-cookie.ts
 readEntryCookies(header): { visit, entered };   // 只读
@@ -769,14 +761,12 @@ visitCookie(token, secure) / enteredCookie(secure): string;
 isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'（Render 在代理后面）
 ```
 
-- **语言判断**与客户端 `BaseHead.astro` 同一条规矩：pathname 的第一个非空 segment 是不是 `en`。`/en`、`/en/`、`/en/blog/...`、`/en/about/intro/...` 全英文 → `/en/`；`/`、`/blog/...`、`/about/...` 全中文 → `/`。
-- **未进门时的入口规则**（`rest_note_entered !== '1'`）：请求的是语言首页（`/`、`/en`、`/en/`）→ 正常返回首页 HTML，让 Entry Gate 显示；请求的是**子页面** → `302` 到本语言首页（**不带 query、不记原路由** —— 用户点过"进入空间"就停在首页）；静态资源 → 永远放行。
-- **已经进门**（`rest_note_entered === '1'`）：服务端不再做子路由重定向，站内 About → Intro / Blog → 文章 / Lab / 中英切换全部照常走 Astro 静态页面（SPA 换页仍然是 ClientRouter 的事）。
+- **子页面无条件分发**：无论 `rest_note_entered` 是否存在、导航请求带什么 Fetch Metadata，HTML 子路由均正常返回。浏览器早期脚本根据导航类型与历史访问章决定 NEW VISIT 是否去本语言首页。站内 About → Intro / Blog → 文章 / Lab / 中英切换仍由 ClientRouter 完成。
 - **静态资源绝不参与重定向**：`/_astro/*`、图片、CSS、JS、sitemap、RSS、favicon、robots 由后缀与前缀判定为静态，直接 `dist/` 分发。**防 path traversal**：`resolveInsideDist()` 先 `path.resolve` 规范化，再要求结果落在 `DIST_ROOT` 内（`/../..`、`%2e%2e%2f`、反斜杠变体都被拒）。
-- **缓存**：HTML 一律 `Cache-Control: no-cache` + `Vary: Cookie`（入口判定依赖 cookie，浏览器缓存住子页 HTML 就等于绕过网关）；`/_astro/` 是带 hash 的产物 → `immutable`；其它静态 → `max-age=3600`。
+- **缓存**：HTML 保持 `Cache-Control: no-cache` + `Vary: Cookie`，`/_astro/` 带 hash 的产物保持 `immutable`，其它静态保持 `max-age=3600`；本次只撤除 cookie 对导航重定向的影响。
 - **媒体 Range**：`serveStatic()` 对单段 `Range: bytes=...` 返回 `206`、`Content-Range`、准确长度并流式输出对应字节；不可满足返回 `416`。普通静态请求仍为 `200`，`HEAD` 只发头。Chrome 在本地 `run.bat` 的 3000 端口刷新恢复、拖动 MP3 时需要这一能力；此前网关忽略 Range，始终整份 `200`，而 Astro dev 的 4321 端口本来就支持 `206`。
 - **`#fragment` 服务端看不见**：`/#about`、`/en/#about` 在服务器眼里只是 `/`，所以首页那四个 Journey hash 的早期清理仍然由 `BaseHead.astro` 在客户端做（见 §5.15）。
-- **`POST /api/enter`**：浏览器点"进入空间"时（同一次点击、不 await）打过来，网关回 `204 No Content` 并写 `rest_note_entered=1`；不返回页面、不管音频。别的方法 → `405`。
+- **`POST /api/enter`**：浏览器点"进入空间"时（同一次点击、不 await）打过来，网关回 `204 No Content` 并写 `rest_note_entered=1`；为兼容保留，不再控制子路由重定向。别的方法 → `405`。
 - **启动**：`PORT` 读 `process.env.PORT`（本地默认 3000），监听 `0.0.0.0`；Node 直接跑 TypeScript（`node --experimental-strip-types`），所以没有构建步骤、没有框架依赖（不用 Express）。`SIGTERM` 时 `server.close()` 后退出。
 - **`GET /health`（Render 健康检查）**：在 `handleRequest` 的**最前面**处理，早于 cookie 读取、Entry Gate 判定与静态分发 —— 它不读也不写任何 cookie（`rest_note_visit` / `rest_note_entered` 都不会被创建）、不参与 302、不读 `dist/`、不改任何访问状态。`GET` / `HEAD` → `200` + `Content-Type: text/plain; charset=utf-8` + `Cache-Control: no-store`，body 固定 `ok`；其它方法 → `405`（`Allow: GET, HEAD`）。
 - **Render Blueprint**：仓库根目录的 `render.yaml` 声明这个 Web Service（`runtime: node`、Free plan、`branch: main`、`buildCommand: npm ci && npm run build`、`startCommand: npm run start:server`、`healthCheckPath: /health`、`autoDeployTrigger: commit`）；没有 disk / 数据库 / 写死的 PORT / 多余环境变量，Node 版本沿 `package.json` 的 `engines`（`>=22.12.0 <25.0.0`），不在 `render.yaml` 里重复设 `NODE_VERSION`。
@@ -802,11 +792,11 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 | `space.scene-scroll` | sessionStorage | 离开"关于这一族"页面时记下的精确 `{ path, y }`；回来时取一次就清掉（第一帧直接落在原处） | `src/scripts/scene-scroll.ts` |
 | `history.state.restNoteVisit` | 历史条目（不是存储） | 当前历史条目属于哪一趟访问：刷新会带着它（同一趟），地址栏重新输入网址则是新条目（新的一趟） | `src/scripts/visit-session.ts`（纯函数 `stampEntryToken()` / `readEntryToken()`） |
 | `rest_note_visit` | cookie（HttpOnly，session 级） | **服务端**这一趟访问的 id（随机 token，`randomBytes(24)` → base64url）；网关补发，值不含任何信息 | `server/visit-cookie.ts`（§5.18） |
-| `rest_note_entered` | cookie（HttpOnly，session 级） | **服务端**这个 session 有没有通过 Entry Gate（值只有 `1`）；由 `POST /api/enter` 写入，网关据此决定要不要拦子路由 | `server/visit-cookie.ts` + `src/scripts/entry-gate.ts`（§5.11 / §5.18） |
+| `rest_note_entered` | cookie（HttpOnly，session 级） | **服务端**入场记录（值只有 `1`）；由 `POST /api/enter` 写入，保留接口兼容，不再决定子路由跳转 | `server/visit-cookie.ts` + `src/scripts/entry-gate.ts`（§5.11 / §5.18） |
 
 规则：所有读写都走 `src/scripts/storage.ts` 的封装（`readString` / `writeString` / `readNumber` / `readBool` / `writeNumber` / `writeBool`），隐私模式下静默降级，不抛异常。跨设备/长期偏好放 localStorage，一次性、会话内的放 sessionStorage。
 例外：`visit-session.ts` 直接读 sessionStorage 是为了能一起处理"隐私模式下拿不到"（数组用的是 `try/catch` + 内存兜底），`history.state` 本来就不在 `storage.ts` 的管辖范围内。身份落点 cookie 名 `rest-note-identity-v3-<这一趟访问的 id>` 也跟着这里走（旧的 `rest-note.identity-visit` key 已不再使用）。
-服务端那两个 cookie（`rest_note_visit` / `rest_note_entered`）**只能由 Node 网关读写**（HttpOnly，前端 JS 看不到，也不该看到）：它们只存随机 token 与 `1`，用途只有一个 —— 判断这个 session 能不能直接进子页面。
+服务端那两个 cookie（`rest_note_visit` / `rest_note_entered`）**只能由 Node 网关读写**（HttpOnly，前端 JS 看不到）；它们保留会话记录兼容，但不参与 NEW/SAME 判定或子页重定向。
 
 ### 6.2 自定义事件总表
 
@@ -907,6 +897,12 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-30 · 子页面手动打开归首页，当前页刷新保留原网址
+
+- 根因：生产网关先按 `Sec-Fetch-Site: none|cross-site` 把子页 302 回首页，另有缺少 `rest_note_entered` cookie 时的第二次 302；这两个服务器信号都不能可靠区分地址栏新打开与当前页刷新，浏览器尚未收到页面就已跳走。
+- 修法：网关正常分发所有 HTML 子页并保留 `/api/enter` 接口；`BaseHead.astro` 在首帧前用既有访问边界信号区分 NEW/SAME，NEW 子页 `location.replace()` 至本语言首页，SAME 刷新不动。整份 document 只运行一次，ClientRouter 站内换页不重复判定；首页 Journey hash 清理不变。
+- 文件：`server/index.ts`、`server/entry-router.ts`、`src/components/BaseHead.astro`、`src/scripts/entry-gate.ts`、`tests/entry-navigation.test.mjs`、`DEVELOPMENT.md`（§2 / §5.11 / §5.15 / §5.18 / §6.1 / 本条）。无新增 storage key、DOM 钩子或事件。`npm test` 109/109；`npm run check` 113 文件 0 错误/警告/提示；`npm run build` 19 页；本地 Node 网关对三条中英文子路由模拟地址栏请求均返回 HTML 200。手机浏览器与线上仍需实机复测。
 
 ### 2026-09-30 · 修复 iPhone 首次触屏彩蛋切主题后旧曲重启
 

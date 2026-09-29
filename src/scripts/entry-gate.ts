@@ -71,8 +71,9 @@ export function initEntryGate(music: MusicManager): boolean {
     visit.markEntered();
 
     /*
-     * 同一时刻告诉服务端网关"这个 session 已经进过门"（它会给 HttpOnly cookie
-     * `rest_note_entered=1`，之后子路由才不会被 302 回首页，见 server/）。
+     * 同一时刻保留服务端入场记录接口（它会给 HttpOnly cookie
+     * `rest_note_entered=1`）。子路由是否归首页由浏览器的访问边界判定，
+     * 不再由这个 cookie 决定，避免刷新时被服务器误重定向。
      *
      * **只发不等**：`void fetch(...)` 绝不 await —— 下面那串动作（`music.play()` /
      * `audioUnlock()`）必须留在这一次点击的**同步可信手势**里。一旦 await，iOS 就丢了
