@@ -688,7 +688,9 @@ export class MusicManager extends EventTarget {
     const incoming = this.elementFor(next);
     // 新曲只需要"接管时恢复一次"；本次文档用过的元素里就是它自己的真实进度
     this.restorePositionOnce(incoming, next.id);
-    const immediateSwitch = window.matchMedia('(pointer: coarse)').matches;
+    // 首次解锁彩蛋时目标曲往往尚未缓冲。等待 play() 完成再淡出旧曲，
+    // 会让主题已经切换却长时间仍听到旧曲；只有目标已可连续播放时才交叉淡出。
+    const immediateSwitch = window.matchMedia('(pointer: coarse)').matches || incoming.readyState < 3;
 
     if (incoming === previous) {
       this.trackId = next.id;
