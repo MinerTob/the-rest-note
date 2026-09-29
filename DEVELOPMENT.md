@@ -347,7 +347,7 @@ function initMusicUI(music: MusicManager): void;
 
 - **C. 进度写入受控**：① 接管 element 时恢复一次（`restorePositionOnce()`）；② 用户拖进度条（`seekToRatio()`，取消待完成的恢复）；③ About 的 AudioContext 接续与原生播放器交接时同步一次位置。在恢复完成前，`timeupdate`、About 让位、暂停、切歌都不能拿新元素暂时的 0 秒覆盖原保存位置。其余自动重试不反复写入 `currentTime`。
 - **D. About / MIDI 只抢音频焦点**：`setAboutActive(true)` 把音量归零并暂停所有主题 MP3、作废在飞的启动与切换，但**不动 `shouldPlay`**；`setAboutActive(false)` 只看 `shouldPlay` 决定要不要恢复（不再有"进入前想不想播"的第二份意图）。About 期间换主题仍然会把当前曲目切到新主题曲（恢复它自己的保存位置），只是保持暂停，离开 About 后按 `shouldPlay` 接着放。
-- **E. 自动恢复只有一条路、同一时刻最多一条在飞**：`init()` / `retryIfIdle()`（`canplay` / `pageshow` / `visibilitychange` / `audio-unlock` 都汇到这里）最终都进 `requestAutoStart()`，条件统一为 `shouldPlay && !inAbout && autoStart && !isPlaying()`；已有启动在飞就直接返回。`play()` 与它共用同一个"在飞"登记位 —— 入场页那次点击里 `music.play()` 紧跟着的 `audioUnlock() → retryIfIdle()` 因此不会在同一个元素上并发第二次 `el.play()`。
+- **E. 自动恢复只有一条路、同一时刻最多一条在飞**：`init()` / `retryIfIdle()`（`canplay` / `pageshow` / `visibilitychange` / `audio-unlock` 都汇到这里）最终都进 `requestAutoStart()`，条件统一为 `shouldPlay && !inAbout && autoStart && !isPlaying()`；已有启动在飞就直接返回。显式 `play()` 和 `crossfadeTo()` 的目标曲 `play()` 与它共用同一个"在飞"登记位 —— 入场点击后的解锁、以及触屏彩蛋 `pointerdown` 切歌后的 `pointerup` 解锁都不能在目标曲加载期间并发重启旧曲。
 - **F. 过期异步操作无害**：`switchToken` 在每次启动 / 切换 / 暂停 / 进出 About 时 +1；`await el.play()` 回来先对号，对不上就只许安静退场（旧元素已经不是当前曲目时顺手 `volume = 0; pause()`），绝不改 `shouldPlay`、不改 `this.el`、不停掉新的那次播放。
 - **G. 每首曲子各自一个 element、各自一条时间线**：`crossfadeTo()` 切走前把旧曲进度落到 `space.position.v1.track:<id>`（格式不变），新曲只在自己**第一次**被接管时 `restorePositionOnce()`；本次文档用过的元素里就是它自己的真实进度，反复切回来不会被 storage 覆盖。`force` 时**不再先 `await waitForCanPlay()`**（那会拖断用户手势链）：直接 `incoming.play()`（浏览器自己会等媒体 ready）。触控设备或目标曲尚未缓冲到 `HAVE_FUTURE_DATA` 时，切换开始即暂停旧曲，新曲拿到目标音量后再播放；桌面目标曲已就绪时才在新曲成功启动后交叉淡出旧曲。autoplay 被拒时保留 `shouldPlay`，等下一次可信手势 / `canplay`。
 - **H. 显式播放按钮继续绕开全局 capture 解锁**：`audio-unlock.ts` 的 `EXPLICIT_AUDIO_CONTROL = '[data-music-toggle], [data-identity-play]'` —— 手势落在它们上面时 document capture 的 `unlockAll()` 不抢，交给按钮自己的 `click`（`music.toggle()` / `transport.start()`），第一击就生效。
@@ -907,6 +907,12 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-09-30 · 修复 iPhone 首次触屏彩蛋切主题后旧曲重启
+
+- 根因：彩蛋最后一键在触屏 `pointerdown` 调用 `crossfadeTo()`，旧曲立即暂停、目标曲 `play()` 仍在等待首次加载。随后 `pointerup` 触发 `audio-unlock.ts` 的 `retryIfIdle()`；切歌没有占用 `startInFlight`，恢复路径便给仍是当前元素的旧曲再次 `play()` 并增加 `switchToken`，使待完成的新曲切换作废。Windows 键盘没有这次紧随其后的 `pointerup`，所以先前修复只在 Windows 生效。
+- 修法：目标曲的 `play()` 与普通显式播放、自动恢复共用既有的 `startInFlight` 登记位；触屏抬起时恢复路径会等待正在进行的切歌，不再重新启动旧曲。保留旧曲立即暂停、目标曲加载与失败降级、切换令牌、各曲进度。
+- 文件：`src/scripts/music-manager.ts`、`DEVELOPMENT.md`（§5.5 / 本条）。无新增接口、DOM 钩子、storage key 或事件；进度拖动、每曲保存位置与暂停重播路径未改。`npm test` 103/103；`npm run check` 112 文件 0 错误/警告；`npm run build` 19 页。iPhone 实机仍需复测。
 
 ### 2026-09-30 · 修复首次彩蛋切主题仍听到旧曲
 

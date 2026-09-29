@@ -728,8 +728,11 @@ export class MusicManager extends EventTarget {
     if (immediateSwitch) previous?.pause();
     if (this.shouldPlay) {
       try {
-        await incoming.play();
-        started = true;
+        // 触屏彩蛋在 pointerdown 切歌，随后的 pointerup 会走全站音频恢复。
+        // 把这次新曲 play 登记在同一在飞槽，避免恢复路径趁加载期间重启旧曲。
+        const running = incoming.play().then(() => true, () => false);
+        this.trackStartInFlight(running);
+        started = await running;
       } catch {
         /* 浏览器不让播：不动 shouldPlay，留 READY 等下一次可信手势 / canplay */
       }
