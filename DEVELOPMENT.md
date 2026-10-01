@@ -686,6 +686,7 @@ visitBoundary({ navigation, sessionToken, entryToken, sameOriginReferrer, intern
 **两个容易踩的点**：
 1. **每次 boot 都要补盖一次章**：Astro 的客户端路由换页时是 `history.pushState({ index, scrollX, scrollY })`，会把条目上原有的字段整个换掉。不补盖的话，"站内换页之后再刷新"会被当成新的一趟，凭空多一次入场页。
 2. **`history.replaceState` 一律带 `history.state` 走**：入场页收尾去掉遗留 `#锚点` 时传 `null`，会把章和 Astro 的滚动位置一起抹掉（见 §5.11）。
+3. **`isNew` 只用于当前 document 第一次 boot 的落点决定**：模块级缓存会让它在 ClientRouter 换页后仍是 `true`；换页时再次执行 `restoreScroll(0)` 会覆盖 About / Blog 的返回位置。每次 boot 仍需调用 `visitSession()`，给 ClientRouter 新历史条目补章。
 
 **NEW VISIT 的入口归一化：由浏览器在首帧前判定**
 
@@ -902,6 +903,12 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-10-01 · 修复首次访问后站内返回被二次滚到顶部
+
+- 根因：`visitSession().isNew` 对同一份文档只判定一次，首次访问时会始终为 `true`；ClientRouter 每次换页都会重跑 `boot()`，旧代码因此在已恢复返回位置之后又执行 `restoreScroll(0)`。上一轮修正了完整文档导航与离开位置记录，但没有覆盖首次访问后的同文档换页。
+- 修法：仅当前文档第一次 `boot()` 且访问为 NEW 时归零落点；后续 ClientRouter 换页沿用精确位置和锚点。每次 `boot()` 仍调用 `visitSession()` 补写历史条目访问章。未改音频和路由的其它状态。
+- 文件：`src/scripts/app.ts`、`DEVELOPMENT.md`（§5.15 / 本条）。无新增导出、DOM 钩子、storage key 或事件。`npm test` 113/113；`npm run check` 113 文件 0 错误/警告/提示；`npm run build` 19 页。iPhone Chrome 待线上实机复测。
 
 ### 2026-10-01 · 修复 iPhone 子页面返回误落首页
 

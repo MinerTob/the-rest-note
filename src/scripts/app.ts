@@ -303,13 +303,16 @@ function boot(): void {
    *   · 其余（刷新、前进后退）没有落点时**什么都不做** —— 交给浏览器与 ClientRouter
    *     各自的恢复机制，这也是"决定初始目标"而不是"事后纠正位置"。
    */
-  const isNewVisit = visitSession().isNew;
+  // isNew 描述的是这份 document 初次加载时的访问边界；ClientRouter 换页仍沿用它。
+  // 只有第一次 boot 才能据此重置到 Home，否则返回页刚恢复的 scrollY 会被再次清零。
+  const visit = visitSession(); // 每次换页仍要给新的 history.state 补访问章
+  const resetForNewVisit = firstBootInDocument && visit.isNew;
   const initialNavigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-  const restored = isNewVisit
+  const restored = resetForNewVisit
     ? null
     : (pendingRestore ?? takeFamilyScroll(window.location.pathname));
   pendingRestore = null;
-  if (isNewVisit) {
+  if (resetForNewVisit) {
     // 只覆盖初始目标，不动 history.state 里 SAME VISIT 以后还要用的那些字段
     restoreScroll(0);
   } else if (restored !== null) {
@@ -318,7 +321,7 @@ function boot(): void {
     requestAnimationFrame(() => {
       if (Math.abs(window.scrollY - restored) > 4) restoreScroll(restored);
     });
-  } else if (!isNewVisit && firstBootInDocument && journey && initialNavigation?.type === 'navigate') {
+  } else if (firstBootInDocument && journey && initialNavigation?.type === 'navigate') {
     // 同站链接若整页加载，浏览器可能不按 #锚点定位；刷新不走这条分支，保留精确位置。
     const target = window.location.hash.slice(1);
     if (target === 'home' || target === 'blog' || target === 'lab' || target === 'about') {
