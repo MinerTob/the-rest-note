@@ -145,7 +145,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch()
 | 联系方式 / 复制 | `src/components/ContactTiles.astro`、`ContactPanel*.astro`、`src/scripts/contact.ts`、`src/lib/contact.ts` | `initContact()`、`CONTACT`、`isInteractive()` | `[data-contact]`、`[data-contact-row]`、`[data-contact-copy]` |
 | 系统提示 LCD | `src/components/SystemMessage.astro`、`src/scripts/system-message.ts` | `initSystemMessages()` | `[data-system-message]`、window 事件 `space:message` |
 | 入场页 | `src/components/EntryGate.astro`、`src/scripts/entry-gate.ts` | `initEntryGate()` | `[data-entry-gate]`、`[data-entry-button]`、`[data-entry-copy]` |
-| **访问会话 / 入场边界** | `src/scripts/visit-session.ts`、`src/lib/visit.ts`、`src/scripts/entry-gate.ts`、`identity-player.ts` | `visitSession()`（`token` / `isNew` / `hasEntered()` / `markEntered()`）、`visitBoundary()`、`navigationKind()`、`readEntryToken()` / `stampEntryToken()` | sessionStorage `rest-note.visit`、`rest-note.entry-passed`、`history.state.restNoteVisit`、`html[data-visit]` |
+| **访问会话 / 入场边界** | `src/scripts/visit-session.ts`、`src/lib/visit.ts`、`src/scripts/entry-gate.ts`、`identity-player.ts` | `visitSession()`（`token` / `isNew` / `hasEntered()` / `markEntered()`）、`markInternalNavigation()`、`visitBoundary()`、`navigationKind()`、`readEntryToken()` / `stampEntryToken()` | sessionStorage `rest-note.visit`、`rest-note.entry-passed`、`rest-note.internal-navigation`、`history.state.restNoteVisit`、`html[data-visit]` |
 | 首页 Journey 长页 | `src/views/JourneyPage.astro`、`src/scripts/app.ts` 里的 `initJourney()`、`src/lib/scene.ts` | `initJourney()`、`updateActiveSection()`（导航蓝杠：视口观察线）、`sceneCoverage()`、`sceneDecision()` | `[data-journey]`、`[data-journey-section]`、`[data-journey-section="about"][data-scene]` |
 | 博客列表 / 标签 | `src/views/BlogIndexPage.astro`、`src/lib/content.ts` | `getPosts()`、`collectTags()` | — |
 | 文章页 | `src/views/PostPage.astro`、`src/lib/pages.ts` | `buildPostProps()`、`postStaticPaths()`、`tagStaticPaths()` | — |
@@ -653,11 +653,12 @@ type VisitSession = {
   markEntered(): void;
 };
 visitSession(): VisitSession;   // 同一份文档里只判定一次（模块级缓存）
+markInternalNavigation(href): void; // 程序触发站内跳转前记下目标，供完整文档导航识别
 
 // lib/visit.ts
 navigationKind(raw): 'navigate' | 'reload' | 'back_forward' | 'unknown';
 readEntryToken(state) / stampEntryToken(state, token);   // history.state 上的章（保留 Astro 的 index / scrollX / scrollY）
-visitBoundary({ navigation, sessionToken, entryToken }): 'new' | 'same';
+visitBoundary({ navigation, sessionToken, entryToken, sameOriginReferrer, internalNavigation }): 'new' | 'same';
 ```
 
 **三套状态从此分开，谁也不许动别人的**（这条是本人明确要求的）：
@@ -674,12 +675,13 @@ visitBoundary({ navigation, sessionToken, entryToken }): 'new' | 'same';
 | --- | --- | --- |
 | 第一次打开 / 新标签页 | `navigate`（sessionStorage 里还没有 id） | 新的一趟 |
 | 站内换页（ClientRouter，不换文档） | 不产生文档加载 | 同一趟（`hasEntered()` 还留着） |
+| 站内链接触发完整文档加载（移动浏览器可能发生） | `navigate`，同源 `document.referrer` 或匹配本次点击目标的短时标记 | 同一趟（返回的 hash 和播放位置保留） |
 | 刷新（F5 / 刷新按钮） | `reload` | 同一趟（历史条目上的章还在） |
 | 前进 / 后退 / bfcache | `back_forward` | 同一趟 |
 | 地址栏重新输入**同一个**网址 | Chrome 报 `navigate`；有的浏览器报 `reload` | 新的一趟（前者按类型判，后者按"章没了"判） |
 | 地址栏输入另一个网址 / 外链 / 书签 | `navigate` | 新的一趟 |
 
-**为什么不能只看 `PerformanceNavigationTiming.type`**：不同浏览器给"地址栏里重新输入同一个网址"报的 type 不一样 —— 报 `reload` 的那种会被当成刷新，上一趟的 `entry-passed` 被沿用、入场页不再出现（本人报的 bug）。所以这里加了第二个信号：**当前历史条目上有没有我们自己盖的访问 id**（`history.state.restNoteVisit`，每次 boot 都补盖一次）。刷新会把条目原样留下来（章还在 → 同一趟），而"地址栏重新输入网址"是一次新的导航、条目被顶掉（章没了 → 新的一趟）。
+**为什么不能只看 `PerformanceNavigationTiming.type`**：不同浏览器给"地址栏里重新输入同一个网址"报的 type 不一样 —— 报 `reload` 的那种会被当成刷新，上一趟的 `entry-passed` 被沿用、入场页不再出现（本人报的 bug）。所以这里加了第二个信号：**当前历史条目上有没有我们自己盖的访问 id**（`history.state.restNoteVisit`，每次 boot 都补盖一次）。刷新会把条目原样留下来（章还在 → 同一趟），而"地址栏重新输入网址"是一次新的导航、条目被顶掉（章没了 → 新的一趟）。`navigate` 还需区分手动输入和站内链接完整加载：已有 session token 且 `document.referrer` 同源，或 2 分钟内的站内点击标记与本次完整 URL 精确匹配，才算 SAME。标记只在同源、跨页面的普通点击时写，ClientRouter 完成后清除；完整文档加载在 `visitSession()` 消费并清除。空 referrer、无标记的手动输入仍为 NEW。`BaseHead.astro` 首帧脚本和 `visit-session.ts` 必须使用相同规则，否则前者保留 hash、后者仍会清除访问和音频状态。
 
 **两个容易踩的点**：
 1. **每次 boot 都要补盖一次章**：Astro 的客户端路由换页时是 `history.pushState({ index, scrollX, scrollY })`，会把条目上原有的字段整个换掉。不补盖的话，"站内换页之后再刷新"会被当成新的一趟，凭空多一次入场页。
@@ -691,7 +693,7 @@ visitBoundary({ navigation, sessionToken, entryToken }): 'new' | 'same';
 
 服务端网关一律正常返回子页 HTML：`Sec-Fetch-Site` 和服务端入场 cookie 都无法可靠区分地址栏输入与当前页刷新。`src/components/BaseHead.astro` 中紧跟 viewport meta 的 `is:inline` 同步脚本在首帧前做统一判定：
 
-1. 判 NEW / SAME（照抄 `lib/visit.ts` 的 `visitBoundary()`）：没有 session token → NEW；`navigate` → NEW；`reload` → `history.state.restNoteVisit === session token` 才算 SAME，否则 NEW；`back_forward` → SAME；拿不到 / 认不出 type → NEW。`sessionStorage` / `history.state` / `performance` 的读取都包在 try/catch 里。
+1. 判 NEW / SAME（照抄 `lib/visit.ts` 的 `visitBoundary()`）：没有 session token → NEW；`navigate` 且同源 referrer 或点击标记与目标 URL 精确匹配 → SAME，其余 `navigate` → NEW；`reload` → `history.state.restNoteVisit === session token` 才算 SAME，否则 NEW；`back_forward` → SAME；拿不到 / 认不出 type → NEW。`sessionStorage` / `history.state` / `performance` / `document.referrer` 的读取都包在 try/catch 里。
 2. **SAME VISIT 立即早退**，一个字节都不改：刷新子页就留在子页，前进后退照旧。整份 document 只判一次，ClientRouter 站内点击文章 / About → Intro / 返回 / 语言切换即使重跑内联脚本也不会被误判。
 3. NEW VISIT 时判"这一页是不是本语言的首页"（pathname 的第一个非空 segment）：
    ```js
@@ -703,6 +705,8 @@ visitBoundary({ navigation, sessionToken, entryToken }): 'new' | 'same';
    - 首页 + hash 是 `#home` / `#blog` / `#lab` / `#about` → `history.replaceState(history.state, '', pathname + search)`，**只抹 hash**，search / pathname / `history.state` 不动。
    - 子页 → `location.replace()` 到 `/` 或 `/en/`，不保留 query/hash、不返回原子页；目标首页照常出现 Entry Gate。
 4. 不写 sessionStorage、不建新的 visit token、不碰 Entry Gate / 音频。
+
+**返回的滚动落点**：ClientRouter `astro:before-swap` 必须在 `disposeJourney()` / `disposeIdentity()` 之前记录离开 About 的 `scrollY`，移动端拆 DOM 后滚动值可能被压回顶部。身份标签的实际点按在 `pointerup` 里程序触发 `navigate()`，所以同时在回调里提前记位置和站内目标；原生链接点击也提前记位置。返回时优先消费这份精确位置；同一趟的完整文档导航若没有精确记录、目标带 Journey hash，就在首次 boot 按锚点瞬间定位。`reload` 不走锚点兜底，保留浏览器和历史条目的刷新位置。
 
 - **为什么在 `<head>` 中同步执行**：`#fragment` 不发给服务器，且子页面是否刷新只有浏览器能判断。脚本在页面内容解析前运行，避免子页或 About 场景闪现；代价是 NEW VISIT 子页要先取得 HTML 才能跳首页。
 - **静态资源**：`/_astro/`、图片、favicon、sitemap、`rss.xml`、`robots.txt` 不经过 `BaseHead.astro`，不参与入口判定。
@@ -789,6 +793,7 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 | `space.position.v1.<id>` | sessionStorage | 每首曲子记下"暂停时的位置"（`identity:nocturne` 的夜曲进度也在这里，**换一趟访问不清理**） | `src/lib/live-timeline.ts` |
 | `rest-note.visit` | sessionStorage | 这一趟访问的 id（跟着标签页走；新的一趟会换成新的） | `src/scripts/visit-session.ts`（判定在 `src/lib/visit.ts`） |
 | `rest-note.entry-passed` | sessionStorage | **这一趟**已通过入场页；判定为新的一趟访问时清掉（只清这一个 key） | `src/scripts/visit-session.ts` |
+| `rest-note.internal-navigation` | sessionStorage | 同源跨页点击的一次性 `{ token, target, at }`；完整文档加载时匹配目标后消费，ClientRouter 换页后直接清掉（最多 2 分钟有效） | `src/scripts/visit-session.ts`、`src/components/BaseHead.astro` |
 | `space.scene-scroll` | sessionStorage | 离开"关于这一族"页面时记下的精确 `{ path, y }`；回来时取一次就清掉（第一帧直接落在原处） | `src/scripts/scene-scroll.ts` |
 | `history.state.restNoteVisit` | 历史条目（不是存储） | 当前历史条目属于哪一趟访问：刷新会带着它（同一趟），地址栏重新输入网址则是新条目（新的一趟） | `src/scripts/visit-session.ts`（纯函数 `stampEntryToken()` / `readEntryToken()`） |
 | `rest_note_visit` | cookie（HttpOnly，session 级） | **服务端**这一趟访问的 id（随机 token，`randomBytes(24)` → base64url）；网关补发，值不含任何信息 | `server/visit-cookie.ts`（§5.18） |
@@ -897,6 +902,12 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-10-01 · 修复 iPhone 子页面返回误落首页
+
+- 根因：文章和自我介绍页的返回链接已指向 `/#blog` / `/#about`，但站内点击可能触发完整文档加载，导航类型是 `navigate`。既有访问判定把所有 `navigate` 当作地址栏新访问，清除 hash 和访问状态。即使保住 hash，本地复核也发现 About 返回仍可能落在 Home：旧代码在 `disposeJourney()` / `disposeIdentity()` **之后**才读离开页的 `scrollY`，布局拆除可能使位置变成 0；完整导航也不会触发 `astro:before-swap`，浏览器不一定自动按 hash 滚动。
+- 修法：早期脚本与正式会话一致识别同源 referrer 或精确匹配的短时站内点击标记，区分站内完整加载与手动输入。把 ClientRouter 离开 About 的位置记录移到 DOM 拆除之前；身份标签点按 / 原生点击也提前记录。返回优先用精确位置；同一趟完整导航缺少记录时才按 hash 瞬间定位。ClientRouter 换页后清标记，完整加载在会话创建时消费。手动输入 / 外链仍为 NEW，刷新恢复与音频逻辑不变。
+- 文件：`src/lib/visit.ts`、`src/scripts/visit-session.ts`、`src/components/BaseHead.astro`、`src/scripts/app.ts`、`src/scripts/identity-player.ts`、`tests/visit.test.mjs`、`tests/entry-navigation.test.mjs`、`DEVELOPMENT.md`（§3 / §5.15 / §6.1 / 本条）。新增 sessionStorage key `rest-note.internal-navigation` 和导出函数 `markInternalNavigation()`，无新增 DOM 钩子或事件。`npm test` 113/113；`npm run check` 113 文件 0 错误/警告/提示；`npm run build` 19 页。本地生产构建浏览器实际点击验证文章返回 `/#blog`、About → 自我介绍 → 返回 `/#about` 且滚到原位置；iPhone Chrome 仍需线上实机复测。
 
 ### 2026-09-30 · 子页面手动打开归首页，当前页刷新保留原网址
 

@@ -3,7 +3,8 @@ import { createIdentityPhysics, type IdentityLayout } from './identity-physics';
 import { attachIdentityMotion } from './identity-motion';
 import { identityRevealPlan, type MidiNote } from "@/lib/identity-midi";
 import { takeLanguageSwap } from './lang';
-import { visitSession } from './visit-session';
+import { markInternalNavigation, visitSession } from './visit-session';
+import { rememberFamilyScroll } from './scene-scroll';
 import { nocturneTransport } from './nocturne-transport';
 import { getGlobal } from './global';
 import { identityPiano } from './identity-audio';
@@ -98,6 +99,12 @@ export function initIdentity(): void {
   transport.attachVolume(Number(volume.value));
   const abort = new AbortController(),
     signal = abort.signal;
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest('[data-identity-arena] [data-identity-link]')) {
+      rememberFamilyScroll(window.location.pathname);
+    }
+  }, { signal });
   let plan: ReturnType<typeof identityRevealPlan> | undefined;
   let disposed = false,
     seeking = false,
@@ -117,6 +124,8 @@ export function initIdentity(): void {
     if (!href) return;
     // 走 ClientRouter 的 navigate()，换页跟站内其它链接一样是平滑过渡；
     // 万一 router 还没就绪，退回一次普通跳转。
+    rememberFamilyScroll(window.location.pathname);
+    markInternalNavigation(href);
     void navigate(href).catch(() => window.location.assign(href));
   });
   // 手机端独有的彩蛋：摇晃手机 → 这些标签跟着一块晃。

@@ -31,6 +31,8 @@ import {
 let disposeJourney: (() => void) | undefined;
 /** 本次"页面加载"有没有 boot 过。防止同一次加载里 boot 跑两遍（见文件末尾）。 */
 let booted = false;
+/** 首次文档加载与同一 document 内 ClientRouter 后续 boot 分开看。 */
+let initialDocumentBoot = true;
 /** 换页时"先恢复、boot 里再用一次"的 scrollY（同一份文档里换页时用） */
 let pendingRestore: number | null = null;
 /** 恢复落点时从路由手里拿掉的 `#锚点`，位置放好后再接回地址栏 */
@@ -251,6 +253,8 @@ function boot(): void {
    */
   if (booted) return;
   booted = true;
+  const firstBootInDocument = initialDocumentBoot;
+  initialDocumentBoot = false;
 
   disposeJourney?.();
   const global = getGlobal();
@@ -300,6 +304,7 @@ function boot(): void {
    *     各自的恢复机制，这也是"决定初始目标"而不是"事后纠正位置"。
    */
   const isNewVisit = visitSession().isNew;
+  const initialNavigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
   const restored = isNewVisit
     ? null
     : (pendingRestore ?? takeFamilyScroll(window.location.pathname));
@@ -313,6 +318,12 @@ function boot(): void {
     requestAnimationFrame(() => {
       if (Math.abs(window.scrollY - restored) > 4) restoreScroll(restored);
     });
+  } else if (!isNewVisit && firstBootInDocument && journey && initialNavigation?.type === 'navigate') {
+    // 同站链接若整页加载，浏览器可能不按 #锚点定位；刷新不走这条分支，保留精确位置。
+    const target = window.location.hash.slice(1);
+    if (target === 'home' || target === 'blog' || target === 'lab' || target === 'about') {
+      document.getElementById(target)?.scrollIntoView({ behavior: 'instant', block: 'start' });
+    }
   }
   /*
    * 落点对齐好了，可以把第一帧的遮盖摘掉（见 global.css 的 [data-scroll-pending] 与
@@ -353,6 +364,12 @@ function boot(): void {
 document.addEventListener('astro:before-swap', (event) => {
   const leavingFamily = Boolean(document.querySelector('[data-identity], [data-nocturne]'));
   const carryingNocturne = Boolean(event.newDocument.querySelector('[data-identity], [data-nocturne]'));
+  const returning = carryingNocturne && event.to ? peekFamilyScroll(event.to.pathname) : null;
+  // 先记离开位置，再拆物理标签和页面；移动端拆 DOM 后 scrollY 可能被压回顶部。
+  if (carryingNocturne && returning === null && leavingFamily &&
+    !isLanguageSwap(event.to?.pathname ?? '')) {
+    rememberFamilyScroll(window.location.pathname);
+  }
   disposeJourney?.();
   disposeIdentity();
   disposeNocturne();
@@ -375,12 +392,9 @@ document.addEventListener('astro:before-swap', (event) => {
      * 不是回去（进子页）：把精确 scrollY 记下来，回来时第一帧就停在原处。
      * 切语言那一趟跳过 —— 那件事由 lang.ts 的"地标对齐"负责，别跟它抢。
      */
-    const returning = event.to ? peekFamilyScroll(event.to.pathname) : null;
     if (event.to && returning !== null) {
       pendingHash = event.to.hash;
       event.to.hash = '';
-    } else if (leavingFamily && !isLanguageSwap(event.to?.pathname ?? '')) {
-      rememberFamilyScroll(window.location.pathname);
     }
   } else {
     stopNocturneTransport();

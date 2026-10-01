@@ -24,7 +24,7 @@ import { TRACKS } from '@/lib/music';
  *      采样缓冲、排程。跟上面两个状态没有任何关系。
  *
  * 判定规则（原话见 lib/visit.ts 的表）：能确定是同一趟才叫同一趟 ——
- *   · 地址栏输入 / 外链 / 书签 → 新访问；
+ *   · 地址栏输入 / 外链 / 书签 → 新访问；同站链接完整加载 → 同一趟；
  *   · 刷新 → 同一趟（历史条目上的章还在）；若浏览器把"地址栏重新输入同一个网址"
  *     也报成刷新，那条目是新的、章没了 → 照样认成新访问；
  *   · 前进 / 后退 → 同一趟；
@@ -35,6 +35,9 @@ import { TRACKS } from '@/lib/music';
 const VISIT_KEY = 'rest-note.visit';
 /** 这一趟访问里是否已经点过"进入网站" */
 const ENTRY_KEY = 'rest-note.entry-passed';
+/** 跨文档站内点击的目标；ClientRouter 换页成功或下一次文档加载后立即清除 */
+const INTERNAL_KEY = 'rest-note.internal-navigation';
+const INTERNAL_MAX_AGE_MS = 120_000;
 
 export type VisitSession = {
   /** 这一趟访问的 id：落点 cookie 之类"每趟不一样"的东西用它 */
@@ -88,6 +91,28 @@ function navigationNow(): NavigationKind {
   return navigationKind(entry?.type);
 }
 
+function sameOriginReferrer(): boolean {
+  try {
+    return Boolean(document.referrer) && new URL(document.referrer).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function matchesInternalNavigation(token: string | null): boolean {
+  if (!token) return false;
+  try {
+    const marker = JSON.parse(read(INTERNAL_KEY) ?? 'null') as {
+      token?: string; target?: string; at?: number;
+    } | null;
+    return marker?.token === token && marker.target === window.location.href &&
+      typeof marker.at === 'number' && Date.now() - marker.at >= 0 &&
+      Date.now() - marker.at <= INTERNAL_MAX_AGE_MS;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 在**当前历史条目**上盖章。每次 boot 都要盖一次：
  * Astro 的客户端路由换页时是 `history.pushState({ index, scrollX, scrollY })`，
@@ -104,10 +129,14 @@ function stampEntry(token: string): void {
 
 function createSession(): VisitSession {
   const previous = read(VISIT_KEY);
+  const internalNavigation = matchesInternalNavigation(previous);
+  forget(INTERNAL_KEY);
   const boundary = visitBoundary({
     navigation: navigationNow(),
     sessionToken: previous,
     entryToken: readEntryToken(history.state),
+    sameOriginReferrer: sameOriginReferrer(),
+    internalNavigation,
   });
   const isNew = boundary === 'new';
   const token = isNew || !previous ? newToken() : previous;
@@ -156,3 +185,30 @@ export function visitSession(): VisitSession {
   stampEntry(current.token);
   return current;
 }
+
+/*
+ * iPhone 等环境可能把站内链接作为完整文档加载，且不给 document.referrer。
+ * 点击时只记同源、跨路径的目标；ClientRouter 换页则立即清理，避免留给下次手动输入。
+ */
+export function markInternalNavigation(href: string): void {
+  try {
+    const destination = new URL(href, window.location.href);
+    if (destination.origin !== window.location.origin ||
+      (destination.pathname === window.location.pathname && destination.search === window.location.search)) return;
+    const token = current?.token;
+    if (token) write(INTERNAL_KEY, JSON.stringify({ token, target: destination.href, at: Date.now() }));
+  } catch {
+    /* 无效 URL / 存储禁用：仍可用 referrer 或正常的新访问规则 */
+  }
+}
+
+document.addEventListener('click', (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const link = target.closest<HTMLAnchorElement>('a[href]');
+  if (!link || link.target && link.target !== '_self' || link.hasAttribute('download')) return;
+  markInternalNavigation(link.href);
+});
+
+document.addEventListener('astro:after-swap', () => forget(INTERNAL_KEY));

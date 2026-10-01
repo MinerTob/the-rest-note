@@ -9,10 +9,12 @@ const head = readFileSync(new URL('../src/components/BaseHead.astro', import.met
 const earlyScript = head.match(/<script is:inline>([\s\S]*?)<\/script>/)?.[1];
 assert.ok(earlyScript, 'the visit decision must run before the rest of the head');
 
-function navigate({ pathname, type, token = 'visit-1', entryToken = token, hash = '' }) {
+function navigate({ pathname, type, token = 'visit-1', entryToken = token, hash = '', referrer = '', internalTarget = '' }) {
   const calls = [];
   const location = {
     pathname,
+    origin: 'https://the-rest-note.onrender.com',
+    href: `https://the-rest-note.onrender.com${pathname}?keep=1${hash}`,
     hash,
     search: '?keep=1',
     replace: (target) => calls.push(['replace', target]),
@@ -22,13 +24,17 @@ function navigate({ pathname, type, token = 'visit-1', entryToken = token, hash 
     replaceState: (state, _title, target) => calls.push(['replaceState', state, target]),
   };
   const window = {
-    sessionStorage: { getItem: () => token },
+    sessionStorage: { getItem: (key) => key === 'rest-note.visit' ? token :
+      key === 'rest-note.internal-navigation' && internalTarget ?
+        JSON.stringify({ token, target: internalTarget, at: Date.now() }) : null },
     history,
     location,
   };
   const context = {
     window,
     location,
+    document: { referrer },
+    URL,
     performance: { getEntriesByType: () => [{ type }] },
   };
   runInNewContext(earlyScript, context);
@@ -42,6 +48,38 @@ test('HTTP gateway serves child HTML regardless of Entry Gate cookie or Fetch Me
   }
   assert.deepEqual(decideEntry({ method: 'POST', pathname: '/api/enter' }), { kind: 'enter' });
   assert.deepEqual(decideEntry({ method: 'GET', pathname: '/api/enter' }), { kind: 'method-not-allowed' });
+});
+
+test('a full-document return link from an article or intro keeps its home anchor', () => {
+  assert.deepEqual(navigate({
+    pathname: '/', type: 'navigate', entryToken: null, hash: '#blog',
+    referrer: 'https://the-rest-note.onrender.com/blog/a-nocturne-for-you/',
+  }).calls, []);
+  assert.deepEqual(navigate({
+    pathname: '/', type: 'navigate', entryToken: null, hash: '#about',
+    referrer: 'https://the-rest-note.onrender.com/about/intro/',
+  }).calls, []);
+  assert.deepEqual(navigate({
+    pathname: '/', type: 'navigate', entryToken: null, hash: '#blog',
+    internalTarget: 'https://the-rest-note.onrender.com/?keep=1#blog',
+  }).calls, [], 'an exact click marker works even when referrer is empty');
+});
+
+test('a typed home anchor still starts a new visit', () => {
+  const state = navigate({ pathname: '/', type: 'navigate', entryToken: null, hash: '#blog' });
+  assert.equal(state.calls[0]?.[0], 'replaceState');
+  const wrongTarget = navigate({
+    pathname: '/', type: 'navigate', entryToken: null, hash: '#blog',
+    internalTarget: 'https://the-rest-note.onrender.com/?keep=1#about',
+  });
+  assert.equal(wrongTarget.calls[0]?.[0], 'replaceState');
+});
+
+test('an external referrer cannot preserve a child route', () => {
+  assert.deepEqual(navigate({
+    pathname: '/about/intro/', type: 'navigate', entryToken: null,
+    referrer: 'https://example.com/',
+  }).calls, [['replace', '/']]);
 });
 
 test('new direct child visits go to their language home before rendering', () => {

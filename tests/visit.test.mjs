@@ -16,6 +16,8 @@ const signals = (over = {}) => ({
   navigation: 'navigate',
   sessionToken: TOKEN,
   entryToken: TOKEN,
+  sameOriginReferrer: false,
+  internalNavigation: false,
   ...over,
 });
 
@@ -30,6 +32,12 @@ test('typing the address bar (or following a link / bookmark) is a new visit', (
   assert.equal(visitBoundary(signals({ navigation: 'navigate' })), 'new');
   assert.equal(visitBoundary(signals({ navigation: 'navigate', entryToken: null })), 'new');
   assert.equal(visitBoundary(signals({ navigation: 'navigate', entryToken: 'stale' })), 'new');
+});
+
+test('a same-origin link remains in the visit when it loads a whole document', () => {
+  assert.equal(visitBoundary(signals({ navigation: 'navigate', sameOriginReferrer: true, entryToken: null })), 'same');
+  assert.equal(visitBoundary(signals({ navigation: 'navigate', internalNavigation: true, entryToken: null })), 'same');
+  assert.equal(visitBoundary(signals({ navigation: 'navigate', sameOriginReferrer: true, sessionToken: null })), 'new');
 });
 
 test('a browser that reports the same-URL re-entry as a reload is still caught', () => {

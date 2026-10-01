@@ -54,7 +54,7 @@ function absolute(path: string): string {
   DOMContentLoaded / astro:page-load / requestAnimationFrame / app.ts 的 boot()。
 
   NEW/SAME 判定照抄 src/lib/visit.ts 的 visitBoundary() 语义（这里不能引模块代码，也不写存储）：
-  没有 session token → NEW；navigate → NEW；reload → history.state.restNoteVisit ===
+  没有 session token → NEW；navigate 且同站 referrer 或点击目标标记匹配 → SAME，其余 navigate → NEW；reload → history.state.restNoteVisit ===
   session token 才算 SAME，否则 NEW；back_forward → SAME；拿不到 / 认不出 type → NEW。
   storage / history / performance 的读取都用 try/catch 包住。
 
@@ -67,6 +67,7 @@ function absolute(path: string): string {
     if (window.__restNoteVisitHeadChecked) return;
     window.__restNoteVisitHeadChecked = true;
     var SESSION_KEY = 'rest-note.visit';
+    var INTERNAL_KEY = 'rest-note.internal-navigation';
     var STATE_KEY = 'restNoteVisit';
     var JOURNEY_HASHES = ['#home', '#blog', '#lab', '#about'];
 
@@ -100,9 +101,27 @@ function absolute(path: string): string {
       navigation = 'unknown';
     }
 
+    var sameOriginReferrer = false;
+    try {
+      sameOriginReferrer = Boolean(document.referrer) &&
+        new URL(document.referrer).origin === window.location.origin;
+    } catch (error) {
+      sameOriginReferrer = false;
+    }
+
+    var internalNavigation = false;
+    try {
+      var marker = JSON.parse(window.sessionStorage.getItem(INTERNAL_KEY) || 'null');
+      var age = Date.now() - marker.at;
+      internalNavigation = marker.token === sessionToken && marker.target === window.location.href &&
+        age >= 0 && age <= 120000;
+    } catch (error) {
+      internalNavigation = false;
+    }
+
     var isNewVisit;
     if (!sessionToken) isNewVisit = true;
-    else if (navigation === 'navigate') isNewVisit = true;
+    else if (navigation === 'navigate') isNewVisit = !sameOriginReferrer && !internalNavigation;
     else if (navigation === 'reload') isNewVisit = entryToken !== sessionToken;
     else if (navigation === 'back_forward') isNewVisit = false;
     else isNewVisit = true;

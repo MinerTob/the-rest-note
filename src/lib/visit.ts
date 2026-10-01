@@ -9,6 +9,7 @@
  * | 用户动作 | Chrome 报的 type | 我们想要的 |
  * | --- | --- | --- |
  * | 地址栏输入 / 外链 / 书签 | `navigate` | 新访问 |
+ * | 同站链接触发完整文档加载 | `navigate` | 同一趟 |
  * | 地址栏里重新输入**同一个**网址 | `navigate`（条目被顶掉） | 新访问 |
  * | 刷新（F5 / 刷新按钮） | `reload` | 同一趟 |
  * | 前进 / 后退 / bfcache | `back_forward` | 同一趟 |
@@ -21,7 +22,8 @@
  * （`history.state` 里的 `restNoteVisit`，每次开机盖章，见 visit-session.ts）。
  *   · 刷新：条目原样留下来 → 章还在 → 同一趟；
  *   · 地址栏重新输入网址：那是一次新的导航，条目被顶掉/换掉 → 章没了 → 新访问。
- * 两个信号合起来，上面那张表里六种情形都能分得开（见 tests/visit.test.mjs）。
+ * 同站链接也可能被浏览器当成完整文档导航；这时看 document.referrer，
+ * 若它为空再看点击时留下的精确目标标记，避免把站内返回误当成地址栏重新输入。
  */
 
 /** 这次加载的导航类型（`PerformanceNavigationTiming.type` 归一化之后） */
@@ -37,6 +39,10 @@ export type VisitSignals = {
   sessionToken: string | null;
   /** 当前历史条目上盖着的访问 id；不是我们盖的 / 没有就是 null */
   entryToken: string | null;
+  /** navigate 是否来自同一站点的上一份文档（站内链接可能未走 ClientRouter） */
+  sameOriginReferrer: boolean;
+  /** 点击站内链接后留下的、与本次目标匹配的一次性标记（referrer 为空时使用） */
+  internalNavigation: boolean;
 };
 
 export type VisitBoundary = 'new' | 'same';
@@ -69,14 +75,14 @@ export function stampEntryToken(state: unknown, token: string): Record<string, u
  * 默认往"新访问"偏：只有能确定是同一趟的情形才返回 `'same'` ——
  * 入场页多出现一次只是多按一下，漏掉一次却是本人报的 bug。
  */
-export function visitBoundary({ navigation, sessionToken, entryToken }: VisitSignals): VisitBoundary {
+export function visitBoundary({ navigation, sessionToken, entryToken, sameOriginReferrer, internalNavigation }: VisitSignals): VisitBoundary {
   // 这个标签页里还没有访问 id：新标签页、或者存储被清过 —— 一趟新访问
   if (!sessionToken) return 'new';
 
   switch (navigation) {
-    // 地址栏输入 / 外链 / 书签：新的导航
+    // 同站链接有时也是完整文档导航，且 referrer 可能为空；用点击标记补足
     case 'navigate':
-      return 'new';
+      return sameOriginReferrer || internalNavigation ? 'same' : 'new';
     // 刷新：真正的刷新会带着我们盖在这一条目上的访问 id；
     // 把"重新输入同一个网址"报成 reload 的浏览器里，条目是新的（章没了）→ 也算新访问
     case 'reload':
