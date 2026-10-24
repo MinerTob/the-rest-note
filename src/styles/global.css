@@ -1039,13 +1039,6 @@ html[data-theme='baroque'] .atmosphere--baroque { opacity: 1; }
 }
 .atmosphere__dust { position: absolute; inset: 0; }
 .atmosphere__dust i { left: var(--x); top: var(--y); width: 2px; height: 2px; border-radius: 50%; background: var(--atmosphere-dust); opacity: .35; }
-.atmosphere-toggle {
-  flex: 0 0 auto; width: 30px; height: 30px; padding: 0;
-  border: 1px solid var(--line); border-radius: var(--radius-xs);
-  background: var(--glass-2); color: var(--ink-2); font-size: var(--fs-xs);
-}
-.atmosphere-toggle[aria-pressed='true'] { background: var(--accent-wash-2); color: var(--accent); }
-.atmosphere-toggle:disabled { opacity: .45; cursor: default; }
 @media (prefers-reduced-motion: no-preference) {
   .atmosphere__wash { animation: atmosphere-flow var(--dur-atmosphere-flow) ease-in-out infinite alternate; }
   .atmosphere__ribbon { animation: atmosphere-ribbon var(--dur-atmosphere-flow) ease-in-out infinite alternate; }

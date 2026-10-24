@@ -126,7 +126,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch()
 | 页脚 | `src/components/Footer.astro` | 纯模板 | — |
 | 现代主题背景 + 面板玻璃材质 | `src/styles/tokens.css`、`src/styles/global.css` | `--bg-image` / `--paper*`（全站同一片淡蓝底）、`--liquid-*` token 与 `.glass--liquid`（时钟 / 播放器 / 联系方式用的面板材质，与顶栏同款透明玻璃） | `html[data-theme]`（modern / baroque 两套值） |
 | 语言切换 + 文字滑出/滑入 | `src/scripts/lang.ts`、`src/styles/global.css`、`src/scripts/app.ts` | `initLangSwitch()`、`swapChrome()`、`collectTextElements()`、`markIncomingLanguageText()`、`markLanguageSwap()` / `takeLanguageSwap()`（切语言这一趟的记号）、`restoreScrollAfterSwap()` / `restoreScrollAfterLoad()`（保留滚动位置） | `[data-lang-switch]`、`html[data-lang]`、`.lang-slide-out` / `.lang-slide-in`、sessionStorage `space.lang-scroll` / `space.lang-swap` |
-| 双主题动态环境 | `src/components/AmbientScene.astro`、`src/scripts/atmosphere.ts`、`src/styles/global.css` | 模块内 `syncAtmosphere()`；持久背景、document 事件委托 | `[data-atmosphere-toggle]`、`.atmosphere-paused` |
+| 双主题动态环境 | `src/components/AmbientScene.astro`、`src/scripts/atmosphere.ts`、`src/styles/global.css` | 模块内 `syncAtmosphere()`；持久背景、可见性与系统动态偏好监听 | `.atmosphere-paused` |
 | 主题切换（modern/baroque） | `src/scripts/theme.ts`、`src/scripts/theme-switch.ts`、`src/lib/themes.ts` | `ThemeManager`、`initTheme()`、`initThemeSwitcher()`、`setTheme()`、`toggle()` | `html[data-theme]`、`[data-theme-switch]` |
 | 全站状态 | `src/scripts/app-state.ts` | `AppStore.get()` / `set()` / `isUnlocked()` / `hasUnlocks()` | `'change'` 事件（detail: `{ state, previous }`） |
 | 焦点圈（仅键盘） | `src/scripts/input-modality.ts`、`src/styles/global.css` | `trackInputModality()` | `html[data-input]` |
@@ -232,7 +232,7 @@ class AppStore extends EventTarget {
 
 ### 5.3 主题 ThemeManager
 
-动态环境由 `AmbientScene.astro` 放入持久化 `.ambient`；两套装饰通过主题选择器交叉淡入淡出。`scripts/atmosphere.ts` 使用一次性 document 事件委托并在 `astro:page-load` 同步按钮；监听可见性与减少动态设置，无逐帧 JS。视觉参数统一来自 tokens.css。
+动态环境由 `AmbientScene.astro` 放入持久化 `.ambient`；两套装饰通过主题选择器交叉淡入淡出。`scripts/atmosphere.ts` 在 `astro:page-load` 同步背景动画状态；监听可见性与减少动态设置，无逐帧 JS。视觉参数统一来自 tokens.css。
 
 
 **文件**：`src/scripts/theme.ts`、`src/scripts/theme-switch.ts`、`src/lib/themes.ts`、`src/styles/tokens.css`
@@ -829,7 +829,7 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 
 ## 7. DOM 钩子总表（改名前先看这里）
 
-- `[data-atmosphere-toggle]`：顶栏背景暂停按钮，`aria-pressed` 表示静止；`.ambient.atmosphere-paused` 暂停背景所有动画。
+- `.ambient.atmosphere-paused`：页面隐藏或系统要求减少动态时，暂停背景所有动画。
 
 > 脚本只认 `data-*`，不认 class。给元素加钩子 = 给脚本加接口；**加/改/删钩子都要同步更新本表**。
 
@@ -909,6 +909,13 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-10-24 · 移除新增的背景暂停按钮
+
+- 需求：新增暂停按钮与语言选择挤在一起，图标含义不直观；按用户要求删除。
+- 修法：移除 Header 中按钮、对应样式、双语文案及点击委托和手动暂停状态；保留现有双主题背景、页面隐藏自动暂停和系统减少动态支持。
+- 文件：`src/components/Header.astro`、`src/styles/global.css`、`src/i18n/ui.ts`、`src/scripts/atmosphere.ts`；同步 §3 / §5.3 / §7，删除 `data-atmosphere-toggle` 钩子，无新增存储或事件。
+- 验证：`npm test` 113/113；`npm run check` 115 文件零诊断；`npm run build` 19 页通过；源码无按钮钩子及文案残留。
 
 ### 2026-10-24 · 双主题动态环境
 

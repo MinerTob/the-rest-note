@@ -34,7 +34,6 @@ const zh = {
   'nav.menu': '导航',
 
   'lang.switch': '切换语言',
-  'theme.pause': '暂停背景动态',
   'lang.to.en': '切换到 English',
   'lang.to.zh': '切换到中文',
 
@@ -160,7 +159,6 @@ const en: Record<UIKey, string> = {
   'nav.menu': 'Navigation',
 
   'lang.switch': 'Switch language',
-  'theme.pause': 'Pause background motion',
   'lang.to.en': 'Switch to English',
   'lang.to.zh': 'Switch to Chinese',
 
