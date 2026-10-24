@@ -568,3 +568,14 @@ html[data-theme="baroque"] {
   --identity-analytical: #3e505e;
   --identity-intro: #7a4048;
 }
+
+/* Atmospheric motion: shared palette, distinct silhouettes and rhythms. */
+:root {
+  --atmosphere-cool: rgba(72, 171, 221, .28);
+  --atmosphere-clear: rgba(239, 253, 255, .65);
+  --atmosphere-ray: rgba(224, 180, 105, .19);
+  --atmosphere-dust: rgba(249, 217, 159, .56);
+  --dur-atmosphere-flow: 24s;
+  --dur-atmosphere-light: 14s;
+  --dur-atmosphere-fade: 900ms;
+}

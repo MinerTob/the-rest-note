@@ -126,6 +126,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch()
 | 页脚 | `src/components/Footer.astro` | 纯模板 | — |
 | 现代主题背景 + 面板玻璃材质 | `src/styles/tokens.css`、`src/styles/global.css` | `--bg-image` / `--paper*`（全站同一片淡蓝底）、`--liquid-*` token 与 `.glass--liquid`（时钟 / 播放器 / 联系方式用的面板材质，与顶栏同款透明玻璃） | `html[data-theme]`（modern / baroque 两套值） |
 | 语言切换 + 文字滑出/滑入 | `src/scripts/lang.ts`、`src/styles/global.css`、`src/scripts/app.ts` | `initLangSwitch()`、`swapChrome()`、`collectTextElements()`、`markIncomingLanguageText()`、`markLanguageSwap()` / `takeLanguageSwap()`（切语言这一趟的记号）、`restoreScrollAfterSwap()` / `restoreScrollAfterLoad()`（保留滚动位置） | `[data-lang-switch]`、`html[data-lang]`、`.lang-slide-out` / `.lang-slide-in`、sessionStorage `space.lang-scroll` / `space.lang-swap` |
+| 双主题动态环境 | `src/components/AmbientScene.astro`、`src/scripts/atmosphere.ts`、`src/styles/global.css` | 模块内 `syncAtmosphere()`；持久背景、document 事件委托 | `[data-atmosphere-toggle]`、`.atmosphere-paused` |
 | 主题切换（modern/baroque） | `src/scripts/theme.ts`、`src/scripts/theme-switch.ts`、`src/lib/themes.ts` | `ThemeManager`、`initTheme()`、`initThemeSwitcher()`、`setTheme()`、`toggle()` | `html[data-theme]`、`[data-theme-switch]` |
 | 全站状态 | `src/scripts/app-state.ts` | `AppStore.get()` / `set()` / `isUnlocked()` / `hasUnlocks()` | `'change'` 事件（detail: `{ state, previous }`） |
 | 焦点圈（仅键盘） | `src/scripts/input-modality.ts`、`src/styles/global.css` | `trackInputModality()` | `html[data-input]` |
@@ -230,6 +231,9 @@ class AppStore extends EventTarget {
 - 单例存在 `getGlobal().store`，客户端路由换页后不重建（从 localStorage 恢复）。
 
 ### 5.3 主题 ThemeManager
+
+动态环境由 `AmbientScene.astro` 放入持久化 `.ambient`；两套装饰通过主题选择器交叉淡入淡出。`scripts/atmosphere.ts` 使用一次性 document 事件委托并在 `astro:page-load` 同步按钮；监听可见性与减少动态设置，无逐帧 JS。视觉参数统一来自 tokens.css。
+
 
 **文件**：`src/scripts/theme.ts`、`src/scripts/theme-switch.ts`、`src/lib/themes.ts`、`src/styles/tokens.css`
 
@@ -825,6 +829,8 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 
 ## 7. DOM 钩子总表（改名前先看这里）
 
+- `[data-atmosphere-toggle]`：顶栏背景暂停按钮，`aria-pressed` 表示静止；`.ambient.atmosphere-paused` 暂停背景所有动画。
+
 > 脚本只认 `data-*`，不认 class。给元素加钩子 = 给脚本加接口；**加/改/删钩子都要同步更新本表**。
 
 ### 全局 / 双语
@@ -903,6 +909,14 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-10-24 · 双主题动态环境
+
+- 根因：现代与巴洛克背景仅有静态渐变，空间与运动特征不明确。
+- 修法：现代增加交错水光和弧形光带；巴洛克增加斜射暖光、拱形细边及 14 粒错相浮尘。只动画 transform / opacity，装饰不接收输入，手机仅保留 7 粒浮尘和一道光带。
+- 文件：`AmbientScene.astro`、`BaseLayout.astro`、`Header.astro`、`scripts/atmosphere.ts`、`styles/global.css`、`styles/tokens.css`、`i18n/ui.ts`。
+- 边界：顶栏暂停按钮使用 aria-pressed；页面隐藏、非当前主题均暂停；系统减少动态时静止并禁用按钮。暂停偏好仅在当前文档内保存，跨客户端路由保留，无新增 storage key / 自定义事件 / 导出函数。
+- 验证：`npm test` 113/113；`npm run check` 115 文件零诊断；`npm run build` 19 页成功。浏览器预览工具连接本地服务失败，双主题视觉、手机与交互效果仍需实机复核。
 
 ### 2026-10-01 · 修复首次访问后站内返回被二次滚到顶部
 

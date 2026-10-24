@@ -87,6 +87,11 @@ const isActive = (href: string): boolean => {
       data-aria-zh={ui.zh['lang.switch']}
       data-aria-en={ui.en['lang.switch']}
     >
+      <button class="atmosphere-toggle" type="button" data-atmosphere-toggle aria-pressed="false"
+        aria-label={t('theme.pause')} data-i18n-aria
+        data-aria-zh={ui.zh['theme.pause']} data-aria-en={ui.en['theme.pause']}>
+        <span aria-hidden="true">Ⅱ</span>
+      </button>
       {locales.map((locale) =>
         locale === lang ? (
           <span class="langswitch__item is-current" aria-current="true">{languages[locale].short}</span>

@@ -1,0 +1,17 @@
+<div class="ambient" aria-hidden="true" transition:persist="ambient">
+  <div class="atmosphere atmosphere--modern">
+    <i class="atmosphere__wash"></i><i class="atmosphere__ribbon"></i>
+    <i class="atmosphere__ribbon atmosphere__ribbon--second"></i>
+  </div>
+  <div class="atmosphere atmosphere--baroque">
+    <i class="atmosphere__light"></i><i class="atmosphere__arch"></i>
+    <div class="atmosphere__dust">
+      {Array.from({ length: 14 }, (_, i) => (
+        <i style={`--x:${(i * 37 + 11) % 100}%;--y:${(i * 23 + 7) % 100}%;--phase:${-i * 2.7}s;--drift:${18 + i % 5 * 4}s`} />
+      ))}
+    </div>
+  </div>
+</div>
+<script>
+  import '@/scripts/atmosphere';
+</script>

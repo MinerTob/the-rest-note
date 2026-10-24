@@ -6,6 +6,7 @@ import Footer from '@/components/Footer.astro';
 import ThemeSwitcher from '@/components/ThemeSwitcher.astro';
 import SystemMessage from '@/components/SystemMessage.astro';
 import EntryGate from '@/components/EntryGate.astro';
+import AmbientScene from '@/components/AmbientScene.astro';
 import T from '@/components/T.astro';
 import { languages, type Lang } from '@/i18n/ui';
 import { localizePath } from '@/i18n/utils';
@@ -63,7 +64,7 @@ const rss = rssHref ?? (lang === 'zh' ? '/rss.xml' : '/en/rss.xml');
   <body class:list={{ 'copyright-only': copyrightOnly }}>
     {/* 背景渐变层。persist：客户端路由切换时保持同一个节点，背景不会闪。
         不用 body 背景图是因为它需要 fixed 定位才能让光晕不随滚动跑掉。 */}
-    <div class="ambient" aria-hidden="true" transition:persist="ambient"></div>
+    <AmbientScene />
 
     {/*
       刷新时的"第一帧"遮盖：在**任何内容渲染之前**（这个内联脚本在 body 最前面，
