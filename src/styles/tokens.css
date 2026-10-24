@@ -579,3 +579,10 @@ html[data-theme="baroque"] {
   --dur-atmosphere-light: 14s;
   --dur-atmosphere-fade: 900ms;
 }
+
+/* Background shader palette, normalized RGB; follows the original pale blue. */
+:root {
+  --ripple-paper: .894 .933 .961;
+  --ripple-light: .975 .991 1;
+  --ripple-shade: .56 .73 .84;
+}

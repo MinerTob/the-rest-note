@@ -126,7 +126,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch()
 | 页脚 | `src/components/Footer.astro` | 纯模板 | — |
 | 现代主题背景 + 面板玻璃材质 | `src/styles/tokens.css`、`src/styles/global.css` | `--bg-image` / `--paper*`（全站同一片淡蓝底）、`--liquid-*` token 与 `.glass--liquid`（时钟 / 播放器 / 联系方式用的面板材质，与顶栏同款透明玻璃） | `html[data-theme]`（modern / baroque 两套值） |
 | 语言切换 + 文字滑出/滑入 | `src/scripts/lang.ts`、`src/styles/global.css`、`src/scripts/app.ts` | `initLangSwitch()`、`swapChrome()`、`collectTextElements()`、`markIncomingLanguageText()`、`markLanguageSwap()` / `takeLanguageSwap()`（切语言这一趟的记号）、`restoreScrollAfterSwap()` / `restoreScrollAfterLoad()`（保留滚动位置） | `[data-lang-switch]`、`html[data-lang]`、`.lang-slide-out` / `.lang-slide-in`、sessionStorage `space.lang-scroll` / `space.lang-swap` |
-| 双主题动态环境 | `src/components/AmbientScene.astro`、`src/scripts/atmosphere.ts`、`src/styles/global.css` | 模块内 `syncAtmosphere()`；持久背景、可见性与系统动态偏好监听 | `.atmosphere-paused` |
+| 双主题动态环境 | `src/components/AmbientScene.astro`、`src/scripts/atmosphere.ts`、`src/styles/global.css` | 模块内 `syncAtmosphere()` / `createRipple()`；持久背景、GPU 波面、自动暂停 | `.atmosphere-paused` |
 | 主题切换（modern/baroque） | `src/scripts/theme.ts`、`src/scripts/theme-switch.ts`、`src/lib/themes.ts` | `ThemeManager`、`initTheme()`、`initThemeSwitcher()`、`setTheme()`、`toggle()` | `html[data-theme]`、`[data-theme-switch]` |
 | 全站状态 | `src/scripts/app-state.ts` | `AppStore.get()` / `set()` / `isUnlocked()` / `hasUnlocks()` | `'change'` 事件（detail: `{ state, previous }`） |
 | 焦点圈（仅键盘） | `src/scripts/input-modality.ts`、`src/styles/global.css` | `trackInputModality()` | `html[data-input]` |
@@ -232,7 +232,7 @@ class AppStore extends EventTarget {
 
 ### 5.3 主题 ThemeManager
 
-动态环境由 `AmbientScene.astro` 放入持久化 `.ambient`；两套装饰通过主题选择器交叉淡入淡出。`scripts/atmosphere.ts` 在 `astro:page-load` 同步背景动画状态；监听可见性与减少动态设置，无逐帧 JS。视觉参数统一来自 tokens.css。
+动态环境由 `AmbientScene.astro` 放入持久化 `.ambient`，与前景字体、布局及面板样式分离。现代使用 WebGL 双波源传播与法线高光，颜色由 `tokens.css` 的 `--ripple-*` 提供，最多 30fps、像素倍率最多 1.25、渲染宽度最多 1920；巴洛克使用经 Astro 转为 WebP 的 `dusk-chamber-v2.png`，叠加局部暖光与浮尘。`scripts/atmosphere.ts` 在 `astro:page-load` 幂等复用画布；监听可见性、主题及减少动态设置，隐藏页面或 baroque 时停止帧循环，减少动态时仅绘制静态波面。WebGL 不可用或上下文丢失时保留原渐变，恢复后重建。
 
 
 **文件**：`src/scripts/theme.ts`、`src/scripts/theme-switch.ts`、`src/lib/themes.ts`、`src/styles/tokens.css`
@@ -829,6 +829,8 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 
 ## 7. DOM 钩子总表（改名前先看这里）
 
+- `.atmosphere__ripples`：持久化波纹 canvas；`.is-ready` 表示 WebGL 成功初始化。
+
 - `.ambient.atmosphere-paused`：页面隐藏或系统要求减少动态时，暂停背景所有动画。
 
 > 脚本只认 `data-*`，不认 class。给元素加钩子 = 给脚本加接口；**加/改/删钩子都要同步更新本表**。
@@ -909,6 +911,14 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-10-25 · 仅优化背景：淡蓝动态波纹与巴洛克光影
+
+- 范围：以已回退的 `e8770a7` 为基线，只修改背景。字体、导航、布局、时钟、播放器、文章、联系组件及它们的材质样式不变。
+- 现代：替换旧弧带平移动画，WebGL 实时计算两组波源的传播、叠加和波峰高光，沿用原有淡蓝色。巴洛克：采用确认稿衍生的独立胡桃木/侧窗/桌面背景（约 37KB WebP），保留轻微暖光和受光区浮尘。
+- 文件：`AmbientScene.astro`、`scripts/atmosphere.ts`、`styles/global.css`（仅背景段）、`styles/tokens.css`（仅追加背景色参数）、`src/images/dusk-chamber-v2.png`、`tests/atmosphere.test.mjs`、素材提示词 `design/theme-assets.json`；同步 §3 / §5.3 / §7。无新增 data 钩子、存储、导出或自定义事件。
+- 边界：跨路由复用一张画布；后台、非当前主题、减少动态时停止动画；WebGL 上下文丢失回退渐变，恢复后重建。帧率上限 30fps、倍率上限 1.25。
+- 验证：`npm test` 114/114（含帧循环复用、后台/减少动态/非当前主题暂停及上下文恢复）；`npm run check` 116 文件零诊断；`npm run build` 19 页。对比 `e8770a7` 确认前景组件、原有 token 及背景段之前的 CSS 完全一致。浏览器 1440px/390px 双主题无横向溢出，现代背景前后截图确有变化；中英切换仅一张已就绪画布，无控制台 error。iPhone Safari 的真实设备性能待实机确认。
 
 ### 2026-10-25 · 按要求撤回双主题整体改版
 

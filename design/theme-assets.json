@@ -1,0 +1,6 @@
+{
+  "tool": "built-in image_gen",
+  "reference": "approved Dusk Chamber desktop concept, 2026-10-24",
+  "output": "src/images/dusk-chamber-v2.png",
+  "prompt": "Extract and recreate ONLY the dusk chamber environmental background from the large LEFT desktop artboard in this reference. Generate one clean landscape 1536x1024 background asset, full bleed, NO interface, NO cards, NO text, NO letters, NO clocks, NO controls, NO mobile panel, NO frame, NO logo. Faithfully reproduce the reference mood: nearly black espresso/walnut left and central wall with subtle natural grain and warm deep brown ambience, real narrow sunlit window at extreme right edge, soft angled late afternoon amber light on right wall, low horizontal dark walnut desk/shelf around bottom 15%, tiny pile of old books and edge of cream musical score at extreme bottom right ONLY. Left 65% and middle must be very dark, open, low contrast and clean to support website text over it. No furniture or conspicuous shapes in left/center. Sophisticated photographic material quality with natural wood not repeating lines, real soft directional light, nuanced shadows. Keep visual details constrained to rightmost 18% and bottommost 12%. Not a generic gradient. No arches drawn as thin golden outline. This will be the actual responsive background for the approved Baroque homepage."
+}

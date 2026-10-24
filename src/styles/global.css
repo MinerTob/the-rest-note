@@ -1008,7 +1008,7 @@ a.chip:hover {
   }
 }
 
-/* Decorative layers never participate in layout or pointer interaction. */
+/* Background only: pale-blue water ripples / dusk chamber. */
 .ambient { overflow: hidden; }
 .atmosphere { position: absolute; inset: 0; opacity: 0; transition: opacity var(--dur-atmosphere-fade) var(--ease); }
 html:not([data-theme='baroque']) .atmosphere--modern,
@@ -1016,33 +1016,20 @@ html[data-theme='baroque'] .atmosphere--baroque { opacity: 1; }
 .atmosphere i { display: block; position: absolute; }
 .atmosphere__wash {
   inset: -15%;
-  background: radial-gradient(ellipse at 22% 72%, var(--atmosphere-cool), transparent 55%),
-    radial-gradient(ellipse at 82% 26%, var(--atmosphere-clear), transparent 50%);
+  background: radial-gradient(ellipse at 22% 72%, var(--atmosphere-cool), transparent 55%), radial-gradient(ellipse at 82% 26%, var(--atmosphere-clear), transparent 50%);
 }
-.atmosphere__ribbon {
-  width: 115vw; height: 58vh; left: -28vw; top: 54%;
-  border-radius: 50%; transform: rotate(-22deg);
-  border-top: 1px solid var(--atmosphere-clear);
-  box-shadow: 0 -18px 45px -22px var(--atmosphere-cool), inset 0 18px 38px -25px var(--atmosphere-clear);
-  background: linear-gradient(180deg, var(--atmosphere-cool), transparent 24%);
-}
-.atmosphere__ribbon--second { left: 28vw; top: 12%; transform: rotate(-30deg); opacity: .5; }
+.atmosphere__ripples { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; }
+.atmosphere__ripples.is-ready { opacity: 1; }
+.atmosphere__chamber { inset: 0; background: var(--chamber-image) center / cover no-repeat; }
+html[data-theme='baroque'] .ambient::after { opacity: 0; }
 .atmosphere__light {
-  inset: -20%; transform-origin: 75% 0;
-  background: conic-gradient(from 155deg at 74% 0%, transparent 0deg, var(--atmosphere-ray) 12deg, transparent 26deg, var(--atmosphere-ray) 31deg, transparent 43deg);
-}
-.atmosphere__arch {
-  right: -9vw; top: 9vh; width: 41vw; height: 115vh;
-  border: 1px solid var(--line); border-radius: 50% 50% 0 0;
-  box-shadow: 0 0 0 16px var(--accent-wash), 0 0 0 18px var(--line-soft), inset 0 0 80px var(--accent-wash);
-  opacity: .55;
+  inset: -20%; transform-origin: 94% 0;
+  background: conic-gradient(from 163deg at 94% 0%, transparent, var(--atmosphere-ray) 11deg, transparent 27deg);
 }
 .atmosphere__dust { position: absolute; inset: 0; }
 .atmosphere__dust i { left: var(--x); top: var(--y); width: 2px; height: 2px; border-radius: 50%; background: var(--atmosphere-dust); opacity: .35; }
 @media (prefers-reduced-motion: no-preference) {
   .atmosphere__wash { animation: atmosphere-flow var(--dur-atmosphere-flow) ease-in-out infinite alternate; }
-  .atmosphere__ribbon { animation: atmosphere-ribbon var(--dur-atmosphere-flow) ease-in-out infinite alternate; }
-  .atmosphere__ribbon--second { animation-delay: -12s; animation-direction: alternate-reverse; }
   .atmosphere__light { animation: atmosphere-light var(--dur-atmosphere-light) ease-in-out infinite alternate; }
   .atmosphere__dust i { animation: atmosphere-dust var(--drift) linear var(--phase) infinite; }
 }
@@ -1050,15 +1037,14 @@ html[data-theme='baroque'] .atmosphere--baroque { opacity: 1; }
 html[data-theme='baroque'] .atmosphere--modern *,
 html:not([data-theme='baroque']) .atmosphere--baroque * { animation-play-state: paused; }
 @keyframes atmosphere-flow { to { transform: translate3d(7%, -5%, 0) scale(1.08); } }
-@keyframes atmosphere-ribbon { to { transform: translate3d(5%, -8%, 0) rotate(-14deg); } }
-@keyframes atmosphere-light { from { opacity: .5; transform: rotate(-4deg); } to { opacity: 1; transform: rotate(4deg); } }
+@keyframes atmosphere-light { from { opacity: .5; transform: rotate(-2deg); } to { opacity: .9; transform: rotate(2deg); } }
 @keyframes atmosphere-dust {
   0% { transform: translate3d(0, 35px, 0); opacity: 0; }
-  20%, 70% { opacity: .65; }
-  100% { transform: translate3d(28px, -100px, 0); opacity: 0; }
+  20%, 70% { opacity: .5; }
+  100% { transform: translate3d(-20px, -100px, 0); opacity: 0; }
 }
 @media (max-width: 600px) {
-  .atmosphere__ribbon--second, .atmosphere__dust i:nth-child(n+8) { display: none; }
-  .atmosphere__arch { right: -24vw; width: 64vw; }
+  .atmosphere__dust i:nth-child(n+8) { display: none; }
+  .atmosphere__chamber { background-position: 64% center; }
 }
 @media (prefers-reduced-motion: reduce) { .atmosphere { transition: none; } }

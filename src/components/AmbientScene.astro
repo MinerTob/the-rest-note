@@ -1,13 +1,18 @@
-<div class="ambient" aria-hidden="true" transition:persist="ambient">
+---
+import { getImage } from 'astro:assets';
+import chamber from '@/images/dusk-chamber-v2.png';
+const backdrop = await getImage({ src: chamber, width: 1600, format: 'webp', quality: 82 });
+---
+<div class="ambient" aria-hidden="true" transition:persist="ambient" style={`--chamber-image: url('${backdrop.src}')`}>
   <div class="atmosphere atmosphere--modern">
-    <i class="atmosphere__wash"></i><i class="atmosphere__ribbon"></i>
-    <i class="atmosphere__ribbon atmosphere__ribbon--second"></i>
+    <i class="atmosphere__wash"></i>
+    <canvas class="atmosphere__ripples"></canvas>
   </div>
   <div class="atmosphere atmosphere--baroque">
-    <i class="atmosphere__light"></i><i class="atmosphere__arch"></i>
+    <i class="atmosphere__chamber"></i><i class="atmosphere__light"></i>
     <div class="atmosphere__dust">
       {Array.from({ length: 14 }, (_, i) => (
-        <i style={`--x:${(i * 37 + 11) % 100}%;--y:${(i * 23 + 7) % 100}%;--phase:${-i * 2.7}s;--drift:${18 + i % 5 * 4}s`} />
+        <i style={`--x:${65 + (i * 7) % 34}%;--y:${(i * 23 + 7) % 100}%;--phase:${-i * 2.7}s;--drift:${18 + i % 5 * 4}s`} />
       ))}
     </div>
   </div>
