@@ -1,13 +1,25 @@
 <div class="ambient" aria-hidden="true" transition:persist="ambient">
   <div class="atmosphere atmosphere--modern">
-    <i class="atmosphere__wash"></i><i class="atmosphere__ribbon"></i>
-    <i class="atmosphere__ribbon atmosphere__ribbon--second"></i>
+    <i class="atmosphere__wash"></i>
+    <svg class="atmosphere__fluid" viewBox="0 0 1440 1000" preserveAspectRatio="none" focusable="false">
+      <defs>
+        <linearGradient id="fluid-fold" x1="0" y1="0" x2="0.25" y2="1">
+          <stop class="fluid-stop--light" offset="0" />
+          <stop class="fluid-stop--blue" offset="0.18" />
+          <stop class="fluid-stop--clear" offset="1" />
+        </linearGradient>
+      </defs>
+      <path class="fluid-fold fluid-fold--back" d="M-160 850 C230 590 420 1060 880 750 S1400 590 1600 420 L1600 1200 H-160Z" />
+      <path class="fluid-fold fluid-fold--front" d="M-160 1030 C320 1070 490 670 910 810 S1370 650 1600 780 L1600 1200 H-160Z" />
+      <path class="fluid-fold fluid-fold--side" d="M1140 -160 C1050 150 1490 190 1320 490 S1160 790 1600 1050 L1700 -160Z" />
+    </svg>
   </div>
   <div class="atmosphere atmosphere--baroque">
-    <i class="atmosphere__light"></i><i class="atmosphere__arch"></i>
+    <i class="atmosphere__wood"></i><i class="atmosphere__light"></i>
+    <i class="atmosphere__window"></i><i class="atmosphere__ledge"></i>
     <div class="atmosphere__dust">
       {Array.from({ length: 14 }, (_, i) => (
-        <i style={`--x:${(i * 37 + 11) % 100}%;--y:${(i * 23 + 7) % 100}%;--phase:${-i * 2.7}s;--drift:${18 + i % 5 * 4}s`} />
+        <i style={`--x:${65 + (i * 7) % 34}%;--y:${(i * 23 + 7) % 100}%;--phase:${-i * 2.7}s;--drift:${18 + i % 5 * 4}s`} />
       ))}
     </div>
   </div>

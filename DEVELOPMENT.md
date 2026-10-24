@@ -124,7 +124,7 @@ AppStore → initTheme() → initSystemMessages() → initLangSwitch()
 | --- | --- | --- | --- |
 | 头部导航 | `src/components/Header.astro` | 纯模板 | `.site-header`、`[data-section-target]` |
 | 页脚 | `src/components/Footer.astro` | 纯模板 | — |
-| 现代主题背景 + 面板玻璃材质 | `src/styles/tokens.css`、`src/styles/global.css` | `--bg-image` / `--paper*`（全站同一片淡蓝底）、`--liquid-*` token 与 `.glass--liquid`（时钟 / 播放器 / 联系方式用的面板材质，与顶栏同款透明玻璃） | `html[data-theme]`（modern / baroque 两套值） |
+| 双主题背景 + 面板材质（淡蓝流体 / 暮色音乐室） | `src/styles/tokens.css`、`src/styles/global.css` | `--bg-image` / `--paper*` / `--flow-*` / `--chamber-*`（全站主题环境）、`--liquid-*` token 与 `.glass--liquid`（时钟 / 播放器 / 联系方式用的面板材质，与顶栏同款透明玻璃） | `html[data-theme]`（modern / baroque 两套值） |
 | 语言切换 + 文字滑出/滑入 | `src/scripts/lang.ts`、`src/styles/global.css`、`src/scripts/app.ts` | `initLangSwitch()`、`swapChrome()`、`collectTextElements()`、`markIncomingLanguageText()`、`markLanguageSwap()` / `takeLanguageSwap()`（切语言这一趟的记号）、`restoreScrollAfterSwap()` / `restoreScrollAfterLoad()`（保留滚动位置） | `[data-lang-switch]`、`html[data-lang]`、`.lang-slide-out` / `.lang-slide-in`、sessionStorage `space.lang-scroll` / `space.lang-swap` |
 | 双主题动态环境 | `src/components/AmbientScene.astro`、`src/scripts/atmosphere.ts`、`src/styles/global.css` | 模块内 `syncAtmosphere()`；持久背景、可见性与系统动态偏好监听 | `.atmosphere-paused` |
 | 主题切换（modern/baroque） | `src/scripts/theme.ts`、`src/scripts/theme-switch.ts`、`src/lib/themes.ts` | `ThemeManager`、`initTheme()`、`initThemeSwitcher()`、`setTheme()`、`toggle()` | `html[data-theme]`、`[data-theme-switch]` |
@@ -232,7 +232,7 @@ class AppStore extends EventTarget {
 
 ### 5.3 主题 ThemeManager
 
-动态环境由 `AmbientScene.astro` 放入持久化 `.ambient`；两套装饰通过主题选择器交叉淡入淡出。`scripts/atmosphere.ts` 在 `astro:page-load` 同步背景动画状态；监听可见性与减少动态设置，无逐帧 JS。视觉参数统一来自 tokens.css。
+动态环境由 `AmbientScene.astro` 放入持久化 `.ambient`；两套装饰通过主题选择器交叉淡入淡出。现代为保留淡蓝基底的三层 SVG 流体曲面（独立 transform 动画）；巴洛克为胡桃木纹、右侧窗光与局部浮尘，全部原生绘制，无背景位图。`scripts/atmosphere.ts` 在 `astro:page-load` 同步背景动画状态；监听可见性与减少动态设置，无逐帧 JS。视觉参数统一来自 tokens.css。
 
 
 **文件**：`src/scripts/theme.ts`、`src/scripts/theme-switch.ts`、`src/lib/themes.ts`、`src/styles/tokens.css`
@@ -909,6 +909,15 @@ isSecureRequest(req): boolean;                  // x-forwarded-proto === 'https'
 ---
 
 ## 10. 功能日志（规定动作）
+
+### 2026-10-25 · 落地淡蓝流体与暮色音乐室双主题
+
+- 需求：按已确认效果稿实施，现代保留原淡蓝色、简约流体；巴洛克采用暖光、胡桃木、黄铜细边；不恢复背景暂停按钮。
+- 修法：现代改为三层独立 SVG 曲面与柔和渐变，巴洛克为右侧拱窗、木纹、暖光与受光区浮尘；使用原生 SVG/CSS，无新增图片请求或逐帧 JS。时钟深色内屏、播放器透光面、两套边框阴影与主题标题字体统一用语义 token。
+- 布局：首页扩大标题与留白，文章分行呈现标题、日期、元信息；手机顺序为身份 → 时钟 → 播放器 → 文章 → 实验室 → 联系。真实内容、音乐控制和路由保持原有实现。
+- 文件：`AmbientScene.astro`、`HomePage.astro`、`LcdClock.astro`、`MusicSystem.astro`、`Header.astro`、`tokens.css`、`global.css`；更新 §3 / §5.3。无新增导出函数、data 钩子、storage key 或自定义事件。
+- 边界：后台、未显示的主题暂停动画；系统减少动态时背景与时钟刷新均静止；手机减少流体和浮尘层数。
+- 验证：`npm test` 113/113；`npm run check` 115 文件零诊断；`npm run build` 19 页。浏览器实测 1440px 桌面与 390px 手机双主题无横向溢出，现代手机中英切换正常；背景始终只有一份，非当前主题动画暂停；进入文章后 baroque 保持。控制台无 error。iPhone Safari 的真实设备性能仍需线上实机复核。
 
 ### 2026-10-24 · 移除新增的背景暂停按钮
 

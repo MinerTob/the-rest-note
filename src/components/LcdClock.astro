@@ -32,7 +32,9 @@ const { lang } = Astro.props;
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding: 13px 15px 12px;
+    padding: clamp(16px, 2vw, 24px);
+    border-radius: var(--device-radius);
+    background-image: var(--device-surface);
   }
 
   .clock__head,
@@ -55,12 +57,12 @@ const { lang } = Astro.props;
   .clock__screen {
     position: relative;
     overflow: hidden;
-    padding: 9px 12px 10px;
+    padding: 23px 12px 25px;
     border-radius: var(--radius-s);
     background-image: var(--lcd-screen-bg);
     border: 1px solid var(--lcd-screen-line);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.6),
+      inset 0 1px 0 var(--device-screen-glint),
       inset 0 -8px 16px -12px var(--lcd-screen-glow);
   }
 
@@ -75,13 +77,16 @@ const { lang } = Astro.props;
       transparent 1px 3px
     );
     pointer-events: none;
+    opacity: .2;
   }
 
   .clock__time {
     position: relative;
     z-index: 1;
     display: block;
-    font-size: clamp(1.55rem, 1.25rem + 1.1vw, 1.95rem);
+    font-size: clamp(2rem, 3.7vw, 3.3rem);
+    text-align: center;
+    font-weight: 300;
     line-height: 1;
     letter-spacing: 0.055em;
     color: var(--lcd-screen-ink);
@@ -91,7 +96,7 @@ const { lang } = Astro.props;
 
   /* 每秒一次、非常轻的刷新感 */
   .clock__time.is-tick {
-    animation: lcd-refresh 300ms var(--ease);
+    animation: lcd-refresh var(--dur-2) var(--ease);
   }
 
   @keyframes lcd-refresh {
@@ -101,7 +106,8 @@ const { lang } = Astro.props;
 
   @media (max-width: 520px) {
     .clock__time {
-      font-size: 1.6rem;
+      font-size: clamp(1.9rem, 7.5vw, 2.8rem);
     }
   }
+@media (prefers-reduced-motion: reduce) { .clock__time.is-tick { animation: none; } }
 </style>
